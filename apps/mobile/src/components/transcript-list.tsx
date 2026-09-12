@@ -52,7 +52,6 @@ import {
   nativeChildIndex,
   offTail,
   shouldExtendTail,
-  underHeader,
   peekedWithinBand,
   type ScrollMetrics,
 } from '@/lib/transcript-scroll';
@@ -105,7 +104,6 @@ export function TranscriptList({
   hydrated,
   running,
   headerInset,
-  onUnderHeaderChange,
   onDevSample,
 }: {
   ref?: Ref<TranscriptListHandle>;
@@ -114,7 +112,6 @@ export function TranscriptList({
   hydrated: boolean;
   running: boolean;
   headerInset: number;
-  onUnderHeaderChange: (under: boolean) => void;
   onDevSample?: (sample: TranscriptDevSample) => void;
 }) {
   const theme = useTheme();
@@ -213,7 +210,6 @@ export function TranscriptList({
 
   // ── Scroll bookkeeping ──────────────────────────────────────────────────
   const metrics = useRef<ScrollMetrics>({ offset: 0, contentHeight: 0, viewportHeight: 0 });
-  const underRef = useRef(false);
   const touchingRef = useRef(false);
   const touchMoved = useRef(false);
   const extending = useRef(false);
@@ -252,11 +248,6 @@ export function TranscriptList({
 
   const evaluate = useCallback(() => {
     const current = metrics.current;
-    const under = underHeader(current);
-    if (under !== underRef.current) {
-      underRef.current = under;
-      onUnderHeaderChange(under);
-    }
     // Scroll events arrive at display rate; touch React state on transitions
     // only, and not at all mid-glide — the offset is on its way to 0.
     const gliding = Date.now() < seatingUntil.current && !touchingRef.current;
@@ -278,7 +269,7 @@ export function TranscriptList({
       extending.current = true;
       setWindowStart((value) => extendedWindowStart(value ?? start));
     }
-  }, [hasEarlier, onUnderHeaderChange, start]);
+  }, [hasEarlier, start]);
 
   // A window extension that changes nothing on screen (all-hidden rows) must
   // not wedge the extender.
