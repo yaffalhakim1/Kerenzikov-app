@@ -373,6 +373,28 @@ fn assemble_slash_commands(
         argument_hint: None,
         template: None,
     });
+    // Project memory belongs to Waku for the same reason: reserving the names
+    // keeps a provider command from shadowing them and submitting the text
+    // into an agent turn instead of the local store.
+    for (name, description) in [
+        (
+            "remember",
+            crate::i18n::translate("commands.remember_description"),
+        ),
+        (
+            "forget",
+            crate::i18n::translate("commands.forget_description"),
+        ),
+    ] {
+        commands.retain(|command| command.name != name);
+        commands.push(SlashCommand {
+            name: name.to_owned(),
+            description,
+            scope: CommandScope::Waku,
+            argument_hint: Some("<text>".to_owned()),
+            template: None,
+        });
+    }
     sort_commands_for_display(&mut commands);
     commands
 }

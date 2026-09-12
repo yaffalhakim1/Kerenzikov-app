@@ -93,6 +93,43 @@ pub fn is_resume_submission(prompt: &str) -> bool {
     prompt.trim() == "/resume"
 }
 
+/// A project-memory composer submission parsed into its intent.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MemoryCommand {
+    /// `/remember <fact>` — store one fact for this project.
+    Remember(String),
+    /// `/forget <text>` — drop every fact containing this text.
+    Forget(String),
+}
+
+/// Whether the submission is a memory command still waiting for its
+/// argument (`/remember` with nothing after it). Accepting such a row from
+/// the suggestion list must only insert the text so the argument can be
+/// typed — executing it would error immediately. Only an explicit Send with
+/// no argument reports usage.
+pub fn is_memory_command_awaiting_argument(prompt: &str) -> bool {
+    matches!(
+        parse_memory_command(prompt),
+        Some(MemoryCommand::Remember(argument)) | Some(MemoryCommand::Forget(argument))
+        if argument.trim().is_empty()
+    )
+}
+
+/// Parse `/remember` and `/forget`. Both are reserved by daemon-side
+/// discovery, so they never reach a provider; the command word must stand
+/// alone (`/remembered` is not a command).
+pub fn parse_memory_command(prompt: &str) -> Option<MemoryCommand> {
+    let rest = prompt.trim().strip_prefix('/')?;
+    let (command, argument) = rest
+        .split_once(char::is_whitespace)
+        .map_or((rest, ""), |(command, argument)| (command, argument));
+    match command {
+        "remember" => Some(MemoryCommand::Remember(argument.trim().to_owned())),
+        "forget" => Some(MemoryCommand::Forget(argument.trim().to_owned())),
+        _ => None,
+    }
+}
+
 /// Whether the submitted text resolves to Codex's native fast-mode command,
 /// which Waku bridges to the provider's service-tier control. Checking the
 /// resolved entry preserves project/user command precedence when one of them
@@ -438,6 +475,36 @@ mod tests {
         assert!(is_resume_submission("  /resume  "));
         assert!(!is_resume_submission("/resume latest"));
         assert!(!is_resume_submission("please /resume"));
+    }
+
+    #[test]
+    fn memory_commands_parse_their_command_word_exactly() {
+        assert_eq!(
+            parse_memory_command("/remember uses pnpm"),
+            Some(MemoryCommand::Remember("uses pnpm".into()))
+        );
+        assert_eq!(
+            parse_memory_command("  /forget pnpm  "),
+            Some(MemoryCommand::Forget("pnpm".into()))
+        );
+        assert_eq!(
+            parse_memory_command("/remember"),
+            Some(MemoryCommand::Remember(String::new()))
+        );
+        assert_eq!(parse_memory_command("/remembered x"), None);
+        assert_eq!(parse_memory_command("please /remember x"), None);
+        assert_eq!(parse_memory_command("/goal x"), None);
+    }
+
+    #[test]
+    fn list_accepted_memory_commands_wait_for_their_argument() {
+        assert!(is_memory_command_awaiting_argument("/remember"));
+        assert!(is_memory_command_awaiting_argument("/remember "));
+        assert!(is_memory_command_awaiting_argument("  /forget  "));
+        assert!(!is_memory_command_awaiting_argument("/remember uses pnpm"));
+        assert!(!is_memory_command_awaiting_argument("/forget pnpm"));
+        assert!(!is_memory_command_awaiting_argument("/resume"));
+        assert!(!is_memory_command_awaiting_argument("plain text"));
     }
 
     #[test]

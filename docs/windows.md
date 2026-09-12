@@ -66,8 +66,17 @@ tampered download cannot install anything. The preference itself lives in
 | Tasks, sessions, transcripts | `%LOCALAPPDATA%\Waku\app.db` |
 | Attachments and blobs | `%LOCALAPPDATA%\Waku\blobs` |
 | Settings | `%USERPROFILE%\.waku\app.json` |
+| Project memory facts | `%USERPROFILE%\.waku\memory\` (plus `MEMORY.md` in each project) |
 
 Unpacking a new release over the old directory leaves all of it untouched.
+
+## Closing to the tray
+
+Closing the window hides Waku to the notification tray instead of quitting,
+so background turns keep streaming. Left-click the tray icon or choose **Show**
+to bring it back; **Quit** (tray menu or the app menu) exits fully. If the
+tray icon cannot be created, closing quits as before — the app never strands
+itself windowless.
 
 ## Agent CLIs
 

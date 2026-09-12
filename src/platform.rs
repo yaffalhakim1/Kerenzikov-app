@@ -402,7 +402,34 @@ pub fn configure_main_window_close_behavior(window: &Window, cx: &gpui::App) {
     });
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows closes to the tray when it is live: the window hides instead of
+/// dying, and the tray icon owns the only path back. Without a tray the close
+/// runs unchanged so the app can never strand itself windowless.
+#[cfg(target_os = "windows")]
+pub fn configure_main_window_close_behavior(window: &Window, cx: &gpui::App) {
+    window.on_window_should_close(cx, |window, _| {
+        if crate::tray::is_active() {
+            hide_window(window);
+            false
+        } else {
+            true
+        }
+    });
+}
+
+/// Linux has no tray host and GPUI exposes no hide primitive there, so a
+/// caption close minimizes: the taskbar entry remains, and the app is never
+/// stranded windowless. The custom-chrome Close button keeps its existing
+/// remove-and-quit behavior.
+#[cfg(target_os = "linux")]
+pub fn configure_main_window_close_behavior(window: &Window, cx: &gpui::App) {
+    window.on_window_should_close(cx, |window, _| {
+        window.minimize_window();
+        false
+    });
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 pub fn configure_main_window_close_behavior(_: &Window, _: &gpui::App) {}
 
 #[cfg(target_os = "macos")]
@@ -431,7 +458,54 @@ pub fn hide_window(window: &mut Window) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn hide_window(window: &mut Window) {
+    if crate::tray::is_active() {
+        hide_window_native(window);
+    } else {
+        window.remove_window();
+    }
+}
+
+/// Reverse [`hide_window_native`]: re-show a tray-hidden window. Called from
+/// the tray's Show path before `activate_window`.
+#[cfg(target_os = "windows")]
+pub fn show_hidden_window(window: &mut Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, ShowWindow};
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    unsafe {
+        let _ = ShowWindow(HWND(handle.hwnd.get() as *mut _), SW_RESTORE);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn hide_window_native(window: &mut Window) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    // Order mirrors the macOS path: hide without triggering GPUI's close
+    // callback, since this runs inside the should-close veto itself.
+    unsafe {
+        let _ = ShowWindow(HWND(handle.hwnd.get() as *mut _), SW_HIDE);
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn hide_window(window: &mut Window) {
     window.remove_window();
 }

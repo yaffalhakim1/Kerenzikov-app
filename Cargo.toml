@@ -155,6 +155,12 @@ embed-resource = "3.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle = "0.6"
+# Close-to-tray: native Shell_NotifyIcon host plus its menu types. Windows-only
+# so Linux CI never needs tray system libraries; Linux degrades to minimize.
+tray-icon = "0.24"
+# Matches the version GPUI exposes through `WindowOptions::icon`; decodes the
+# bundled PNG into the tray icon's RGBA pixels.
+image = { version = "0.25", default-features = false, features = ["png"] }
 # The browser surface. WebView2 is evergreen on Windows 10 and in-box on 11.
 # Waku drives it through `webview2-com` rather than wry because it needs the
 # *composition* controller, which renders into a DirectComposition visual

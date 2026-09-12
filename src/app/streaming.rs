@@ -196,6 +196,82 @@ impl Waku {
             })
     }
 
+    /// Fire-and-forget fact extraction over a successfully settled turn. The    /// daemon runs the probe and appends whatever it finds; this side never
+    /// blocks settling on it and shows nothing on success or failure.
+    pub(super) fn spawn_memory_extraction(&self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        let Some(project) = self
+            .state
+            .projects
+            .iter()
+            .find(|project| project.id == session.project_id)
+            .filter(|project| !project.is_projectless())
+            .map(|project| project.path.clone())
+        else {
+            return;
+        };
+        let Some(turn) = session.turns.last() else {
+            return;
+        };
+        let turn_id = turn.id;
+        let mut user_text = String::new();
+        let mut assistant_text = String::new();
+        for message in &session.messages {
+            if message.turn_id != Some(turn_id) {
+                continue;
+            }
+            let target = match message.role {
+                MessageRole::User => &mut user_text,
+                MessageRole::Assistant => &mut assistant_text,
+                _ => continue,
+            };
+            if !target.is_empty() {
+                target.push('\n');
+            }
+            target.push_str(&message.content);
+        }
+        const EXCERPT_CAP: usize = waku_client::project_memory::MAX_EXCERPT_BYTES;
+        if user_text.trim().is_empty() && assistant_text.trim().is_empty() {
+            return;
+        }
+        let excerpt = format!(
+            "User:\n{}\n\nAssistant:\n{}",
+            truncate_for_memory(user_text, EXCERPT_CAP),
+            truncate_for_memory(assistant_text, EXCERPT_CAP)
+        );
+        let Some(binary) = self
+            .provider_probe(session.provider)
+            .and_then(|probe| probe.path.clone())
+        else {
+            return;
+        };
+        let invocation = waku_client::git_commit::AgentInvocation {
+            provider: session.provider,
+            binary,
+            model: self.model_for_session(session).map(str::to_owned),
+            reasoning_effort: session.reasoning_effort.clone(),
+        };
+        let workspace_client = waku_client::WorkspaceClient::new(self.daemon.client());
+        cx.background_executor()
+            .spawn(async move {
+                let _ = workspace_client.request(
+                    waku_client::WorkspaceOperation::ExtractMemoryFacts {
+                        project_path: project,
+                        excerpt,
+                        invocation,
+                    },
+                );
+            })
+            .detach();
+    }
+
     /// Whether the running turn was prompted — a provider-started wake has no
     /// user message of its own.
     pub(super) fn active_turn_has_user_message(&self, session_id: Uuid) -> bool {
@@ -696,6 +772,12 @@ impl Waku {
                 runtime.computer_use_previews.clear();
                 runtime.driver.refresh_background_work();
                 self.capture_latest_turn_checkpoint_for(session_id);
+                if success {
+                    // Best-effort fact extraction over the settled turn. Silent
+                    // by design: a probe that finds nothing (or fails) must
+                    // never interrupt the session it just observed.
+                    self.spawn_memory_extraction(session_id, cx);
+                }
                 if allow_queue_drain && success {
                     // Start the next queued follow-up once the runtime has
                     // been re-inserted so the same process is reused.
@@ -988,3 +1070,16 @@ pub(super) fn append_text_delta_to_session(
     }
     session.updated_at = unix_time();
 }
+
+fn truncate_for_memory(mut value: String, limit: usize) -> String {
+    if value.len() <= limit {
+        return value;
+    }
+    let mut end = limit;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value.truncate(end);
+    value
+}
+

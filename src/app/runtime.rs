@@ -602,7 +602,7 @@ fn perform_provider_rewind(
         }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Copilot | ProviderKind::Fx | ProviderKind::Kimi | ProviderKind::OpenCode2 => {
+        ProviderKind::Copilot | ProviderKind::Fx | ProviderKind::Kimi => {
             Err(anyhow::anyhow!(tr!(
                 "errors.provider_turn_branching_unsupported",
                 provider = provider.display_name()
@@ -2232,16 +2232,53 @@ impl Waku {
         );
     }
 
-    fn start_message_rewind(
+    /// Standalone turn undo: the same file+provider rewind a message edit
+    /// performs, but the transcript ends at the retained turn with no
+    /// replacement prompt. Gated identically so the two can never disagree
+    /// about what is rewindable.
+    pub(super) fn start_turn_undo(
         &mut self,
-        edit: MessageEdit,
-        submission: ComposerSubmission,
+        action: UserMessageAction,
         cx: &mut Context<Self>,
     ) {
-        let session_id = edit.session_id;
-        let turn_count = edit.turn_count;
+        let session_id = action.session_id;
+        let turn_count = action.turn_count;
+        if self.submission_preparations.contains(&session_id) {
+            return;
+        }
+        let request = match self.turn_rewind_request(session_id, turn_count) {
+            Ok(request) => request,
+            Err(error) => {
+                self.show_toast(error);
+                cx.notify();
+                return;
+            }
+        };
+        self.submission_preparations.insert(session_id);
+        self.hide_toast();
+        cx.notify();
+        cx.spawn(async move |waku, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move { perform_message_rewind(request) })
+                .await;
+            let _ = waku.update(cx, move |waku, cx| {
+                waku.finish_turn_undo(session_id, turn_count, result, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Shared guards and provider/file request for every rewind: message-edit
+    /// resubmission and standalone turn undo. Errors are user-facing toast
+    /// text; callers display them.
+    fn turn_rewind_request(
+        &mut self,
+        session_id: Uuid,
+        turn_count: usize,
+    ) -> Result<MessageRewindRequest, String> {
         let retained_turn_count = turn_count.saturating_sub(1);
-        let Some(source) = self
+        let source = self
             .state
             .sessions
             .iter()
@@ -2252,40 +2289,26 @@ impl Waku {
                     .iter()
                     .any(|turn| turn.turn_count == turn_count)
             })
-        else {
-            self.show_toast(tr!("session.message_unavailable"));
-            cx.notify();
-            return;
-        };
+            .ok_or_else(|| tr!("session.message_unavailable"))?;
         if self.state.selected_session != Some(session_id) {
-            self.show_toast(tr!("session.select_before_rewind"));
-            cx.notify();
-            return;
+            return Err(tr!("session.select_before_rewind"));
         }
         if !matches!(source.status, SessionStatus::Idle | SessionStatus::Failed) {
-            self.show_toast(tr!("session.stop_before_rewind"));
-            cx.notify();
-            return;
+            return Err(tr!("session.stop_before_rewind"));
         }
         let rollback_turns = source.provider_turns_after(retained_turn_count);
         if !source.provider.supports_conversation_rollback()
             || (rollback_turns > 0 && source.provider_cursor.is_none())
         {
-            self.show_toast(tr!(
+            return Err(tr!(
                 "session.provider_cannot_rewind",
                 provider = source.provider.display_name()
             ));
-            cx.notify();
-            return;
         }
-        let Some(project_path) = self
-            .workspace_path_for_session(&source)
+        let project_path = self
+            .workspace_path_for_session(source)
             .map(std::path::Path::to_path_buf)
-        else {
-            self.show_toast(tr!("errors.task_project_not_found"));
-            cx.notify();
-            return;
-        };
+            .ok_or_else(|| tr!("errors.task_project_not_found"))?;
         let provider_turn_count = source
             .turns
             .iter()
@@ -2314,12 +2337,10 @@ impl Waku {
             })
             .flatten();
         if needs_binary && binary.is_none() {
-            self.show_toast(tr!(
+            return Err(tr!(
                 "errors.provider_not_found",
                 provider = source.provider.display_name()
             ));
-            cx.notify();
-            return;
         }
         let driver_start = if rollback_turns > 0
             && matches!(
@@ -2331,31 +2352,63 @@ impl Waku {
             )
             && driver.is_none()
         {
-            match self.driver_start_request_for_session(&source, project_path.clone()) {
+            match self.driver_start_request_for_session(source, project_path.clone()) {
                 Ok(request) => Some(request),
-                Err(error) => {
-                    self.show_toast(error.to_string());
-                    cx.notify();
-                    return;
-                }
+                Err(error) => return Err(error.to_string()),
             }
         } else {
             None
         };
-        let previous_status = source.status;
-        let previous_turn_count = source.turns.len();
-        let provider = source.provider;
-        let provider_cursor = source.provider_cursor.clone();
-        let session_title = source.display_title().to_owned();
-        let cursor_source = (provider == ProviderKind::Cursor).then(|| source.clone());
-        let edited_message_id = edit.message_id;
+        Ok(MessageRewindRequest {
+            workspace_client: waku_client::WorkspaceClient::new(self.daemon.client()),
+            session_id,
+            provider: source.provider,
+            provider_cursor: source.provider_cursor.clone(),
+            session_title: source.display_title().to_owned(),
+            cursor_source: (source.provider == ProviderKind::Cursor).then(|| source.clone()),
+            previous_turn_count: source.turns.len(),
+            project_path,
+            retained_turn_count,
+            rollback_turns,
+            provider_turn_count,
+            provider_resume_at,
+            binary,
+            driver,
+            driver_start,
+        })
+    }
+
+    fn start_message_rewind(
+        &mut self,
+        edit: MessageEdit,
+        submission: ComposerSubmission,
+        cx: &mut Context<Self>,
+    ) {
+        let session_id = edit.session_id;
+        let turn_count = edit.turn_count;
+        let Some(source) = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .filter(|session| {
+                session
+                    .turns
+                    .iter()
+                    .any(|turn| turn.turn_count == turn_count)
+            })
+        else {
+            self.show_toast(tr!("session.message_unavailable"));
+            cx.notify();
+            return;
+        };
         let Some(edited_message_index) = source
             .turns
             .iter()
             .find(|turn| turn.turn_count == turn_count)
             .and_then(|turn| {
                 source.messages.iter().position(|message| {
-                    message.id == edited_message_id
+                    message.id == edit.message_id
                         && message.turn_id == Some(turn.id)
                         && message.role == MessageRole::User
                 })
@@ -2365,22 +2418,13 @@ impl Waku {
             cx.notify();
             return;
         };
-        let request = MessageRewindRequest {
-            workspace_client: waku_client::WorkspaceClient::new(self.daemon.client()),
-            session_id,
-            provider,
-            provider_cursor,
-            session_title,
-            cursor_source,
-            previous_turn_count,
-            project_path,
-            retained_turn_count,
-            rollback_turns,
-            provider_turn_count,
-            provider_resume_at,
-            binary,
-            driver,
-            driver_start,
+        let request = match self.turn_rewind_request(session_id, turn_count) {
+            Ok(request) => request,
+            Err(error) => {
+                self.show_toast(error);
+                cx.notify();
+                return;
+            }
         };
 
         // Optimistically leave edit mode and show the replacement bubble at
@@ -2388,6 +2432,14 @@ impl Waku {
         // spinner while every Git, process, native transcript, and provider
         // operation runs off the UI thread. Failure restores both the original
         // bubble and this edit input.
+        let edited_message_id = edit.message_id;
+        let previous_status = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.status)
+            .unwrap_or(SessionStatus::Idle);
         let original_message = self.state.session_mut(session_id).and_then(|session| {
             let message = session
                 .messages
@@ -2481,6 +2533,87 @@ impl Waku {
                 return;
             }
         };
+        let retained_turn_count = turn_count.saturating_sub(1);
+        let Some((provider, removed_turns, cleanup_error)) =
+            self.apply_prepared_rewind(session_id, retained_turn_count, prepared, selected)
+        else {
+            return;
+        };
+        if selected {
+            self.show_toast(match cleanup_error {
+                None => tr!("session.rewound", turn = turn_count),
+                Some(error) => tr!(
+                    "session.rewound_with_stale_refs",
+                    turn = turn_count,
+                    error = error
+                ),
+            });
+        }
+        self.analytics
+            .track(crate::analytics::Event::ConversationRolledBack {
+                provider: provider.id(),
+                turns: removed_turns,
+            });
+        cx.notify();
+        self.submit_submission_for_session(session_id, submission, cx);
+    }
+
+    /// Settle a standalone turn undo: same file+provider rewind as a message
+    /// edit, but the transcript ends at the retained turn instead of taking a
+    /// replacement prompt.
+    fn finish_turn_undo(
+        &mut self,
+        session_id: Uuid,
+        turn_count: usize,
+        result: Result<PreparedMessageRewind, String>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.submission_preparations.remove(&session_id) {
+            return;
+        }
+        let selected = self.state.selected_session == Some(session_id);
+        let prepared = match result {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.show_toast(error);
+                cx.notify();
+                return;
+            }
+        };
+        let retained_turn_count = turn_count.saturating_sub(1);
+        let Some((provider, removed_turns, cleanup_error)) =
+            self.apply_prepared_rewind(session_id, retained_turn_count, prepared, selected)
+        else {
+            return;
+        };
+        if selected {
+            self.show_toast(match cleanup_error {
+                None => tr!("session.turn_undone", turn = turn_count),
+                Some(error) => tr!(
+                    "session.turn_undone_with_stale_refs",
+                    turn = turn_count,
+                    error = error
+                ),
+            });
+        }
+        self.analytics
+            .track(crate::analytics::Event::ConversationRolledBack {
+                provider: provider.id(),
+                turns: removed_turns,
+            });
+        cx.notify();
+    }
+
+    /// Adopt a successful provider+file rewind: rewound cursor, truncated
+    /// transcript, reinstalled drivers. Shared by message-edit resubmission
+    /// and standalone turn undo; neither submits.
+    fn apply_prepared_rewind(
+        &mut self,
+        session_id: Uuid,
+        retained_turn_count: usize,
+        prepared: PreparedMessageRewind,
+        selected: bool,
+    ) -> Option<(ProviderKind, usize, Option<String>)> {
         let PreparedMessageRewind {
             provider_rewind_cursor,
             claude_fork,
@@ -2488,7 +2621,6 @@ impl Waku {
             reset_native_session,
             cleanup_error,
         } = prepared;
-        let retained_turn_count = turn_count.saturating_sub(1);
         let provider_and_removed_turns = self
             .state
             .sessions
@@ -2501,7 +2633,7 @@ impl Waku {
                 )
             });
         let Some((provider, removed_turns)) = provider_and_removed_turns else {
-            return;
+            return None;
         };
         if selected {
             self.sync_transcript_rows();
@@ -2585,22 +2717,8 @@ impl Waku {
             self.expanded_changed_files.clear();
             self.transcript_control_focuses.borrow_mut().clear();
             self.splice_transcript_rows_after_visibility_change(&previous_kinds);
-            self.show_toast(match cleanup_error {
-                None => tr!("session.rewound", turn = turn_count),
-                Some(error) => tr!(
-                    "session.rewound_with_stale_refs",
-                    turn = turn_count,
-                    error = error
-                ),
-            });
         }
-        self.analytics
-            .track(crate::analytics::Event::ConversationRolledBack {
-                provider: provider.id(),
-                turns: removed_turns,
-            });
-        cx.notify();
-        self.submit_submission_for_session(session_id, submission, cx);
+        Some((provider, removed_turns, cleanup_error))
     }
 
     /// Resolves the turn options a driver should run with, dropping a reasoning
@@ -3074,6 +3192,31 @@ impl Waku {
         .unwrap_or_else(|| prompt.to_owned())
     }
 
+    /// Prepend recalled project memory to the provider-facing prompt. The
+    /// transcript keeps exactly what the user typed; only the transport sees
+    /// the context block. Empty for projects (and projectless drafts) that
+    /// remember nothing, so those sessions pay nothing.
+    fn with_project_memory(&self, session_id: Uuid, prompt: String) -> String {
+        let context = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .and_then(|session| {
+                self.state
+                    .projects
+                    .iter()
+                    .find(|project| project.id == session.project_id)
+                    .filter(|project| !project.is_projectless())
+            })
+            .map(|project| waku_client::project_memory::load_context(&project.path))
+            .unwrap_or_default();
+        if context.trim().is_empty() {
+            return prompt;
+        }
+        format!("<project-memory>\n{context}\n</project-memory>\n\n{prompt}")
+    }
+
     pub(super) fn enqueue_follow_up_submission(
         &mut self,
         session_id: Uuid,
@@ -3515,6 +3658,7 @@ impl Waku {
         // Claude's commands pass through untouched; its CLI owns expansion.
         let prompt = submission.prompt;
         let driver_prompt = self.resolve_provider_submission(provider, &prompt);
+        let driver_prompt = self.with_project_memory(session_id, driver_prompt);
         // The turn and its user message landed at accept time. Their ids go
         // with the prompt so every other client attached to the runtime
         // mirrors the same rows instead of minting its own.

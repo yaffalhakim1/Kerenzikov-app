@@ -42,6 +42,8 @@ mod query;
 mod review_diff;
 mod terminal;
 mod theme;
+#[cfg(target_os = "windows")]
+mod tray;
 mod ui;
 mod updater;
 
@@ -401,6 +403,35 @@ pub fn run() {
                 .ok();
 
             set_app_menus(cx, updater_available);
+            // Windows tray owns post-close visibility: install it on the main
+            // thread before any close can arrive. Failure keeps the historical
+            // quit-on-close path, never a windowless app.
+            #[cfg(target_os = "windows")]
+            if let Some(tray_actions) = crate::tray::install() {
+                let tray_window = window.clone();
+                cx.spawn(async move |cx| {
+                    use crate::tray::TrayAction;
+                    while let Ok(action) = tray_actions.recv().await {
+                        match action {
+                            TrayAction::Show => {
+                                let _ = cx.update(|cx| {
+                                    tray_window
+                                        .update(cx, |_, window, _| {
+                                            crate::platform::show_hidden_window(window);
+                                            window.activate_window();
+                                        })
+                                        .ok();
+                                    cx.activate(true);
+                                });
+                            }
+                            TrayAction::Quit => {
+                                let _ = cx.update(|cx| cx.quit());
+                            }
+                        }
+                    }
+                })
+                .detach();
+            }
             // A Linux handoff retains the previous prefix until this freshly
             // relaunched build has successfully opened its main window.
             crate::updater::signal_relaunch_ready();

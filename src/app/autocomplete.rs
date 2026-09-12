@@ -380,7 +380,13 @@ impl Waku {
         if matches!(row, AutocompleteRow::Command(_)) {
             let mut submission = self.composer.read(cx).content(cx).to_owned();
             submission.replace_range(trigger.range.clone(), &insert);
-            if self.execute_local_composer_command(&submission, cx) {
+            // A list-accepted command that still needs its argument only
+            // lands in the composer for typing — executing `/remember` with
+            // nothing after it would usage-error on the accept itself. Only
+            // an explicit Send with no argument reports usage.
+            if !composer_complete::is_memory_command_awaiting_argument(&submission)
+                && self.execute_local_composer_command(&submission, cx)
+            {
                 return;
             }
         }

@@ -562,6 +562,14 @@ commands.fast_enabled: 高速モードを有効にしました
 commands.fast_disabled: 高速モードを無効にしました
 commands.goal_description: このタスクが継続して追求するゴールを設定
 commands.resume_description: ターミナルのエージェントセッションを再開
+commands.remember_description: プロジェクトの記憶を追加
+commands.forget_description: 一致するプロジェクトの記憶を削除
+commands.memory_remembered: プロジェクトの記憶を追加しました
+commands.memory_remember_failed: 記憶を追加できませんでした
+commands.memory_forgotten: "%{count} 件のプロジェクト記憶を削除しました"
+commands.memory_found_nothing: 一致するプロジェクト記憶がありません
+commands.memory_usage: "使い方: /remember <記憶> または /forget <検索文字>"
+commands.memory_no_project: プロジェクトの記憶にはプロジェクトのタスクが必要です
 goal.title: ゴール
 goal.objective_placeholder: このタスクは何を目指し続けるべきですか？
 goal.set: ゴールを設定
@@ -739,6 +747,9 @@ session.pre_turn_checkpoint_missing: メッセージのターン開始前の Git
 session.rewind_title: "%{title}（巻き戻し）"
 session.rewound: タスクをターン %{turn} の前まで巻き戻しました
 session.rewound_with_stale_refs: "タスクをターン %{turn} の前まで巻き戻しましたが、古い ref が残っています：%{error}"
+session.undo_turn: このターンを取り消す
+session.turn_undone: ターン %{turn} を取り消しました
+session.turn_undone_with_stale_refs: "ターン %{turn} を取り消しましたが、古い ref が残っています：%{error}"
 
 right_panel.browser: ブラウザ
 right_panel.terminal: ターミナル
