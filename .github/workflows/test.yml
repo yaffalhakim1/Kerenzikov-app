@@ -98,16 +98,16 @@ jobs:
             pkg-config \
             xdg-desktop-portal
 
+      # rust-cache over actions/cache: the raw cache stored the entire
+      # target/ dir (2-2.6 GB per OS), which blew past the repo's 10 GB
+      # cache budget and got evicted before the next run could hit it —
+      # every build ran cold. rust-cache stores only crates + built deps
+      # pruned against the current lockfile (a few hundred MB), so entries
+      # survive and restores actually happen.
       - name: Cache Cargo
-        uses: actions/cache@v6
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ matrix.os }}-rust-1.96.0-cargo-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.os }}-rust-1.96.0-cargo-
+          toolchain: 1.96.0
 
       - name: Run tests
         run: cargo test --locked

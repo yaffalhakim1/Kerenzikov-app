@@ -1,4 +1,5 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
 
 import { AppPressable } from '@/components/app-pressable';
 
@@ -6,7 +7,7 @@ import { AppSymbol } from '@/components/app-symbol';
 import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
-export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
+export function DaemonOnboarding() {
   const theme = useTheme();
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
@@ -23,7 +24,7 @@ export function DaemonOnboarding({ onAddDaemon }: { onAddDaemon: () => void }) {
       <AppPressable
         accessibilityLabel="Add a daemon"
         accessibilityRole="button"
-        onPress={onAddDaemon}
+        onPress={() => router.push('/daemon-editor')}
         style={({ pressed }) => [
           styles.primaryButton,
           { backgroundColor: theme.inverse, opacity: pressed ? 0.78 : 1 },

@@ -88,21 +88,14 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
-      - uses: actions/cache@v6
+      # rust-cache instead of caching the whole target/ tree: raw entries
+      # ran 2.6 GB per matrix leg and pushed the repo past GitHub's 10 GB
+      # cache budget, so the LRU evicted them before the next release could
+      # restore anything.
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-latest-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            windows-latest-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Waku-*-Setup.exe
+          toolchain: 1.96.0
 
       - name: Bundle
         env:
@@ -140,21 +133,10 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
-      - uses: actions/cache@v6
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: windows-11-arm-rust-1.96.0-release-${{ hashFiles('Cargo.lock') }}
-          restore-keys: |
-            windows-11-arm-rust-1.96.0-release-
-
-      # `target/` is restored from the release cache, so the previous
-      # release's bundles are still sitting in `target/release` when this one
-      # starts. Cargo does not own them, so nothing else clears them.
-      - name: Clear stale bundles
-        run: Remove-Item -Force -ErrorAction SilentlyContinue target/release/waku-*.zip, target/release/Waku-*-Setup.exe
+          toolchain: 1.96.0
 
       - name: Bundle
         env:
@@ -200,16 +182,13 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      # A cold gradle run costs ~20 minutes of dependency resolution and
-      # native compilation; the cache makes every later release a few.
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('apps/mobile/android/gradle/wrapper/gradle-wrapper.properties', 'apps/mobile/android/app/build.gradle') }}
-          restore-keys: |
-            gradle-
+      # gradle/actions owns caching: the raw actions/cache key included
+      # app/build.gradle, so it changed with every app commit and — combined
+      # with the repo sitting at GitHub's 10 GB cache budget — never survived
+      # to the next run. This action caches ~/.gradle keyed on the wrapper
+      # and lockfiles and prunes stale entries itself.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       # Gradle shells out to `node` for the React Native and Expo plugins and
       # bundles the JS through Expo's CLI, so both runtimes must be present.
