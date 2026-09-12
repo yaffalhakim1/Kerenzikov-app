@@ -72,6 +72,7 @@ argument**; `NO_COLOR=1` and `CI=1` are set for all of them.
 | Amp | `amp` | `--execute --no-color --no-ide --no-notifications --settings-file <temp>` | `--mode` | `--effort` |
 | Claude Code | `claude` | `--print --output-format text --permission-mode plan --tools "" --disable-slash-commands --no-session-persistence --no-chrome` | pinned `claude-haiku-4-5` | pinned `low` |
 | Codex CLI | `codex exec` | `--sandbox read-only --ephemeral --color never --skip-git-repo-check` | pinned `gpt-5.6-luna` | pinned `none`, via `-c` |
+| Copilot CLI | `copilot` | `--prompt <prompt> --silent --no-color` | `--model` | — |
 | Cursor CLI | `cursor-agent` | `--print --output-format text --mode ask --sandbox enabled --trust` | `--model` | — |
 | DeepSeek Harness | `dsh` | `--profile headless` | — | — |
 | Fx | `fx ask` | `--no-save --no-color --` | — | — |
@@ -97,8 +98,14 @@ Where a provider is not simply "flags plus prompt":
   lets a workspace that is not a repo root run. Effort rides on a `-c` config
   override because `codex exec` has no flag for it.
 - **Cursor** has no tool switch either; `--mode ask` is its read-only answer
-  mode, `--sandbox enabled` the backstop, and `--trust` suppresses the
-  workspace-trust prompt that would block a piped run.
+mode, `--sandbox enabled` the backstop, and `--trust` suppresses the
+workspace-trust prompt that would block a piped run.
+- **Copilot** is the third exception to prompt-last alongside Grok and Kimi:
+`--prompt` takes the prompt as its value, so the function returns early
+rather than appending it twice. It has no tool switch to turn off, so the
+prompt's "do not call tools" is the whole guard, as with DeepSeek; `--silent`
+keeps the output to the message. Prompt mode exposes no thinking-level flag,
+hence no effort column.
 - **DeepSeek** gets only `--profile headless`, Harness's one-shot stdout-only
   client. It has no tool switch — the prompt's "do not call tools" is the whole
   guard, which holds because all context is inlined.

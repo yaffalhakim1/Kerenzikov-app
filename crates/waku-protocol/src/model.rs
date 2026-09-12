@@ -14,6 +14,7 @@ pub enum ProviderKind {
     Claude,
     #[default]
     Codex,
+    Copilot,
     Cursor,
     DeepSeek,
     Fx,
@@ -26,10 +27,11 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Amp,
         Self::Claude,
         Self::Codex,
+        Self::Copilot,
         Self::Cursor,
         Self::DeepSeek,
         Self::Fx,
@@ -46,6 +48,7 @@ impl ProviderKind {
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Copilot => "copilot",
             Self::Cursor => "cursor",
             Self::DeepSeek => "deepseek",
             Self::Fx => "fx",
@@ -63,6 +66,7 @@ impl ProviderKind {
             Self::Amp => "Amp",
             Self::Claude => "Claude Code",
             Self::Codex => "Codex CLI",
+            Self::Copilot => "Copilot CLI",
             Self::Cursor => "Cursor CLI",
             Self::DeepSeek => "DeepSeek Harness",
             Self::Fx => "Fx",
@@ -80,6 +84,7 @@ impl ProviderKind {
             Self::Amp => "Amp",
             Self::Claude => "Claude",
             Self::Codex => "Codex",
+            Self::Copilot => "Copilot",
             Self::Cursor => "Cursor",
             Self::DeepSeek => "DeepSeek",
             Self::Fx => "Fx",
@@ -97,6 +102,9 @@ impl ProviderKind {
             Self::Amp => "amp",
             Self::Claude => "claude",
             Self::Codex => "codex",
+            // The standalone Copilot CLI binary. The `gh copilot` extension is
+            // a different CLI and is not probed here.
+            Self::Copilot => "copilot",
             // Cursor documents `agent` as its primary command, but that name is
             // shared by other CLIs. The backward-compatible alias is unambiguous.
             Self::Cursor => "cursor-agent",
@@ -115,7 +123,8 @@ impl ProviderKind {
     /// [`Self::supports_conversation_fork`]. Kimi's ACP `session/fork` copies a
     /// whole session and takes no turn count, while Fx exposes no turn-aware
     /// fork or truncation method. Neither can reproduce Waku's "drop the last N
-    /// turns" semantics without corrupting history.
+    /// turns" semantics without corrupting history. Copilot CLI exposes no
+    /// fork method at all.
     pub fn supports_conversation_rollback(self) -> bool {
         matches!(
             self,
@@ -153,6 +162,7 @@ impl ProviderKind {
             self,
             Self::Claude
                 | Self::Codex
+                | Self::Copilot
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::Fx
@@ -204,6 +214,9 @@ pub enum ProviderResumeCursor {
     Codex {
         thread_id: String,
     },
+    Copilot {
+        session_id: String,
+    },
     Cursor {
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -253,6 +266,7 @@ impl ProviderResumeCursor {
                 resume_at: None,
             },
             ProviderKind::Codex => Self::Codex { thread_id: id },
+            ProviderKind::Copilot => Self::Copilot { session_id: id },
             ProviderKind::Cursor => Self::Cursor {
                 session_id: id,
                 fork_context: None,
@@ -282,6 +296,7 @@ impl ProviderResumeCursor {
             Self::Amp { .. } => ProviderKind::Amp,
             Self::Claude { .. } => ProviderKind::Claude,
             Self::Codex { .. } => ProviderKind::Codex,
+            Self::Copilot { .. } => ProviderKind::Copilot,
             Self::Cursor { .. } => ProviderKind::Cursor,
             Self::DeepSeek { .. } => ProviderKind::DeepSeek,
             Self::Fx { .. } => ProviderKind::Fx,
@@ -299,6 +314,7 @@ impl ProviderResumeCursor {
             Self::Amp { thread_id, .. } => thread_id,
             Self::Claude { session_id, .. }
             | Self::Cursor { session_id, .. }
+            | Self::Copilot { session_id }
             | Self::DeepSeek { session_id }
             | Self::Fx { session_id }
             | Self::OpenCode { session_id }
@@ -4351,7 +4367,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 12);
+        assert_eq!(ProviderKind::ALL.len(), 13);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(
