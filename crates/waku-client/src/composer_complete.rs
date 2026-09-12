@@ -102,6 +102,19 @@ pub enum MemoryCommand {
     Forget(String),
 }
 
+/// Whether the submission is a memory command still waiting for its
+/// argument (`/remember` with nothing after it). Accepting such a row from
+/// the suggestion list must only insert the text so the argument can be
+/// typed — executing it would error immediately. Only an explicit Send with
+/// no argument reports usage.
+pub fn is_memory_command_awaiting_argument(prompt: &str) -> bool {
+    matches!(
+        parse_memory_command(prompt),
+        Some(MemoryCommand::Remember(argument)) | Some(MemoryCommand::Forget(argument))
+        if argument.trim().is_empty()
+    )
+}
+
 /// Parse `/remember` and `/forget`. Both are reserved by daemon-side
 /// discovery, so they never reach a provider; the command word must stand
 /// alone (`/remembered` is not a command).
@@ -481,6 +494,17 @@ mod tests {
         assert_eq!(parse_memory_command("/remembered x"), None);
         assert_eq!(parse_memory_command("please /remember x"), None);
         assert_eq!(parse_memory_command("/goal x"), None);
+    }
+
+    #[test]
+    fn list_accepted_memory_commands_wait_for_their_argument() {
+        assert!(is_memory_command_awaiting_argument("/remember"));
+        assert!(is_memory_command_awaiting_argument("/remember "));
+        assert!(is_memory_command_awaiting_argument("  /forget  "));
+        assert!(!is_memory_command_awaiting_argument("/remember uses pnpm"));
+        assert!(!is_memory_command_awaiting_argument("/forget pnpm"));
+        assert!(!is_memory_command_awaiting_argument("/resume"));
+        assert!(!is_memory_command_awaiting_argument("plain text"));
     }
 
     #[test]
