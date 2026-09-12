@@ -112,6 +112,16 @@ export const MonoFont = Platform.select({
   default: 'monospace',
 });
 
+/**
+ * Material 3 state layers. A ripple is an overlay of the *content* colour at a
+ * low opacity, not a tinted wash — `overlayStrong` (a 9% neutral) is invisible
+ * on light surfaces, so the pressed state reads as nothing happening.
+ */
+export const StateLayer = {
+  light: 'rgba(36, 36, 36, 0.12)',
+  dark: 'rgba(226, 226, 226, 0.16)',
+} as const;
+
 export const Spacing = {
   half: 2,
   one: 4,
@@ -130,5 +140,4 @@ export const Radius = {
   pill: 999,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
 export const MaxContentWidth = 800;

@@ -12,12 +12,13 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { AppPressable } from '@/components/app-pressable';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ComposerAccessMenu } from '@/components/composer-access-menu';
@@ -46,6 +47,7 @@ import {
 import { resolvedComposerSubmission } from '@/lib/composer-commands';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useTheme } from '@/hooks/use-theme';
+import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { daemonKeys, inspectBranches } from '@/lib/daemon-api';
 import {
   loadComposerPreferences,
@@ -72,6 +74,7 @@ type SheetKind =
 export default function NewTaskScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
   const headerInset = useScreenHeaderInset();
   const daemon = useDaemon();
   const runtime = useRuntime();
@@ -386,7 +389,7 @@ export default function NewTaskScreen() {
         <SelectorRow
           icon={{ ios: 'arrow.uturn.down', android: 'restart_alt', web: 'restart_alt' }}
           label="Resume external session"
-          value="From a CLI on the daemon"
+          value="Resume from CLI"
           onPress={() => {
             void Haptics.selectionAsync();
             setResumeOpen(true);
@@ -394,7 +397,7 @@ export default function NewTaskScreen() {
         />
       </View>
 
-      <View style={[styles.composerShell, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <View style={[styles.composerShell, { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 }]}>
         {error && (
           <View
             accessibilityLiveRegion="polite"
@@ -551,6 +554,10 @@ export default function NewTaskScreen() {
   );
 }
 
+/** Full-width context row: icon, current value, unfold affordance. The label
+ * never shows — the value is what changes and what you recognise — but it
+ * stays on the accessibility node, and the sheet it opens is titled with it.
+ * 52dp tall, so the target clears Material's 48dp minimum on its own. */
 function SelectorRow({
   icon,
   label,
@@ -566,15 +573,12 @@ function SelectorRow({
 }) {
   const theme = useTheme();
   return (
-    <Pressable
+    <AppPressable
       accessibilityLabel={`${label}: ${value}`}
       accessibilityRole="button"
       disabled={loading}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? theme.overlay : 'transparent' },
-      ]}>
+      style={[styles.row, { backgroundColor: theme.surface }]}>
       <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
       {loading ? (
         <ActivityIndicator color={theme.textTertiary} size="small" />
@@ -588,7 +592,7 @@ function SelectorRow({
         size={13}
         tintColor={theme.textTertiary}
       />
-    </Pressable>
+    </AppPressable>
   );
 }
 

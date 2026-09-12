@@ -3,12 +3,14 @@ import { Stack } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+
+import { AppPressable } from '@/components/app-pressable';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionBanner } from '@/components/connection-banner';
@@ -66,7 +68,7 @@ export default function UsageScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <Pressable
+            <AppPressable
               accessibilityLabel="Rescan usage"
               accessibilityRole="button"
               hitSlop={10}
@@ -76,15 +78,15 @@ export default function UsageScreen() {
                 size={20}
                 tintColor={theme.text}
               />
-            </Pressable>
+            </AppPressable>
           ),
-          unstable_headerRightItems: () => [{
+          unstable_headerRightItems: Platform.OS === 'ios' ? () => [{
             type: 'button',
             accessibilityLabel: 'Rescan usage',
             icon: { type: 'sfSymbol', name: 'arrow.clockwise' },
             label: 'Rescan',
             onPress: rescan,
-          }],
+          }] : undefined,
         }}
       />
       <ScrollView
@@ -92,7 +94,7 @@ export default function UsageScreen() {
         contentContainerStyle={styles.content}>
         <ConnectionBanner />
 
-        <Pressable
+        <AppPressable
           accessibilityLabel={`Usage window: ${usageWindowLabel(window)}`}
           accessibilityRole="button"
           onPress={() => setPickerOpen(true)}
@@ -118,7 +120,7 @@ export default function UsageScreen() {
             size={13}
             tintColor={theme.textTertiary}
           />
-        </Pressable>
+        </AppPressable>
 
         {usage.error && (
           <Text style={[styles.notice, { color: theme.danger }]}>

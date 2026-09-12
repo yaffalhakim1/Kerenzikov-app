@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -20,7 +19,8 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
+
+import { AppPressable } from '@/components/app-pressable';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { DaemonList } from '@/components/daemon-list';
@@ -28,6 +28,8 @@ import { Sheet, SheetRow } from '@/components/sheet';
 import { NativeTint, Radius } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
+import { scheduleOnRN } from 'react-native-worklets';
+
 import { useDaemon } from '@/lib/daemon-context';
 import {
   isPrivateDaemonAddress,
@@ -84,6 +86,11 @@ export function DaemonPickerSheet({
     });
   }
 
+  function finishPop() {
+    setEditorTarget(undefined);
+    setEditorProfile(undefined);
+  }
+
   function popEditor() {
     if (editorTarget === undefined) return;
     cancelAnimation(pageProgress);
@@ -93,16 +100,16 @@ export function DaemonPickerSheet({
       setEditorProfile(undefined);
       return;
     }
+    // The completion callback runs on the UI runtime, where React state
+    // setters are remote functions and a synchronous call crashes. The hop
+    // back to the JS thread must target a named component-scope function —
+    // an inline closure is not serializable by the worklets runtime.
     pageProgress.value = withTiming(
       0,
       { duration: 240, easing: Easing.bezier(0.32, 0.72, 0.25, 1) },
       (finished?: boolean) => {
-        if (finished) {
-          scheduleOnRN(() => {
-            setEditorTarget(undefined);
-            setEditorProfile(undefined);
-          });
-        }
+        'worklet';
+        if (finished) scheduleOnRN(finishPop);
       },
     );
   }
@@ -344,7 +351,7 @@ function DaemonEditor({
             style={[styles.rowInput, styles.tokenInput, { color: theme.text }]}
             value={token}
           />
-          <Pressable
+          <AppPressable
             accessibilityLabel={revealed ? 'Hide token' : 'Reveal token'}
             accessibilityRole="button"
             accessibilityState={{ selected: revealed }}
@@ -358,7 +365,7 @@ function DaemonEditor({
               size={18}
               tintColor={theme.textSecondary}
             />
-          </Pressable>
+          </AppPressable>
         </View>
       </View>
 
@@ -376,7 +383,7 @@ function DaemonEditor({
       )}
 
       <View style={styles.editorButtons}>
-        <Pressable
+        <AppPressable
           accessibilityRole="button"
           accessibilityState={{ disabled: !canSave }}
           disabled={!canSave}
@@ -389,11 +396,11 @@ function DaemonEditor({
           <Text style={[styles.editorButtonText, styles.saveButtonText]}>
             {saving ? 'Saving…' : profile ? 'Save' : 'Add'}
           </Text>
-        </Pressable>
+        </AppPressable>
       </View>
 
       {profile && (
-        <Pressable
+        <AppPressable
           accessibilityRole="button"
           disabled={saving || removing}
           onPress={confirmRemove}
@@ -402,7 +409,7 @@ function DaemonEditor({
           <Text style={[styles.removeText, { color: theme.danger }]}>
             {removing ? 'Removing…' : 'Remove Daemon'}
           </Text>
-        </Pressable>
+        </AppPressable>
       )}
     </View>
   );
@@ -421,7 +428,7 @@ function SheetPageHeader({
   return (
     <View style={styles.pageHeader}>
       {onBack ? (
-        <Pressable
+        <AppPressable
           accessibilityLabel="Back to daemons"
           accessibilityRole="button"
           accessibilityState={{ disabled: backDisabled }}
@@ -437,7 +444,7 @@ function SheetPageHeader({
             size={20}
             tintColor={NativeTint}
           />
-        </Pressable>
+        </AppPressable>
       ) : (
         <View style={styles.headerSide} />
       )}

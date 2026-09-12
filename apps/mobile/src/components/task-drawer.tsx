@@ -1,4 +1,5 @@
 import type { AgentSession } from '@waku/client';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
 import { router, useGlobalSearchParams, usePathname } from 'expo-router';
 import {
@@ -18,7 +19,6 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   RefreshControl,
   SectionList,
   StyleSheet,
@@ -30,6 +30,8 @@ import {
 import { Drawer } from 'react-native-drawer-layout';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AppPressable } from '@/components/app-pressable';
+
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionBanner, useConnectionNotice } from '@/components/connection-banner';
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
@@ -37,6 +39,7 @@ import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionStatus, connectionPhaseLabel } from '@/components/connection-status';
 import { ProviderIcon } from '@/components/provider-icon';
 import { RenameDialog } from '@/components/rename-dialog';
+import { Sheet, SheetRow } from '@/components/sheet';
 import { TaskRowMenu } from '@/components/task-row-menu';
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useSessionMessageSearch, useTaskState } from '@/hooks/use-daemon-data';
@@ -51,11 +54,34 @@ import {
   messageSearchRows,
   providerLabel,
   type MessageSearchRow,
+  type SessionGrouping,
   type SessionListItem,
+  type SessionOrdering,
 } from '@/lib/session-presentation';
 
 const DaemonPickerHeight = 38;
 const SearchDockGap = 14;
+const SIDEBAR_PREFS_KEY = 'waku.mobile.sidebar-prefs.v1';
+
+interface SidebarPrefs {
+  grouping: SessionGrouping;
+  ordering: SessionOrdering;
+}
+
+const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = { grouping: 'updated', ordering: 'newest' };
+
+function parseSidebarPrefs(raw: string | null): SidebarPrefs | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<SidebarPrefs>;
+    return {
+      grouping: value.grouping === 'project' ? 'project' : 'updated',
+      ordering: value.ordering === 'oldest' ? 'oldest' : 'newest',
+    };
+  } catch {
+    return null;
+  }
+}
 interface TaskDrawerContextValue {
   openTaskDrawer: () => void;
   closeTaskDrawer: () => void;
@@ -122,7 +148,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           drawerScene
         )}
         {open && searchFocused && (
-          <Pressable
+          <AppPressable
             accessibilityLabel="Close task history"
             accessibilityRole="button"
             onPress={() => {
@@ -171,6 +197,30 @@ function TaskDrawerContent({
   const messageSearch = useSessionMessageSearch(messageQuery);
   const [daemonPickerOpen, setDaemonPickerOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<AgentSession | null>(null);
+  // Sidebar grouping/ordering, persisted like the desktop's sidebar prefs.
+  const [prefs, setPrefs] = useState<SidebarPrefs>(DEFAULT_SIDEBAR_PREFS);
+  const [filterOpen, setFilterOpen] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(SIDEBAR_PREFS_KEY)
+      .then((raw) => {
+        if (!cancelled) {
+          const parsed = parseSidebarPrefs(raw);
+          if (parsed) setPrefs(parsed);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const updatePrefs = useCallback((patch: Partial<SidebarPrefs>) => {
+    setPrefs((previous) => {
+      const next = { ...previous, ...patch };
+      void AsyncStorage.setItem(SIDEBAR_PREFS_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  }, []);
   const visibleSessions = useMemo(() => {
     if (!taskState.data) return [];
     const query = search.trim().toLocaleLowerCase();
@@ -188,8 +238,10 @@ function TaskDrawerContent({
     });
   }, [search, taskState.data]);
   const sections = useMemo(
-    () => taskState.data ? groupSessions(taskState.data.projects, visibleSessions) : [],
-    [taskState.data, visibleSessions],
+    () => taskState.data
+      ? groupSessions(taskState.data.projects, visibleSessions, new Date(), prefs)
+      : [],
+    [taskState.data, visibleSessions, prefs],
   );
   const messageRows = useMemo(
     () => (messageQuery.trim() && messageSearch.data)
@@ -281,9 +333,32 @@ function TaskDrawerContent({
           />
         )}
         renderSectionHeader={({ section }) => (
-          <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
-            {section.title}
-          </Text>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
+              {section.title}
+            </Text>
+            {/* One control for the whole list, riding the first section
+              header so it stays top-right whether the title reads "Today"
+              or a project name. */}
+            {section === sections[0] && (
+              <GlassSurface
+                interactive
+                style={[styles.filterButton, Platform.OS === 'android' && styles.rippleClip]}>
+                <AppPressable
+                  accessibilityLabel="Group and order tasks"
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  onPress={() => setFilterOpen(true)}
+                  style={({ pressed }) => [styles.filterInner, { opacity: pressed ? 0.5 : 1 }]}>
+                  <AppSymbol
+                    name={{ ios: 'arrow.up.arrow.down', android: 'sort', web: 'sort' }}
+                    size={14}
+                    tintColor={theme.text}
+                  />
+                </AppPressable>
+              </GlassSurface>
+            )}
+          </View>
         )}
         renderItem={({ item }) => (
           <SessionRow
@@ -354,7 +429,7 @@ function TaskDrawerContent({
                   onBlur={() => onSearchFocus?.(false)}
                 />
                 {search.length > 0 && (
-                  <Pressable
+                  <AppPressable
                     accessibilityLabel="Clear search"
                     accessibilityRole="button"
                     hitSlop={8}
@@ -365,16 +440,18 @@ function TaskDrawerContent({
                       size={16}
                       tintColor={theme.textTertiary}
                     />
-                  </Pressable>
+                  </AppPressable>
                 )}
               </View>
             </GlassSurface>
             {daemon.phase === 'connected' && (
-              <GlassSurface interactive style={styles.composeButton}>
-                <Pressable
+              <GlassSurface
+                interactive
+                style={[styles.composeButton, Platform.OS === 'android' && styles.rippleClip]}>
+                <AppPressable
                   accessibilityLabel="New task"
                   accessibilityRole="button"
-                  hitSlop={6}
+                  hitSlop={8}
                   onPress={showNewTask}
                   style={({ pressed }) => [styles.roundInner, { opacity: pressed ? 0.5 : 1 }]}>
                   <AppSymbol
@@ -382,7 +459,7 @@ function TaskDrawerContent({
                     size={20}
                     tintColor={theme.text}
                   />
-                </Pressable>
+                </AppPressable>
               </GlassSurface>
             )}
           </View>
@@ -401,6 +478,30 @@ function TaskDrawerContent({
         onDismiss={() => setDaemonPickerOpen(false)}
         visible={daemonPickerOpen}
       />
+      <Sheet onDismiss={() => setFilterOpen(false)} title="Task list" visible={filterOpen}>
+        <Text style={[styles.filterHeading, { color: theme.textTertiary }]}>Group by</Text>
+        <SheetRow
+          label="Updated"
+          selected={prefs.grouping === 'updated'}
+          onPress={() => updatePrefs({ grouping: 'updated' })}
+        />
+        <SheetRow
+          label="Project"
+          selected={prefs.grouping === 'project'}
+          onPress={() => updatePrefs({ grouping: 'project' })}
+        />
+        <Text style={[styles.filterHeading, { color: theme.textTertiary }]}>Order</Text>
+        <SheetRow
+          label="Newest first"
+          selected={prefs.ordering === 'newest'}
+          onPress={() => updatePrefs({ ordering: 'newest' })}
+        />
+        <SheetRow
+          label="Oldest first"
+          selected={prefs.ordering === 'oldest'}
+          onPress={() => updatePrefs({ ordering: 'oldest' })}
+        />
+      </Sheet>
     </View>
   );
 }
@@ -416,7 +517,7 @@ const MessageResultRow = memo(function MessageResultRow({
 }) {
   const theme = useTheme();
   return (
-    <Pressable
+    <AppPressable
       accessibilityLabel={`${displaySessionTitle(row.session)}: ${row.snippet}`}
       accessibilityRole="button"
       onPress={() => onSelect(row.session.id)}
@@ -433,7 +534,7 @@ const MessageResultRow = memo(function MessageResultRow({
       <Text numberOfLines={2} style={[styles.messageSnippet, { color: theme.textSecondary }]}>
         {row.snippet}
       </Text>
-    </Pressable>
+    </AppPressable>
   );
 });
 
@@ -441,8 +542,14 @@ function DaemonPill({ onPress }: { onPress: () => void }) {
   const theme = useTheme();
   const daemon = useDaemon();
   return (
-    <GlassSurface interactive style={styles.daemonButton}>
-      <Pressable
+    // Android only: the native ripple is a full-bounds drawable that the
+    // pressable cannot round itself — the parent must clip it to the pill
+    // (ReactViewGroup rounds dispatchDraw for overflow-hidden children).
+    // iOS glass masks natively and must not be overflow-clipped.
+    <GlassSurface
+      interactive
+      style={[styles.daemonButton, Platform.OS === 'android' && styles.rippleClip]}>
+      <AppPressable
         accessibilityHint="Opens the daemon switcher"
         accessibilityLabel={daemon.activeProfile
           ? `${connectionPhaseLabel(daemon.phase)}: ${daemon.activeProfile.name}`
@@ -466,7 +573,7 @@ function DaemonPill({ onPress }: { onPress: () => void }) {
           size={12}
           tintColor={theme.textTertiary}
         />
-      </Pressable>
+      </AppPressable>
     </GlassSurface>
   );
 }
@@ -527,15 +634,17 @@ function TaskListEmpty({
         Start an agent on anything — a bug, a feature, a question about the code.
       </Text>
       {phase === 'connected' && (
-        <Pressable
-          accessibilityRole="button"
-          onPress={onNewTask}
-          style={({ pressed }) => [
-            styles.emptyAction,
-            { backgroundColor: theme.inverse, opacity: pressed ? 0.7 : 1 },
-          ]}>
-          <Text style={[styles.emptyActionText, { color: theme.onInverse }]}>New task</Text>
-        </Pressable>
+        <View style={[styles.emptyActionClip, Platform.OS === 'android' && styles.rippleClip]}>
+          <AppPressable
+            accessibilityRole="button"
+            onPress={onNewTask}
+            style={({ pressed }) => [
+              styles.emptyAction,
+              { backgroundColor: theme.inverse, opacity: pressed ? 0.7 : 1 },
+            ]}>
+            <Text style={[styles.emptyActionText, { color: theme.onInverse }]}>New task</Text>
+          </AppPressable>
+        </View>
       )}
     </View>
   );
@@ -625,6 +734,25 @@ const styles = StyleSheet.create({
     position: 'absolute',
     zIndex: 30,
   },
+  sectionHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    paddingRight: 12,
+  },
+  filterButton: {
+    borderRadius: Radius.pill,
+    height: 30,
+    width: 30,
+  },
+  filterInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  filterHeading: {
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    marginHorizontal: 12,
+    marginTop: 10,
+    textTransform: 'uppercase',
+  },
   roundInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
   searchDockAvoider: {
     left: 0,
@@ -649,6 +777,8 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, fontSize: 16.5, paddingVertical: 10 },
   composeButton: { borderRadius: Radius.pill, height: 50, width: 50 },
   daemonButton: { borderRadius: Radius.pill, maxWidth: 176 },
+  /** Parent-side clip that rounds Android's rectangular ripple drawable. */
+  rippleClip: { overflow: 'hidden' },
   daemonButtonInner: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -660,11 +790,12 @@ const styles = StyleSheet.create({
   listContent: { paddingBottom: 96 },
   listContentEmpty: { flexGrow: 1 },
   sectionTitle: {
+    flex: 1,
     fontSize: 13,
     fontWeight: '500',
     letterSpacing: 0,
     marginBottom: 4,
-    marginHorizontal: 24,
+    marginLeft: 24,
     marginTop: 14,
   },
   emptyState: {
@@ -684,10 +815,14 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   emptyBody: { fontSize: 14, lineHeight: 20, marginTop: 7, maxWidth: 320, textAlign: 'center' },
+  emptyActionClip: {
+    alignSelf: 'stretch',
+    borderRadius: Radius.pill,
+    marginTop: 18,
+  },
   emptyAction: {
     borderRadius: Radius.pill,
     justifyContent: 'center',
-    marginTop: 18,
     minHeight: 42,
     paddingHorizontal: 18,
   },
