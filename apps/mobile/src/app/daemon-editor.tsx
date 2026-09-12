@@ -18,7 +18,7 @@ import {
 
 import { AppPressable } from "@/components/app-pressable";
 import { AppSymbol } from "@/components/app-symbol";
-import { Radius } from "@/constants/theme";
+import { NativeTint, Radius } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { useDaemon } from "@/lib/daemon-context";
 import {
@@ -122,48 +122,10 @@ export default function DaemonEditorScreen() {
         options={{
           title: profile ? "Edit Daemon" : "Add Daemon",
           contentStyle: { backgroundColor: colors.background },
-          headerBackVisible: false,
           headerStyle: { backgroundColor: colors.background },
           headerTintColor: colors.accent,
           headerTitleStyle: { color: colors.text },
           gestureEnabled: !saving && !removing,
-          ...(Platform.OS === "ios"
-            ? {
-                unstable_headerLeftItems: () => [
-                  {
-                    type: "button" as const,
-                    label: "Cancel",
-                    disabled: saving || removing,
-                    onPress: navigateBack,
-                  },
-                ],
-                unstable_headerRightItems: () => [
-                  {
-                    type: "button" as const,
-                    label: saving ? "Saving…" : profile ? "Save" : "Add",
-                    variant: "done" as const,
-                    disabled: !canSave,
-                    onPress: () => void save(),
-                  },
-                ],
-              }
-            : {
-                headerLeft: () => (
-                  <HeaderButton
-                    disabled={saving || removing}
-                    label="Cancel"
-                    onPress={navigateBack}
-                  />
-                ),
-                headerRight: () => (
-                  <HeaderButton
-                    disabled={!canSave}
-                    emphasized
-                    label={saving ? "Saving…" : profile ? "Save" : "Add"}
-                    onPress={() => void save()}
-                  />
-                ),
-              }),
         }}
       />
       <ScrollView
@@ -314,6 +276,45 @@ export default function DaemonEditorScreen() {
           </View>
         )}
 
+        <View style={styles.formActions}>
+          <AppPressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canSave }}
+            disabled={!canSave}
+            onPress={() => void save()}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              { backgroundColor: NativeTint },
+              { opacity: !canSave ? 0.45 : pressed ? 0.8 : 1 },
+            ]}
+          >
+            {saving && (
+              <ActivityIndicator color="#ffffff" size="small" />
+            )}
+            <Text style={styles.primaryLabel}>
+              {saving ? "Saving…" : profile ? "Save" : "Add"}
+            </Text>
+          </AppPressable>
+          <AppPressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: saving || removing }}
+            disabled={saving || removing}
+            onPress={navigateBack}
+            style={({ pressed }) => [
+              styles.secondaryButton,
+              {
+                backgroundColor: colors.surface,
+                borderColor: colors.separator,
+                opacity: saving || removing ? 0.45 : pressed ? 0.7 : 1,
+              },
+            ]}
+          >
+            <Text style={[styles.secondaryLabel, { color: colors.text }]}>
+              Cancel
+            </Text>
+          </AppPressable>
+        </View>
+
         {profile && (
           <>
             <Text
@@ -417,43 +418,6 @@ function ConnectionFootnote({
   );
 }
 
-function HeaderButton({
-  disabled,
-  emphasized = false,
-  label,
-  onPress,
-}: {
-  disabled: boolean;
-  emphasized?: boolean;
-  label: string;
-  onPress: () => void;
-}) {
-  const colors = useNativeFormColors();
-  return (
-    <AppPressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      hitSlop={8}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.headerButton,
-        { opacity: disabled ? 0.35 : pressed ? 0.5 : 1 },
-      ]}
-    >
-      <Text
-        style={[
-          styles.headerButtonText,
-          emphasized && styles.headerButtonEmphasized,
-          { color: colors.accent },
-        ]}
-      >
-        {label}
-      </Text>
-    </AppPressable>
-  );
-}
-
 interface NativeFormColors {
   accent: ColorValue;
   background: ColorValue;
@@ -545,6 +509,30 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   messageText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  formActions: {
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 20,
+  },
+  primaryButton: {
+    alignItems: "center",
+    borderRadius: Platform.select({ ios: 12, default: Radius.medium }),
+    flexDirection: "row",
+    gap: 8,
+    justifyContent: "center",
+    minHeight: 52,
+    paddingHorizontal: 16,
+  },
+  primaryLabel: { color: "#ffffff", fontSize: 16, fontWeight: "600" },
+  secondaryButton: {
+    alignItems: "center",
+    borderRadius: Platform.select({ ios: 12, default: Radius.medium }),
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+    minHeight: 52,
+    paddingHorizontal: 16,
+  },
+  secondaryLabel: { fontSize: 16 },
   removeRow: {
     alignItems: "center",
     flexDirection: "row",
@@ -560,7 +548,4 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginTop: 8,
   },
-  headerButton: { justifyContent: "center", minHeight: 44, minWidth: 44 },
-  headerButtonText: { fontSize: 16 },
-  headerButtonEmphasized: { fontWeight: "700" },
 });
