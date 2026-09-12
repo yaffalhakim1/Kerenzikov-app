@@ -2,6 +2,7 @@ name: Tests
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -12,8 +13,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # What changed decides what runs. Everything shares the Rust workspace and
+  # the generated protocol, so desktop sources or the protocol pull in the
+  # full matrix; a mobile-only change runs just the mobile checks, and a
+  # workflow/docs-only change runs nothing.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      client: ${{ steps.filter.outputs.client }}
+      mobile: ${{ steps.filter.outputs.mobile }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            # The desktop app, its crates, and everything the Rust build and
+            # tests consume. Also matched by protocol/client changes: the
+            # generated artifact is checked in and the desktop compiles it.
+            rust:
+              - 'src/**'
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'build.rs'
+              - '.cargo/**'
+              - 'locales/**'
+              - '.github/workflows/test.yml'
+            client:
+              - 'packages/waku-client/**'
+              - 'waku-client/**'
+              - 'scripts/**'
+              - 'bun.lock'
+              - '.github/workflows/test.yml'
+            mobile:
+              - 'apps/mobile/**'
+              - 'packages/waku-client/**'
+              - 'waku-client/**'
+              - 'scripts/**'
+              - 'bun.lock'
+              - '.github/workflows/test.yml'
+
   test:
     name: Rust (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -75,12 +125,56 @@ jobs:
           bun run --filter @waku/client check
           bun run --filter @waku/client test
 
-      # Mobile has its own client code against the same generated protocol and
-      # is not covered by the Rust or @waku/client checks, so protocol changes
-      # can drift past it silently. Types and unit tests are enough to catch
-      # that without an emulator.
+  # Mobile has its own client code against the same generated protocol and is
+  # not covered by the Rust or @waku/client checks, so protocol changes can
+  # drift past it silently. Types and unit tests are enough to catch that
+  # without an emulator.
+  mobile:
+    name: Mobile client
+    needs: changes
+    if: needs.changes.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+
       - name: Check mobile client
-        if: runner.os == 'Linux'
         run: |
           bun run --filter @waku/mobile typecheck
           bun run --filter @waku/mobile test
+
+  # The generated protocol must match its checked-in artifact. Runs whenever
+  # anything that feeds the generator changed, including mobile-only pushes.
+  client:
+    name: Protocol and browser client
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install JavaScript dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check generated protocol and browser client
+        run: |
+          bun run protocol:check
+          bun run --filter @waku/client check
+          bun run --filter @waku/client test
