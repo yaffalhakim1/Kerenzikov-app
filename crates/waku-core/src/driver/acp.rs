@@ -69,6 +69,10 @@ struct AcpLaunch {
 
 fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow::Result<AcpLaunch> {
     match provider {
+        ProviderKind::Copilot => Ok(AcpLaunch {
+            args: vec!["--acp".into(), "--stdio".into()],
+            env: Vec::new(),
+        }),
         ProviderKind::Cursor => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
@@ -234,11 +238,23 @@ fn sdk_agent(
     // `AcpAgentConfig` deliberately contains only argv and environment. macOS
     // `env -C` supplies the session cwd without a shell, preserving exact
     // argument boundaries and the SDK's process-group lifecycle management.
+    //
+    // Windows has no /usr/bin/env, so the CLI launches directly with the
+    // daemon's working directory inherited. The ACP session itself still runs
+    // in `cwd` via session/new; only startup-time cwd indexing differs.
+    // std Command runs the resolved `.cmd` shim through cmd.exe, and the
+    // child PATH built above still carries the shim's runtime.
+    #[cfg(not(windows))]
     let mut args = vec!["-C".to_owned(), cwd.to_owned(), binary.to_owned()];
+    #[cfg(not(windows))]
+    let command = "/usr/bin/env";
+    #[cfg(windows)]
+    let (command, mut args) = {
+        let _ = cwd;
+        (binary.to_owned(), Vec::new())
+    };
     args.extend(launch.args);
-    let config = AcpAgentConfig::new("/usr/bin/env")
-        .args(args)
-        .envs(environment);
+    let config = AcpAgentConfig::new(command).args(args).envs(environment);
     Ok(AcpAgent::new(config).with_debug(move |line, direction| {
         if direction != LineDirection::Stderr || line.trim().is_empty() {
             return;
@@ -511,6 +527,31 @@ async fn run_sdk_connection(
                     .block_task()
                     .await;
             }
+            if provider == ProviderKind::Copilot
+                && let Some(options) = config_options.as_deref()
+                && let Some(option) = options
+                    .iter()
+                    .find(|option| option.id.to_string().eq_ignore_ascii_case("allow_all"))
+            {
+                // FullAccess runs wide open; every other posture leaves the
+                // agent asking. Opportunistic like the mode above: a rejected
+                // transition must not invalidate the session.
+                let desired = if mode == RuntimeMode::FullAccess {
+                    "on"
+                } else {
+                    "off"
+                };
+                if session_config_current_value(option) != Some(desired) {
+                    let _ = connection
+                        .send_request(SetSessionConfigOptionRequest::new(
+                            session_id.clone(),
+                            option.id.clone(),
+                            desired,
+                        ))
+                        .block_task()
+                        .await;
+                }
+            }
             let native_session_id = session_id.to_string();
             let _ = events.send(DriverEvent::Connected {
                 provider_cursor: Some(ProviderResumeCursor::from_session_id(
@@ -718,7 +759,19 @@ fn desired_access_mode(
     mode: RuntimeMode,
 ) -> Option<SessionModeId> {
     let modes = modes?;
-    let desired = if provider == ProviderKind::Fx {
+    let desired = if provider == ProviderKind::Copilot {
+        // Waku modes are permission postures; Copilot's plan mode is a
+        // planning behavior, not a permission level, so every Waku mode runs
+        // in agent. FullAccess additionally flips the `allow_all` config
+        // option where `run_sdk_connection` applies it; the experimental
+        // autopilot mode is deliberately never selected.
+        modes
+            .available_modes
+            .iter()
+            .find(|mode| mode.id.to_string().ends_with("#agent"))?
+            .id
+            .clone()
+    } else if provider == ProviderKind::Fx {
         let desired = if mode == RuntimeMode::Ask {
             "ask"
         } else {
@@ -756,11 +809,13 @@ fn desired_access_mode(
 }
 
 /// Which session config option carries reasoning effort. ACP leaves the id to
-/// the agent: Kimi Code exposes it as its `thinking` level, while the other
-/// agents Waku drives keep it on `mode`. Grok does not use this path: its
-/// effort rides on `session/set_model` as `_meta.reasoningEffort`.
+/// the agent: Kimi Code exposes it as its `thinking` level, Copilot CLI as
+/// `reasoning_effort`, while the other agents Waku drives keep it on `mode`.
+/// Grok does not use this path: its effort rides on `session/set_model` as
+/// `_meta.reasoningEffort`.
 fn reasoning_effort_config_id(provider: ProviderKind) -> &'static str {
     match provider {
+        ProviderKind::Copilot => "reasoning_effort",
         ProviderKind::Kimi => "thinking",
         _ => "mode",
     }
@@ -2119,6 +2174,52 @@ mod tests {
     }
 
     #[test]
+    fn copilot_launches_its_documented_acp_server() {
+        let launch = launch_for(ProviderKind::Copilot, None).unwrap();
+        assert_eq!(launch.args, ["--acp", "--stdio"]);
+        assert!(launch.env.is_empty());
+    }
+
+    #[test]
+    fn copilot_effort_rides_on_its_own_config_option() {
+        assert_eq!(
+            reasoning_effort_config_id(ProviderKind::Copilot),
+            "reasoning_effort"
+        );
+    }
+
+    #[test]
+    fn copilot_access_modes_all_run_in_agent() {
+        const AGENT: &str = "https://agentclientprotocol.com/protocol/session-modes#agent";
+        const PLAN: &str = "https://agentclientprotocol.com/protocol/session-modes#plan";
+        const AUTOPILOT: &str = "https://agentclientprotocol.com/protocol/session-modes#autopilot";
+        let modes = SessionModeState::new(
+            PLAN,
+            vec![
+                SessionMode::new(AGENT, "Agent"),
+                SessionMode::new(PLAN, "Plan"),
+                SessionMode::new(AUTOPILOT, "Autopilot"),
+            ],
+        );
+
+        // Waku modes are permission postures, so all four select agent; the
+        // experimental autopilot mode is never selected, and FullAccess
+        // instead flips the allow_all config option.
+        for mode in [
+            RuntimeMode::Ask,
+            RuntimeMode::AutoAcceptEdits,
+            RuntimeMode::Auto,
+            RuntimeMode::FullAccess,
+        ] {
+            assert_eq!(
+                desired_access_mode(ProviderKind::Copilot, Some(&modes), mode)
+                    .map(|mode| mode.to_string()),
+                Some(AGENT.to_owned())
+            );
+        }
+    }
+
+    #[test]
     fn fx_model_option_ignores_provider_selector_in_same_category() {
         let provider = select_config_option(
             "provider",
@@ -2563,6 +2664,64 @@ mod tests {
             }
         }
         assert!(produced_text, "the Cursor turn produced no text");
+        assert_eq!(finished, Some(true));
+    }
+
+    /// Covers Copilot's ACP handshake end to end: session/new advertises
+    /// the account catalog, set_model switches within the session, and a
+    /// cheap prompt settles the turn.
+    #[test]
+    #[ignore = "requires an installed, authenticated copilot"]
+    fn copilot_handshake_and_cheap_prompt_finish_a_real_turn() {
+        let binary =
+            crate::command_env::find_executable("copilot").expect("copilot is not installed");
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = AcpDriver::start(
+            ProviderKind::Copilot,
+            DriverStartOptions {
+                binary,
+                cwd: std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+                mode: RuntimeMode::FullAccess,
+                model: Some("gpt-5.6-luna".into()),
+                reasoning_effort: Some("low".into()),
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("the ACP session should open");
+
+        loop {
+            let event = event_rx
+                .recv_timeout(Duration::from_secs(60))
+                .expect("the agent should report its session");
+            match event {
+                DriverEvent::Connected {
+                    provider_cursor: Some(ProviderResumeCursor::Copilot { .. }),
+                } => break,
+                DriverEvent::Error(error) => panic!("the agent reported: {error}"),
+                _ => {}
+            }
+        }
+        driver.prompt("Reply exactly OK.".into());
+
+        let mut produced_text = false;
+        let mut finished = None;
+        while let Ok(event) = event_rx.recv_timeout(Duration::from_secs(180)) {
+            match event {
+                DriverEvent::TextDelta(text) => produced_text |= !text.is_empty(),
+                DriverEvent::TurnFinished { success, .. } => {
+                    finished = Some(success);
+                    break;
+                }
+                DriverEvent::Error(error) => panic!("the agent reported: {error}"),
+                _ => {}
+            }
+        }
+        assert!(produced_text, "the Copilot turn produced no text");
         assert_eq!(finished, Some(true));
     }
 

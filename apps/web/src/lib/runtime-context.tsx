@@ -1445,6 +1445,7 @@ function providerName(provider: AgentSession['provider']) {
       amp: 'Amp',
       claude: 'Claude Code',
       codex: 'Codex',
+      copilot: 'Copilot',
       cursor: 'Cursor Agent',
       deepSeek: 'DeepSeek Harness',
       fx: 'Fx',

@@ -58,6 +58,19 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         ProviderKind::Cursor => {
             vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
         }
+        // Mirrors the daemon catalog: Copilot's account-specific models
+        // arrive on the ACP handshake, with Auto as the selectable default
+        // until discovery completes.
+        ProviderKind::Copilot => {
+            vec![
+                ProviderModel::new("auto", tr!("model_option.auto"))
+                    .default()
+                    .reasoning(
+                        reasoning_options(["low", "medium", "high", "xhigh", "max"]),
+                        "medium",
+                    ),
+            ]
+        }
         ProviderKind::DeepSeek
         | ProviderKind::Fx
         | ProviderKind::Grok

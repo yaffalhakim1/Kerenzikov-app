@@ -342,6 +342,20 @@ fn agent_arguments(
             }
             return args;
         }
+        // Copilot carries the prompt as `--prompt`'s value rather than a
+        // trailing positional, so it returns early. The commit prompt is
+        // what forbids tool use; `--silent` keeps the output to the message.
+        ProviderKind::Copilot => {
+            push(&mut args, "--prompt");
+            push(&mut args, prompt);
+            push(&mut args, "--silent");
+            push(&mut args, "--no-color");
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            return args;
+        }
         // Kimi carries the prompt as `--prompt`'s value rather than a trailing
         // positional, so it returns early. It has no tool or session switches
         // to turn off; the commit prompt is what forbids tool use.
@@ -818,6 +832,11 @@ mod tests {
                     assert!(has(&args, "--no-tools"));
                     assert!(has(&args, "--no-rules"));
                     assert!(has_pair(&args, "--thinking", "low"));
+                }
+                ProviderKind::Copilot => {
+                    assert!(has_pair(&args, "--prompt", prompt));
+                    assert!(has(&args, "--silent"));
+                    assert!(has_pair(&args, "--model", "model"));
                 }
                 ProviderKind::Kimi => {
                     assert!(has_pair(&args, "--prompt", prompt));

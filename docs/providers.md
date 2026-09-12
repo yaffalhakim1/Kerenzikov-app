@@ -10,13 +10,13 @@ polled off disk, and the one Waku generates itself — is in
 
 Every provider is reached through the same driver abstraction in
 [driver/mod.rs](../crates/waku-core/src/driver/mod.rs). There are seven
-transport implementations behind eleven providers, and **every one of them holds a
+transport implementations behind twelve providers, and **every one of them holds a
 session that spans the whole conversation**:
 
 | Transport | File | Providers |
 | --- | --- | --- |
 | Codex app-server (JSON-RPC over stdio) | [driver/codex.rs](../crates/waku-core/src/driver/codex.rs) | Codex CLI |
-| Agent Client Protocol (JSON-RPC over stdio) | [driver/acp.rs](../crates/waku-core/src/driver/acp.rs) | Cursor CLI, Fx, Grok Build, Kimi Code |
+| Agent Client Protocol (JSON-RPC over stdio) | [driver/acp.rs](../crates/waku-core/src/driver/acp.rs) | Copilot CLI, Cursor CLI, Fx, Grok Build, Kimi Code |
 | OpenCode server (HTTP + server-sent events) | [driver/opencode.rs](../crates/waku-core/src/driver/opencode.rs) | OpenCode |
 | Pi RPC mode (NDJSON request/response over stdio) | [driver/pi.rs](../crates/waku-core/src/driver/pi.rs) | Pi, Oh My Pi |
 | Claude streaming-input session (NDJSON over stdio) | [driver/claude.rs](../crates/waku-core/src/driver/claude.rs) | Claude Code |
@@ -149,20 +149,28 @@ OpenCode server itself, whose driver kills it explicitly on drop.
 
 ## At a glance
 
-| | Codex CLI | Pi | Oh My Pi | Claude Code | Amp | Cursor CLI | Fx | OpenCode | Grok Build | Kimi Code |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Binary | `codex` | `pi` | `omp` | `claude` | `amp` | `cursor-agent` | `fx` | `opencode` | `grok` | `kimi` |
-| Wire protocol | JSON-RPC over stdio | NDJSON RPC over stdio | NDJSON RPC over stdio | stream-json over stdio | stream-json over stdio | ACP over stdio | ACP over stdio | HTTP + SSE | ACP over stdio | ACP over stdio |
-| Process spans the whole session | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Process spawned per turn | no | no | no | no | no | no | no | no | no | no |
-| Bidirectional | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Reasoning stream | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
-| Interactive approvals | yes | no | no (has them; Waku runs `--yolo`) | yes | no | yes | yes | yes | yes | yes |
-| Mid-turn steering | yes | yes | yes | yes | yes | yes | **no** | yes | yes | yes (transport) |
-| Model discovery | yes | yes | yes | no (fixed) | no (modes) | yes | yes | yes | yes | yes |
-| Computer Use | yes | yes | no (ships its own) | no | no | no | no | yes | yes | no |
-| Restricted to Full access | no | yes | yes | no | yes | no | no | no | no | no |
-| Rewind and branch at a turn | yes | yes | yes | yes | yes | yes | **no** | yes | yes | **no** |
+| | Codex CLI | Copilot CLI | Pi | Oh My Pi | Claude Code | Amp | Cursor CLI | Fx | OpenCode | Grok Build | Kimi Code |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Binary | `codex` | `copilot` | `pi` | `omp` | `claude` | `amp` | `cursor-agent` | `fx` | `opencode` | `grok` | `kimi` |
+| Wire protocol | JSON-RPC over stdio | ACP over stdio | NDJSON RPC over stdio | NDJSON RPC over stdio | stream-json over stdio | stream-json over stdio | ACP over stdio | ACP over stdio | HTTP + SSE | ACP over stdio | ACP over stdio |
+| Process spans the whole session | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Process spawned per turn | no | no | no | no | no | no | no | no | no | no | no |
+| Bidirectional | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Reasoning stream | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| Interactive approvals | yes | yes (transport) | no | no (has them; Waku runs `--yolo`) | yes | no | yes | yes | yes | yes | yes |
+| Mid-turn steering | yes | yes (transport) | yes | yes | yes | yes | yes | **no** | yes | yes | yes (transport) |
+| Model discovery | yes | yes | yes | yes | no (fixed) | no (modes) | yes | yes | yes | yes | yes |
+| Computer Use | yes | no | yes | no (ships its own) | no | no | no | no | yes | yes | no |
+| Restricted to Full access | no | no | yes | yes | no | yes | no | no | no | no | no |
+| Rewind and branch at a turn | yes | **no** | yes | yes | yes | yes | yes | **no** | yes | yes | **no** |
+
+Copilot's approvals and steering are the transport's, not a probed policy: the
+ACP driver sends `session/request_permission` answers and the second
+`session/prompt` for every agent it drives, but Copilot's permission flow has
+not been observed against a live turn the way Cursor's and Grok's were (the
+end-to-end test runs FullAccess, where nothing asks). Its rewind/branch gap is
+structural — `session/fork` is `Method not found` — so the affordances stay
+hidden like Kimi's and Fx's.
 
 Kimi Code's steering is the transport's, not a probed policy: the ACP driver
 sends the second `session/prompt` for every agent it drives, but Kimi's
@@ -575,8 +583,13 @@ received them.
 
 ## Agent Client Protocol
 
-**Launch** — `cursor-agent acp`, `fx acp`, `grok agent [--reasoning-effort E] stdio`, `kimi acp`
+**Launch** — `copilot --acp --stdio`, `cursor-agent acp`, `fx acp`,
+`grok agent [--reasoning-effort E] stdio`, `kimi acp`
 ([driver/acp.rs](../crates/waku-core/src/driver/acp.rs)).
+
+On Windows the SDK has no `/usr/bin/env` to route through, so the CLI
+launches directly with the daemon's working directory inherited; the ACP
+session itself still runs in the task cwd via `session/new`.
 
 **Protocol** — newline-delimited JSON-RPC over stdio, bidirectional. One agent
 process serves the whole conversation, streams `session/update` notifications,
@@ -717,6 +730,16 @@ all. Grok is the exception: effort rides on `session/set_model` as
 `_meta.reasoningEffort` (and as `--reasoning-effort` at launch), not as a
 session config option.
 
+Copilot names both plainly: models switch through the standard
+`session/set_model`, effort through a `reasoning_effort` config option
+(`low`/`medium`/`high`/`xhigh`/`max`, default `medium`), and access posture
+through the `allow_all` option (`on` only in FullAccess). Every Waku mode runs
+in Copilot's `agent` mode — plan is a planning behavior, not a permission
+level, so an adopted plan session is normalized to agent like any other
+legacy mode, and the experimental `autopilot` mode is never selected. Its model
+catalog needs no probe process either: `session/new` already returns the
+account's `model` config option, which is what discovery parses.
+
 Grok's catalog comes from the plain-text `grok models` listing, which reports
 ids but no effort metadata. The hardcoded menu therefore covers only the exact
 built-ins (`grok-4.5` stops at high, `grok-4.6` offers xhigh): the listing also
@@ -754,12 +777,13 @@ own ACP server plus on-disk truncation
 ([grok_session.rs](../crates/waku-core/src/grok_session.rs)), Cursor re-seeds a
 fresh session ([cursor_session.rs](../crates/waku-core/src/cursor_session.rs)).
 
-**Kimi Code and Fx have neither, deliberately.** Kimi advertises a `fork` session
+**Kimi Code, Fx, and Copilot CLI have neither, deliberately.** Kimi advertises a `fork` session
 capability, but `session/fork` takes only `{sessionId, cwd}` and copies the
 whole conversation — there is no turn count, so "drop the last N turns" cannot
-be expressed. Fx exposes no turn-aware fork or truncation method.
+be expressed. Fx exposes no turn-aware fork or truncation method, and Copilot
+answers `session/fork` with `Method not found`.
 `ProviderKind::supports_conversation_fork` and
-`supports_conversation_rollback` are therefore false for both, which hides the
+`supports_conversation_rollback` are therefore false for all three, which hides the
 rewind and branch affordances rather than offering a control that would silently
 keep history the user asked to discard. The daemon and desktop match arms for it
 exist only to keep the matches exhaustive; reaching them means the UI gate was
@@ -780,12 +804,12 @@ which its `--print` transport did not emit at all.
 Waku's `RuntimeMode` (Supervised / Auto-accept edits / Auto / Full access)
 maps into each CLI's own vocabulary.
 
-| Waku | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Cursor | Fx | OpenCode | Grok | Kimi Code |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Supervised | `untrusted` / `read-only` / `user` | `default` + `can_use_tool` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `ask` | permission requests reach the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user |
-| Auto-accept edits | `on-request` / `workspace-write` / `user` | `acceptEdits` | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
-| Auto | `on-request` / `workspace-write` / `auto_review` | `auto` | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
-| Full access | `never` / `danger-full-access` / `user` | `bypassPermissions` + `--dangerously-skip-permissions` | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
+| Waku | Codex (`approvalPolicy` / `sandbox` / reviewer) | Claude `--permission-mode` | Copilot CLI | Cursor | Fx | OpenCode | Grok | Kimi Code |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Supervised | `untrusted` / `read-only` / `user` | `default` + `can_use_tool` reaches the user | agent mode, `allow_all` off, `session/request_permission` reaches the user | `session/request_permission` reaches the user | `session/set_mode` → `ask` | permission requests reach the user | `session/request_permission` reaches the user | `session/request_permission` reaches the user |
+| Auto-accept edits | `on-request` / `workspace-write` / `user` | `acceptEdits` | agent mode, `allow_all` off, auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
+| Auto | `on-request` / `workspace-write` / `auto_review` | `auto` | agent mode, `allow_all` off, auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
+| Full access | `never` / `danger-full-access` / `user` | `bypassPermissions` + `--dangerously-skip-permissions` | agent mode, `allow_all` on, auto-answered | auto-answered | `session/set_mode` → `code` | auto-answered (`always`) | auto-answered | auto-answered |
 
 Amp, Pi, and Oh My Pi accept Full access only and always run wide open
 (`--dangerously-allow-all`, `--approve`, `--yolo`).
@@ -811,6 +835,7 @@ persisted with the session and is what makes a Waku task outlive its process:
 | Claude | `session_id`, `resume_at` | `resume_at` is the transcript message uuid used for forking |
 | Amp | `thread_id`, `fork_context` | `fork_context` is the seeded history for a branch |
 | Cursor | `session_id`, `fork_context` | id is empty until a seeded branch streams one |
+| Copilot CLI | `session_id` | `session/load`; no fork, see above |
 | Fx | `session_id` | `session/resume`; no fork or rewind, see above |
 | OpenCode | `session_id` | `--session` / server fork |
 | Grok | `session_id` | `--resume` / ACP fork |

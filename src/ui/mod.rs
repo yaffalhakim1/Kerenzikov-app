@@ -165,6 +165,7 @@ pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
         ProviderKind::Claude => rgb(0xD97757).into(),
         ProviderKind::DeepSeek => rgb(0x4D6BFE).into(),
         ProviderKind::Codex
+        | ProviderKind::Copilot
         | ProviderKind::Cursor
         | ProviderKind::Fx
         | ProviderKind::OpenCode
@@ -188,6 +189,9 @@ pub fn provider_icon(provider: ProviderKind) -> &'static str {
         ProviderKind::Amp => "icons/provider-amp.svg",
         ProviderKind::Claude => "icons/provider-claude.svg",
         ProviderKind::Codex => "icons/provider-openai.svg",
+        // No Copilot-specific mark ships with the app; the GitHub mark is
+        // the vendor's and reads correctly next to the "Copilot CLI" label.
+        ProviderKind::Copilot => "icons/github.svg",
         ProviderKind::Cursor => "icons/provider-cursor.svg",
         ProviderKind::DeepSeek => "icons/provider-deepseek.svg",
         ProviderKind::Fx => "icons/provider-fx.svg",

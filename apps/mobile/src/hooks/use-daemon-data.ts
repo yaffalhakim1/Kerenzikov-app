@@ -37,6 +37,7 @@ import { providerLabel } from '@/lib/session-presentation';
 export const PROVIDERS: ProviderKind[] = [
   'codex',
   'claude',
+  'copilot',
   'cursor',
   'amp',
   'openCode',

@@ -8,6 +8,13 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::schema::v1::{
+    ClientCapabilities, Implementation, InitializeRequest, NewSessionRequest, SessionConfigKind,
+    SessionConfigOption, SessionConfigSelectOptions,
+};
+use agent_client_protocol::{Agent, Client, ConnectionTo};
+
 use crate::model::{ProviderAgentPreset, ProviderKind, ProviderModel, ProviderModelOption};
 use crate::opencode_session::OpenCodeServer;
 
@@ -72,6 +79,20 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // older CLIs selectable if model discovery is unavailable.
         ProviderKind::Cursor => {
             vec![ProviderModel::new("auto", tr!("model_option.auto")).default()]
+        }
+        // Copilot CLI has no `models` subcommand; the account-specific
+        // catalog arrives on the ACP `session/new` handshake instead. Auto
+        // is the provider-owned default and keeps older CLIs selectable
+        // when discovery is unavailable.
+        ProviderKind::Copilot => {
+            vec![
+                ProviderModel::new("auto", tr!("model_option.auto"))
+                    .default()
+                    .reasoning(
+                        reasoning_options(["low", "medium", "high", "xhigh", "max"]),
+                        "medium",
+                    ),
+            ]
         }
         // Harness reports its account/configuration-specific catalog from its
         // Host. An invented fallback would make unavailable routes selectable.
@@ -154,6 +175,7 @@ pub fn discover_catalog(
         ProviderKind::Codex => (CatalogProbe::legacy(discover_codex_models(binary)), None),
         ProviderKind::Claude => (CatalogProbe::legacy(discover_claude_models(binary)), None),
         ProviderKind::Cursor => (CatalogProbe::legacy(discover_cursor_models(binary)), None),
+        ProviderKind::Copilot => (CatalogProbe::legacy(discover_copilot_models(binary)), None),
         ProviderKind::DeepSeek => {
             let (models, presets) = discover_deepseek_catalog(binary);
             (CatalogProbe::legacy(models), presets)
@@ -874,6 +896,110 @@ fn parse_kimi_models(catalog: &Value, default_model: Option<&str>) -> Vec<Provid
                             .any(|option| option.id == *effort)
                     })
                     .map(str::to_owned);
+            }
+            model
+        })
+        .collect()
+}
+
+/// Copilot CLI exposes no `models` subcommand; its account-specific catalog
+/// arrives on the ACP `session/new` handshake as the `model` config option,
+/// with the global `reasoning_effort` option alongside it. A short-lived
+/// session in the isolated catalog directory keeps the probe cheap and off
+/// the user's workspace. Discovery is authoritative.
+fn discover_copilot_models(binary: &Path) -> Vec<ProviderModel> {
+    let Ok(directory) = crate::acp_session::catalog_working_directory() else {
+        return Vec::new();
+    };
+    let Ok(agent) = crate::driver::catalog_agent(ProviderKind::Copilot, binary, &directory)
+    else {
+        return Vec::new();
+    };
+    let request = Client.builder().name("waku-model-catalog").connect_with(
+        agent,
+        async move |connection: ConnectionTo<Agent>| {
+            connection
+                .send_request(
+                    InitializeRequest::new(ProtocolVersion::V1)
+                        .client_capabilities(ClientCapabilities::new().terminal(false))
+                        .client_info(Implementation::new("waku", env!("CARGO_PKG_VERSION"))),
+                )
+                .block_task()
+                .await?;
+            let response = connection
+                .send_request(NewSessionRequest::new(directory))
+                .block_task()
+                .await?;
+            Ok(parse_copilot_models(response.config_options.as_deref()))
+        },
+    );
+    smol::block_on(smol::future::race(
+        async move { request.await.map_err(anyhow::Error::new) },
+        async move {
+            smol::Timer::after(Duration::from_secs(20)).await;
+            Err(anyhow::anyhow!("Copilot ACP model catalog timed out"))
+        },
+    ))
+    .unwrap_or_default()
+}
+
+fn parse_copilot_models(options: Option<&[SessionConfigOption]>) -> Vec<ProviderModel> {
+    let options = options.unwrap_or_default();
+    let select_values = |id: &str| -> Vec<(String, String, Option<String>)> {
+        options
+            .iter()
+            .find(|option| option.id.to_string().eq_ignore_ascii_case(id))
+            .and_then(|option| match &option.kind {
+                SessionConfigKind::Select(select) => Some(select),
+                _ => None,
+            })
+            .map(|select| match &select.options {
+                SessionConfigSelectOptions::Ungrouped(options) => options.clone(),
+                SessionConfigSelectOptions::Grouped(groups) => {
+                    groups.iter().flat_map(|group| group.options.clone()).collect()
+                }
+                _ => Vec::new(),
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|option| {
+                (
+                    option.value.0.as_ref().to_owned(),
+                    option.name.clone(),
+                    option.description.clone(),
+                )
+            })
+            .collect()
+    };
+    let efforts = select_values("reasoning_effort");
+    let current_value = |id: &str| {
+        options
+            .iter()
+            .find(|option| option.id.to_string().eq_ignore_ascii_case(id))
+            .and_then(|option| match &option.kind {
+                SessionConfigKind::Select(select) => Some(select.current_value.0.as_ref().to_owned()),
+                _ => None,
+            })
+    };
+    let default_effort =
+        current_value("reasoning_effort").filter(|default| efforts.iter().any(|(value, _, _)| value == default));
+    let default_model = current_value("model");
+    select_values("model")
+        .into_iter()
+        .filter(|(id, _, _)| !id.trim().is_empty())
+        .map(|(id, name, _)| {
+            let label = name.trim();
+            let label = if label.is_empty() { id.as_str() } else { label };
+            let mut model = ProviderModel::new(id.as_str(), label);
+            model.is_default = default_model.as_deref() == Some(id.as_str());
+            if !efforts.is_empty() {
+                model.reasoning_efforts = efforts
+                    .iter()
+                    .map(|(value, _, _)| {
+                        ProviderModelOption::new(value, reasoning_effort_label(value))
+                    })
+                    .collect();
+                model.default_reasoning_effort = default_effort.clone();
             }
             model
         })
@@ -1736,6 +1862,68 @@ opencode/big-pickle
         let binary = crate::command_env::find_executable("fx").expect("Fx is not installed");
         let models = discover_catalog(ProviderKind::Fx, &binary).0;
         assert!(!models.is_empty(), "the installed Fx reported no models");
+        assert!(models.iter().any(|model| model.is_default));
+    }
+
+    #[test]
+    fn parses_copilot_handshake_model_and_effort_options() {
+        use agent_client_protocol::schema::v1::SessionConfigSelectOption;
+
+        let options = vec![
+            SessionConfigOption::select(
+                "model",
+                "Model",
+                "claude-sonnet-5",
+                vec![
+                    SessionConfigSelectOption::new("auto", "Auto"),
+                    SessionConfigSelectOption::new("claude-sonnet-5", "Claude Sonnet 5"),
+                    SessionConfigSelectOption::new("gpt-5.6-luna", "GPT-5.6 Luna"),
+                ],
+            ),
+            SessionConfigOption::select(
+                "reasoning_effort",
+                "Reasoning effort",
+                "medium",
+                vec![
+                    SessionConfigSelectOption::new("low", "Low"),
+                    SessionConfigSelectOption::new("medium", "Medium"),
+                ],
+            ),
+        ];
+        let models = parse_copilot_models(Some(&options));
+
+        assert_eq!(models.len(), 3);
+        assert_eq!(models[0].id, "auto");
+        assert_eq!(models[1].name, "Claude Sonnet 5");
+        assert!(models[1].is_default);
+        for model in &models {
+            assert_eq!(
+                model
+                    .reasoning_efforts
+                    .iter()
+                    .map(|effort| effort.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["low", "medium"]
+            );
+            assert_eq!(
+                model.default_reasoning_effort.as_deref(),
+                Some("medium")
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires an installed and authenticated Copilot CLI"]
+    fn installed_copilot_reports_handshake_models() {
+        let binary =
+            crate::command_env::find_executable("copilot").expect("Copilot CLI is not installed");
+        let models = discover_catalog(ProviderKind::Copilot, &binary).0;
+        // The pre-discovery fallback is a single `auto` entry; more than one
+        // model proves the ACP handshake catalog arrived.
+        assert!(
+            models.len() > 1,
+            "the installed Copilot CLI reported no handshake catalog"
+        );
         assert!(models.iter().any(|model| model.is_default));
     }
 
