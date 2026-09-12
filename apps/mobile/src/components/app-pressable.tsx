@@ -116,9 +116,13 @@ export function AppPressable({
   };
   // Android already reports the touch through the ripple, so a downstream
   // `pressed ? 0.6 : 1` just dims the label on top of it and reads as a
-  // flicker. iOS and web have no such affordance and keep the fade.
+  // flicker. iOS and web have no such affordance and keep the fade. The
+  // resting state is cast because the environment disagrees on the callback
+  // type: expo's react-native-web augmentation requires `hovered`, stock RN
+  // types reject it.
+  const restingState = { pressed: false } as unknown as PressableStateCallbackType;
   const pressedStyle = Platform.OS === 'android'
-    ? (typeof style === 'function' ? style({ pressed: false, hovered: false }) : style)
+    ? (typeof style === 'function' ? style(restingState) : style)
     : style;
   // Only the resolved Android style needs the host; iOS/web keep the style
   // function so `pressed` opacity keeps working.
