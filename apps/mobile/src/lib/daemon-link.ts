@@ -252,7 +252,11 @@ export class DaemonLink {
   }
 
   private onFailure(cause: unknown): void {
-    const failure = describeConnectionFailure(cause, 'Couldn’t connect to this daemon.');
+    const failure = describeConnectionFailure(
+      cause,
+      'Couldn’t connect to this daemon.',
+      this.client.authority,
+    );
     if (!failure.retryable) {
       this.update({ phase: 'error', error: failure.message, outage: null });
       return;

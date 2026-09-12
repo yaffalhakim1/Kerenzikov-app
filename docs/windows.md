@@ -133,6 +133,20 @@ shim on `PATH`. If the shell finds it but Waku does not, set the binary path in
 **Git-backed features do nothing.** Waku shells out to `git`. Install Git for
 Windows and make sure `git --version` works in a new terminal.
 
+**A phone on the LAN can't reach the daemon.** Three checks, in order:
+desktop and phone on the same Wi-Fi (or tailnet); **Settings → Daemon →
+Expose managed daemon** on, with the address shown there matching what the
+phone saved (toggling exposure off rebinds to loopback and silently bricks
+saved phones); and an inbound firewall rule for `waku-daemon.exe`, which
+Windows blocks by default. In an elevated PowerShell (adjust the port if you
+customized it in Daemon settings):
+
+```powershell
+New-NetFirewallRule -DisplayName "Waku daemon" -Direction Inbound `
+  -Program "$env:LOCALAPPDATA\Programs\Waku\waku-daemon.exe" `
+  -Protocol TCP -LocalPort 34123 -Action Allow
+```
+
 **The update never arrives.** Waku reaches the feed with the `curl.exe` in
 System32; a proxy or filter that blocks `releases.waku.sh` blocks updates too.
 **Check for Updates…** reports the reason, where the once-per-launch check
