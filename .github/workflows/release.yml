@@ -229,6 +229,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history + tags: the notes fallback lists commits since the
+          # previous v* tag.
+          fetch-depth: 0
 
       - uses: oven-sh/setup-bun@v2
 
@@ -250,19 +254,43 @@ jobs:
       - name: Write release notes
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          TAG: ${{ needs.version.outputs.tag }}
         run: |
-          bun -e '
+          notes=$(bun -e '
             import { extractReleaseNotes } from "./scripts/changelog.ts";
             const version = process.env.VERSION;
             const file = Bun.file("CHANGELOG.md");
             const notes = (await file.exists())
               ? extractReleaseNotes(await file.text(), version)
               : null;
-            await Bun.write(
-              "release-notes.md",
-              `${notes ?? "See CHANGELOG.md for details."}\n`,
-            );
-          '
+            process.stdout.write(notes ?? "");
+          ')
+          if [ -n "$notes" ]; then
+            printf '%s\n' "$notes" > release-notes.md
+            exit 0
+          fi
+          # No CHANGELOG section for this version: list the commits since
+          # the previous v* tag, grouped by conventional prefix.
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$TAG~1" 2>/dev/null) || prev=""
+          if [ -z "$prev" ]; then
+            echo "See CHANGELOG.md for details." > release-notes.md
+            exit 0
+          fi
+          {
+            echo "What's changed since $prev:"
+            for group in "feat:Features" "fix:Fixes" "chore:Chores"; do
+              prefix="${group%%:*}"
+              title="${group##*:}"
+              items=$(git log "$prev..$TAG" --pretty=format:'- %s (%h)' --grep="^$prefix" -i)
+              if [ -n "$items" ]; then
+                printf '\n### %s\n%s\n' "$title" "$items"
+              fi
+            done
+            rest=$(git log "$prev..$TAG" --pretty=format:'- %s (%h)' --invert-grep --grep='^(feat|fix|chore)' -i)
+            if [ -n "$rest" ]; then
+              printf '\n### Other\n%s\n' "$rest"
+            fi
+          } > release-notes.md
 
       - uses: softprops/action-gh-release@v3
         with:
