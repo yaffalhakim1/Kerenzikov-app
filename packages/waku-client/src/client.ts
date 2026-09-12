@@ -61,6 +61,10 @@ export type WakuConnectionFailure =
   | "handshake"
   /** The socket failed or closed before the handshake completed. */
   | "unreachable"
+  /** The host actively refused the connection: nothing is listening there. */
+  | "refused"
+  /** The hostname did not resolve. */
+  | "unresolved"
   /** The handshake did not settle within `connectTimeoutMs`. */
   | "timeout"
   /** An established connection closed. */
@@ -79,7 +83,8 @@ export class WakuConnectionError extends Error {
 
   /** True when a later attempt could succeed without anyone changing anything. */
   get retryable(): boolean {
-    return this.kind === "unreachable" || this.kind === "timeout" || this.kind === "closed";
+    return this.kind === "unreachable" || this.kind === "refused" ||
+      this.kind === "unresolved" || this.kind === "timeout" || this.kind === "closed";
   }
 }
 
@@ -159,6 +164,16 @@ export class WakuClient {
   /** The close reason of the last established connection that ended remotely, when the peer gave one. */
   get lastDisconnectReason(): string | null {
     return this.disconnectReason;
+  }
+
+  /** `host:port` of the configured daemon, for user-facing error copy. */
+  get authority(): string {
+    try {
+      const url = new URL(daemonUrl(this.address));
+      return url.port ? `${url.hostname}:${url.port}` : url.hostname;
+    } catch {
+      return this.address;
+    }
   }
 
   /** Connects, or reconnects while replaying events after the last seen sequence. */
@@ -276,7 +291,12 @@ export class WakuClient {
         if (established) this.disconnectReason = reason || null;
         failHandshake(
           new WakuConnectionError(
-            "unreachable",
+            classifyConnectFailure(
+              reason ||
+                (socketErrored
+                  ? "Waku daemon connection failed"
+                  : "Waku daemon disconnected during handshake"),
+            ),
             reason ||
               (socketErrored
                 ? "Waku daemon connection failed"
@@ -490,6 +510,20 @@ function subscriptionKey(sessionId: string, runtimeId: string): string {
 function rejectionError(message: string): WakuConnectionError {
   const kind = /^protocol \d+ is unsupported/.test(message) ? "protocol" : "rejected";
   return new WakuConnectionError(kind, `daemon rejected connection: ${message}`);
+}
+
+/**
+ * Map a native socket close reason to the most specific transport failure.
+ * Reason strings vary per OS and WebSocket implementation, so anything
+ * unrecognized stays `unreachable` and the copy degrades instead of lying.
+ */
+export function classifyConnectFailure(
+  reason: string,
+): "refused" | "timeout" | "unresolved" | "unreachable" {
+  if (/refused|ECONNREFUSED|could not connect to the server/i.test(reason)) return "refused";
+  if (/ENOTFOUND|EAI_\w+|getaddrinfo|unable to resolve|DNS/i.test(reason)) return "unresolved";
+  if (/ETIMEDOUT|timed out|timeout/i.test(reason)) return "timeout";
+  return "unreachable";
 }
 
 function asError(error: unknown): Error {

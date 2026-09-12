@@ -33,7 +33,11 @@ export interface ConnectionFailure {
 /** Turns a failed connect (or a dropped connection) into user-facing copy and
  * a retry decision. Only the client's own failures are retryable: storage
  * faults, missing tokens, and unknown errors need a person. */
-export function describeConnectionFailure(cause: unknown, fallback: string): ConnectionFailure {
+export function describeConnectionFailure(
+  cause: unknown,
+  fallback: string,
+  authority?: string,
+): ConnectionFailure {
   if (cause instanceof WakuConnectionError) {
     switch (cause.kind) {
       case 'rejected':
@@ -54,7 +58,26 @@ export function describeConnectionFailure(cause: unknown, fallback: string): Con
           retryable: false,
         };
       case 'timeout':
-        return { message: 'The daemon didn’t answer in time.', retryable: true };
+        return {
+          message: authority
+            ? `No answer from ${authority}. Check the desktop firewall (Windows blocks waku-daemon inbound by default) and that both devices share a network.`
+            : 'The daemon didn’t answer in time.',
+          retryable: true,
+        };
+      case 'refused':
+        return {
+          message: authority
+            ? `Nothing is listening at ${authority}. Is Waku Desktop running with Daemon exposure on?`
+            : 'The daemon is not listening. Is Waku Desktop running with Daemon exposure on?',
+          retryable: true,
+        };
+      case 'unresolved':
+        return {
+          message: authority
+            ? `Can’t resolve ${authority}. Check the address for typos.`
+            : 'The daemon address doesn’t resolve. Check it for typos.',
+          retryable: true,
+        };
       case 'closed':
         return { message: 'The daemon connection closed.', retryable: true };
       case 'unreachable':

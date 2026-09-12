@@ -36,16 +36,46 @@ describe("reconnectDelayMs", () => {
 
 describe("describeConnectionFailure", () => {
   test("keeps trying through network faults", () => {
-    const refused = describeConnectionFailure(
+    const unreachable = describeConnectionFailure(
       new WakuConnectionError(
         "unreachable",
         "The operation couldn’t be completed. Connection refused",
       ),
       "fallback",
     );
-    expect(refused).toEqual({ message: "Connection refused", retryable: true });
+    expect(unreachable).toEqual({ message: "Connection refused", retryable: true });
     expect(describeConnectionFailure(new WakuConnectionError("timeout", "x"), "f").retryable).toBe(true);
     expect(describeConnectionFailure(new WakuConnectionError("closed", "x"), "f").retryable).toBe(true);
+  });
+
+  test("names the next step per transport failure", () => {
+    const refused = describeConnectionFailure(
+      new WakuConnectionError("refused", "Connection refused"),
+      "fallback",
+      "192.168.100.5:34123",
+    );
+    expect(refused.retryable).toBe(true);
+    expect(refused.message).toContain("192.168.100.5:34123");
+    expect(refused.message).toContain("exposure");
+
+    const timeout = describeConnectionFailure(
+      new WakuConnectionError("timeout", "x"),
+      "fallback",
+      "192.168.100.5:34123",
+    );
+    expect(timeout.message).toContain("firewall");
+
+    const unresolved = describeConnectionFailure(
+      new WakuConnectionError("unresolved", "x"),
+      "fallback",
+      "yaffpc:34123",
+    );
+    expect(unresolved.message).toContain("typos");
+
+    // Without an authority the copy degrades instead of naming a host.
+    expect(
+      describeConnectionFailure(new WakuConnectionError("refused", "x"), "f").message,
+    ).toContain("not listening");
   });
 
   test("stops for failures only the user can fix", () => {

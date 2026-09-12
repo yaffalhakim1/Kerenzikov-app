@@ -4,6 +4,7 @@ import {
   WakuClient,
   WakuConnectionError,
   WakuRpcError,
+  classifyConnectFailure,
   daemonUrl,
   type WebSocketLike,
 } from "./client";
@@ -342,9 +343,39 @@ describe("WakuClient connection failures", () => {
     expect(garbage.kind).toBe("handshake");
 
     const refused = await failure((socket) => socket.fail("Connection refused"));
-    expect(refused.kind).toBe("unreachable");
+    expect(refused.kind).toBe("refused");
     expect(refused.retryable).toBe(true);
     expect(refused.message).toBe("Connection refused");
+  });
+
+  test("classifies native transport failures so copy can name the next step", async () => {
+    const iosRefused = await failure((socket) =>
+      socket.fail("The operation couldn’t be completed. Could not connect to the server."),
+    );
+    expect(iosRefused.kind).toBe("refused");
+
+    const dns = await failure((socket) => socket.fail("Unable to resolve host \"yaffpc\": No address associated with hostname"));
+    expect(dns.kind).toBe("unresolved");
+    expect(dns.retryable).toBe(true);
+
+    const nativeTimeout = await failure((socket) => socket.fail("connect ETIMEDOUT 192.168.100.5:34123"));
+    expect(nativeTimeout.kind).toBe("timeout");
+
+    const unknown = await failure((socket) => socket.fail("failed to connect to /192.168.100.5:34123"));
+    expect(unknown.kind).toBe("unreachable");
+    expect(unknown.retryable).toBe(true);
+  });
+
+  test("classifyConnectFailure degrades to unreachable on unknown reasons", () => {
+    expect(classifyConnectFailure("")).toBe("unreachable");
+    expect(classifyConnectFailure("Waku daemon connection failed")).toBe("unreachable");
+    expect(classifyConnectFailure("ECONNREFUSED")).toBe("refused");
+    expect(classifyConnectFailure("getaddrinfo EAI_AGAIN yaffpc")).toBe("unresolved");
+  });
+
+  test("authority names the daemon for error copy", () => {
+    const { client } = fixture();
+    expect(client.authority).toBe("127.0.0.1:4312");
   });
 
   test("times out a handshake the daemon never answers", async () => {

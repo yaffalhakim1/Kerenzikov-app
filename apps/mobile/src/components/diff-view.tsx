@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 
 import { MonoFont, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -46,7 +47,11 @@ export function DiffView({
   }
   return (
     <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <GestureScrollView
+        horizontal
+        nestedScrollEnabled
+        persistentScrollbar
+        showsHorizontalScrollIndicator>
         <View style={styles.lines}>
           {lines.map((line, index) => (
             <DiffRow key={index} line={line} />
@@ -57,7 +62,7 @@ export function DiffView({
             </Text>
           )}
         </View>
-      </ScrollView>
+      </GestureScrollView>
     </View>
   );
 }

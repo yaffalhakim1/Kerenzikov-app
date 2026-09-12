@@ -138,7 +138,9 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
                 onSearchFocus={setSearchFocused}
               />
             )}
-            swipeEdgeWidth={width}
+            // Narrow edge so wide code/tables can pan horizontally without
+            // opening the drawer; the button still opens it anywhere.
+            swipeEdgeWidth={32}
             swipeEnabled={swipeEnabled}
             onClose={closeTaskDrawer}
             onOpen={openTaskDrawer}>
