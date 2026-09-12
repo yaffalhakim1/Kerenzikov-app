@@ -356,7 +356,8 @@ function renderCode(
       <GestureScrollView
         horizontal
         nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}>
+        persistentScrollbar
+        showsHorizontalScrollIndicator>
         <View style={[styles.codeContent, scrollContentStyle]}>
           {lines.map((line, index) => {
             const pieces = renderLeaf(line, ictx);
@@ -433,7 +434,8 @@ function renderTable(
       <GestureScrollView
         horizontal
         nestedScrollEnabled
-        showsHorizontalScrollIndicator={false}>
+        persistentScrollbar
+        showsHorizontalScrollIndicator>
         <View style={scrollContentStyle}>
           {head && renderRow(head, 'head', true)}
           {rows.map((row, index) => renderRow(row, index, false))}
