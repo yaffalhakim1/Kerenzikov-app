@@ -2,7 +2,7 @@
   "expo": {
     "name": "Waku",
     "slug": "waku-mobile",
-    "version": "1.0.0",
+    "version": "0.1.20",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "waku",
