@@ -11,6 +11,7 @@ pub mod computer_use;
 pub mod driver;
 pub mod persistence;
 mod process;
+pub mod project_memory;
 mod workspace_client;
 
 pub use client::DaemonClient;

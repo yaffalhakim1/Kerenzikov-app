@@ -1102,6 +1102,22 @@ commands.goal_description:
   en: Set a goal this task keeps pursuing
 commands.resume_description:
   en: Resume a terminal agent session
+commands.remember_description:
+  en: Remember a project fact
+commands.forget_description:
+  en: Forget matching project facts
+commands.memory_remembered:
+  en: Project fact remembered
+commands.memory_remember_failed:
+  en: Could not remember that fact
+commands.memory_forgotten:
+  en: Forgot %{count} project fact(s)
+commands.memory_found_nothing:
+  en: No matching project fact
+commands.memory_usage:
+  en: "Usage: /remember <fact> or /forget <text>"
+commands.memory_no_project:
+  en: Project memory needs a project task
 
 goal.title:
   en: Goal
@@ -1450,6 +1466,12 @@ session.rewound:
   en: Rewound to before turn %{turn}
 session.rewound_with_stale_refs:
   en: "Rewound to before turn %{turn}; stale refs remain: %{error}"
+session.undo_turn:
+  en: Undo this turn
+session.turn_undone:
+  en: Undid turn %{turn}
+session.turn_undone_with_stale_refs:
+  en: "Undid turn %{turn}; stale refs remain: %{error}"
 
 right_panel.browser:
   en: Browser

@@ -117,6 +117,12 @@ pub enum WorkspaceOperation {
         include_unstaged: bool,
         invocation: AgentInvocation,
     },
+    ExtractMemoryFacts {
+        #[ts(type = "string")]
+        project_path: PathBuf,
+        excerpt: String,
+        invocation: AgentInvocation,
+    },
     Commit {
         #[ts(type = "string")]
         cwd: PathBuf,
@@ -236,6 +242,9 @@ pub enum WorkspaceResult {
     },
     CommitMessage {
         message: String,
+    },
+    MemoryFacts {
+        saved: usize,
     },
     Checkpoint {
         checkpoint: Checkpoint,

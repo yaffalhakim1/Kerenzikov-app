@@ -317,7 +317,32 @@ pub(super) fn render_message_footer(
     }
 
     if let Some(action) = user_message_action {
-        let edit_waku = waku;
+        let edit_waku = waku.clone();
+        let undo_waku = waku.clone();
+        let undo_action = action;
+        // Standalone turn undo next to edit-and-resubmit: same rewind gate,
+        // files and provider roll back, transcript ends, nothing resubmits.
+        footer = footer.child(
+            div()
+                .id(SharedString::from(format!(
+                    "user-message-undo-{message_id}"
+                )))
+                .w(px(27.0))
+                .h(px(27.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_default()
+                .hover(|element| element.bg(theme.overlay_strong))
+                .child(icon("icons/rotate-cw.svg", 14.0, footer_color))
+                .tooltip(Tooltip::text(tr_cow!("session.undo_turn")))
+                .on_click(move |_, _, cx| {
+                    let _ = undo_waku.update(cx, |this, cx| {
+                        this.start_turn_undo(undo_action, cx);
+                    });
+                }),
+        );
         footer = footer.child(
             div()
                 .id(SharedString::from(format!(

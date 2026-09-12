@@ -533,6 +533,14 @@ commands.fast_enabled: 已启用快速模式
 commands.fast_disabled: 已关闭快速模式
 commands.goal_description: 为此任务设定一个持续追求的目标
 commands.resume_description: 恢复终端智能体会话
+commands.remember_description: 记住一条项目记忆
+commands.forget_description: 删除匹配的项目记忆
+commands.memory_remembered: 已记住项目记忆
+commands.memory_remember_failed: 无法记住该条记忆
+commands.memory_forgotten: 已删除 %{count} 条项目记忆
+commands.memory_found_nothing: 没有匹配的项目记忆
+commands.memory_usage: 用法：/remember <记忆> 或 /forget <关键词>
+commands.memory_no_project: 项目记忆需要一个项目任务
 goal.title: 目标
 goal.objective_placeholder: 这个任务应该持续朝什么方向努力？
 goal.set: 设定目标
@@ -703,6 +711,9 @@ session.pre_turn_checkpoint_missing: 缺少该消息发送前的 Git 检查点
 session.rewind_title: "%{title}（回退）"
 session.rewound: 已回退到第 %{turn} 轮任务之前
 session.rewound_with_stale_refs: "已回退到第 %{turn} 轮任务之前，但仍有过期引用：%{error}"
+session.undo_turn: 撤销这一轮
+session.turn_undone: 已撤销第 %{turn} 轮
+session.turn_undone_with_stale_refs: "已撤销第 %{turn} 轮，但仍有过期引用：%{error}"
 right_panel.browser: 浏览器
 right_panel.terminal: 终端
 right_panel.files: 文件

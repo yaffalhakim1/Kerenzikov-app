@@ -28,6 +28,9 @@ trash = "5.2.6"
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 url = "2"
 uuid = { version = "1.18", features = ["v4", "serde"] }
+# Shared client-side helpers (project memory storage). waku-client never
+# depends back on waku-core, so this introduces no cycle.
+waku-client = { path = "../waku-client" }
 waku-protocol = { path = "../waku-protocol" }
 
 [target.'cfg(unix)'.dependencies]
@@ -42,4 +45,3 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-waku-client = { path = "../waku-client" }

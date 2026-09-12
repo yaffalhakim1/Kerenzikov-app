@@ -2115,6 +2115,7 @@ impl Waku {
     ) -> bool {
         self.execute_resume_composer_command(prompt, cx)
             || self.execute_fast_mode_toggle(prompt, cx)
+            || self.execute_memory_composer_command(prompt, cx)
             || self.execute_goal_composer_command(prompt, cx)
     }
 
@@ -2195,6 +2196,55 @@ impl Waku {
                     );
                 }
             },
+        }
+        self.composer.update(cx, |input, cx| input.clear(cx));
+        cx.notify();
+        true
+    }
+
+    fn execute_memory_composer_command(&mut self, prompt: &str, cx: &mut Context<Self>) -> bool {
+        use waku_client::composer_complete::MemoryCommand;
+
+        let Some(command) = waku_client::composer_complete::parse_memory_command(prompt) else {
+            return false;
+        };
+        let Some(workspace) = self
+            .selected_session()
+            .and_then(|session| self.workspace_path_for_session(session))
+            .map(std::path::Path::to_path_buf)
+        else {
+            self.show_toast(tr!("commands.memory_no_project"));
+            cx.notify();
+            return true;
+        };
+        match command {
+            MemoryCommand::Remember(argument) => {
+                let argument = argument.trim();
+                if argument.is_empty() {
+                    self.show_toast(tr!("commands.memory_usage"));
+                    cx.notify();
+                    return true;
+                }
+                match waku_client::project_memory::remember(&workspace, argument) {
+                    Ok(_) => self.show_success_toast(tr!("commands.memory_remembered")),
+                    Err(_) => self.show_toast(tr!("commands.memory_remember_failed")),
+                }
+            }
+            MemoryCommand::Forget(argument) => {
+                let argument = argument.trim();
+                if argument.is_empty() {
+                    self.show_toast(tr!("commands.memory_usage"));
+                    cx.notify();
+                    return true;
+                }
+                match waku_client::project_memory::forget(&workspace, argument) {
+                    Ok(removed) if removed > 0 => self.show_success_toast(tr!(
+                        "commands.memory_forgotten",
+                        count = removed
+                    )),
+                    _ => self.show_toast(tr!("commands.memory_found_nothing")),
+                }
+            }
         }
         self.composer.update(cx, |input, cx| input.clear(cx));
         cx.notify();

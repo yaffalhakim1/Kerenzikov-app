@@ -85,8 +85,7 @@ pub fn generate_message(
     cwd: &Path,
     include_unstaged: bool,
     invocation: &AgentInvocation,
-) -> anyhow::Result<String> {
-    let prompt = commit_prompt(cwd, include_unstaged)?;
+) -> anyhow::Result<String> {    let prompt = commit_prompt(cwd, include_unstaged)?;
     let amp_settings = if invocation.provider == ProviderKind::Amp {
         let path = std::env::temp_dir().join(format!("waku-amp-commit-{}.json", Uuid::new_v4()));
         fs::write(
@@ -134,6 +133,85 @@ pub fn generate_message(
             invocation.provider.display_name()
         )
     })
+}
+
+/// Extract durable project facts from a finished turn's excerpt and append
+/// them to the project's memory. Returns how many facts were saved.
+/// Best-effort by design: an extraction failure saves nothing and reports
+/// zero rather than erroring, so a flaky probe can never break turn settling.
+///
+/// Like commit subjects, extraction is a fixed classification over text that
+/// is already in the prompt, so the two providers with a named cheap tier
+/// run pinned; every other provider reuses the session's own selection.
+pub fn extract_and_remember(
+    project: &Path,
+    excerpt: &str,
+    invocation: &AgentInvocation,
+) -> usize {
+    let excerpt = excerpt.trim();
+    if excerpt.is_empty() {
+        return 0;
+    }
+    let (model, reasoning_effort) = match invocation.provider {
+        ProviderKind::Claude => (
+            Some(CLAUDE_COMMIT_MODEL.to_owned()),
+            Some(CLAUDE_COMMIT_EFFORT.to_owned()),
+        ),
+        ProviderKind::Codex => (
+            Some(CODEX_COMMIT_MODEL.to_owned()),
+            Some(CODEX_COMMIT_EFFORT.to_owned()),
+        ),
+        _ => (
+            invocation.model.clone(),
+            invocation.reasoning_effort.clone(),
+        ),
+    };
+    let prompt = waku_client::project_memory::extraction_prompt(excerpt);
+    // Amp has no flag that disables tools; reuse generate_message's throwaway
+    // settings file so extraction cannot act on the workspace.
+    let amp_settings = if invocation.provider == ProviderKind::Amp {
+        let path = std::env::temp_dir().join(format!("waku-amp-memory-{}.json", Uuid::new_v4()));
+        if fs::write(
+            &path,
+            r#"{"amp.tools.enable":[],"amp.notifications.enabled":false,"amp.skills.disableClaudeCodeSkills":true}"#,
+        )
+        .is_err()
+        {
+            return 0;
+        }
+        Some(path)
+    } else {
+        None
+    };
+    let args = agent_arguments(
+        invocation.provider,
+        model.as_deref(),
+        reasoning_effort.as_deref(),
+        &prompt,
+        amp_settings.as_deref(),
+    );
+    let mut command = crate::command_env::command(&invocation.binary);
+    command
+        .args(args)
+        .current_dir(project)
+        .env("NO_COLOR", "1")
+        .env("CI", "1");
+    let output = run_capture(&mut command, AGENT_TIMEOUT);
+    if let Some(path) = amp_settings {
+        let _ = fs::remove_file(path);
+    }
+    let Ok(output) = output else {
+        return 0;
+    };
+    if !output.status.success() {
+        return 0;
+    }
+    waku_client::project_memory::parse_extracted(&String::from_utf8_lossy(&output.stdout))
+        .into_iter()
+        .filter(|(title, body)| {
+            waku_client::project_memory::remember(project, &format!("{title}: {body}")).is_ok()
+        })
+        .count()
 }
 
 pub fn commit(cwd: &Path, message: &str, include_unstaged: bool) -> anyhow::Result<()> {

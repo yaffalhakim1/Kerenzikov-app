@@ -126,6 +126,13 @@ pub fn execute(operation: WorkspaceOperation) -> anyhow::Result<WorkspaceResult>
         } => WorkspaceResult::CommitMessage {
             message: crate::git_commit::generate_message(&cwd, include_unstaged, &invocation)?,
         },
+        WorkspaceOperation::ExtractMemoryFacts {
+            project_path,
+            excerpt,
+            invocation,
+        } => WorkspaceResult::MemoryFacts {
+            saved: crate::git_commit::extract_and_remember(&project_path, &excerpt, &invocation),
+        },
         WorkspaceOperation::Commit {
             cwd,
             message,
