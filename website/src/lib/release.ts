@@ -1,60 +1,64 @@
 import { queryOptions } from '@tanstack/react-query'
-import { createServerFn } from '@tanstack/react-start'
 
 export interface LatestRelease {
   version: string
-  url: string
-  pubDate: string | null
+  /** Direct download URLs; null until the GitHub API answers. */
+  assets: {
+    x64: string
+    arm64: string
+    portableX64: string
+  } | null
 }
 
-const RELEASES_BASE = 'https://releases.waku.sh'
+const OWNER = 'yaffalhakim1'
+const REPO = 'waku'
 
-// Versioned artifact names are a stable contract and old archives stay in R2
-// (see RELEASING.md), so a known-published version is a safe fallback while
-// the appcast query is pending or unreachable.
-export const FALLBACK_DOWNLOAD_URL = `${RELEASES_BASE}/Waku-0.0.1.dmg`
+export const RELEASES_URL = `https://github.com/${OWNER}/${REPO}/releases/latest`
 
-export const WINDOWS_ARCHITECTURES = [
-  { arch: 'x86_64', label: 'Windows (x86_64)' },
-  { arch: 'aarch64', label: 'Windows (arm64)' },
-] as const
-
-// Every release publishes both installers under versioned names — see
-// docs/windows.md. There is no unversioned "latest" object to link at, so a
-// direct link needs the resolved version; without one the menu falls back to
-// the docs page rather than guessing a URL that would 404.
-export function windowsInstallerUrl(version: string, arch: string) {
-  return `${RELEASES_BASE}/Waku-${version}-${arch}-Setup.exe`
+// ponytail: client-side GitHub API, no server fn — GH Pages serves static files only.
+interface GhAsset {
+  name: string
+  browser_download_url: string
 }
 
-// The Sparkle appcast has no CORS headers, so resolve it on the server.
-const fetchLatestRelease = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<LatestRelease | null> => {
-    try {
-      const res = await fetch(`${RELEASES_BASE}/appcast.xml`, {
-        signal: AbortSignal.timeout(2500),
-      })
-      if (!res.ok) return null
-      const xml = await res.text()
-      // generate_appcast writes the newest release first.
-      const version =
-        xml.match(/sparkle:shortVersionString="([^"]+)"/)?.[1] ??
-        xml.match(/<sparkle:shortVersionString>([^<]+)</)?.[1]
-      if (!version) return null
-      const pubDate = xml.match(/<pubDate>([^<]+)<\/pubDate>/)?.[1] ?? null
-      return {
-        version,
-        url: `${RELEASES_BASE}/Waku-${version}.dmg`,
-        pubDate,
-      }
-    } catch {
-      return null
+interface GhRelease {
+  tag_name?: string
+  assets?: GhAsset[]
+}
+
+async function fetchLatestRelease(): Promise<LatestRelease | null> {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`,
+      { signal: AbortSignal.timeout(5000) },
+    )
+    if (!res.ok) return null
+    const json = (await res.json()) as GhRelease
+    const version = (json.tag_name ?? '').replace(/^v/, '')
+    if (!version) return null
+    const byName = new Map(
+      (json.assets ?? []).map((a) => [a.name, a.browser_download_url] as const),
+    )
+    const pick = (...names: string[]): string =>
+      names.map((n) => byName.get(n)).find((u): u is string => !!u) ??
+      RELEASES_URL
+    return {
+      version,
+      assets: {
+        x64: pick(`Waku-${version}-x86_64-Setup.exe`),
+        arm64: pick(`Waku-${version}-aarch64-Setup.exe`),
+        portableX64: pick(`waku-${version}-x86_64-pc-windows-msvc.zip`),
+      },
     }
-  },
-)
+  } catch {
+    return null
+  }
+}
 
 export const releaseQuery = queryOptions({
   queryKey: ['latest-release'],
-  queryFn: () => fetchLatestRelease(),
+  queryFn: fetchLatestRelease,
   staleTime: 5 * 60_000,
+  retry: 1,
+  refetchOnWindowFocus: false,
 })
