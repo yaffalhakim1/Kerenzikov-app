@@ -24,10 +24,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
-  FALLBACK_DOWNLOAD_URL,
-  WINDOWS_ARCHITECTURES,
+  RELEASES_URL,
   releaseQuery,
-  windowsInstallerUrl,
 } from '@/lib/release'
 import type { ReactNode } from 'react'
 
@@ -40,14 +38,16 @@ export const Route = createFileRoute('/')({
 })
 
 const WINDOWS_DOCS_URL =
-  'https://github.com/egoist/waku/blob/main/docs/windows.md'
+  'https://github.com/yaffalhakim1/waku/blob/main/docs/windows.md'
+
+const GITHUB_URL = 'https://github.com/yaffalhakim1/waku'
 
 const PROVIDERS = [
+  { slug: 'opencode', label: 'OpenCode' },
   { slug: 'amp', label: 'Amp' },
   { slug: 'claude', label: 'Claude Code' },
   { slug: 'openai', label: 'Codex' },
   { slug: 'cursor', label: 'Cursor' },
-  { slug: 'opencode', label: 'OpenCode' },
   { slug: 'grok', label: 'Grok' },
   { slug: 'pi', label: 'Pi' },
   { slug: 'kimi', label: 'Kimi' },
@@ -81,8 +81,8 @@ const FEATURES = [
   },
   {
     icon: RefreshCw,
-    title: 'Quietly current',
-    body: 'Signed, notarized, and auto-updated with binary deltas via Sparkle. The app stays fresh without asking for your attention.',
+    title: 'Manual updates, no surprises',
+    body: 'No auto-updater and no update feed. Grab a new release from the releases page when you want one — nothing ever swaps your binary behind your back.',
   },
 ]
 
@@ -101,7 +101,11 @@ const FAQ = [
   },
   {
     q: 'What is the future plan?',
-    a: 'A mobile app for remote control, and cloud agents are planned',
+    a: 'Windows-first with OpenCode as the best-supported provider, plus an Android companion that is already building as an APK. macOS and iOS builds are not maintained here.',
+  },
+  {
+    q: 'Is this the same Waku from waku.sh?',
+    a: 'This is a fork of egoist/waku, tuned for Windows and OpenCode. If you are on macOS or Linux, use the upstream releases instead.',
   },
 ]
 
@@ -114,15 +118,15 @@ function SectionLabel({ children }: { children: ReactNode }) {
 }
 
 function DownloadMenu({
-  downloadUrl,
-  version,
+  primaryUrl,
+  assets,
   size,
   align,
   className,
   showIcon = false,
 }: {
-  downloadUrl: string
-  version?: string
+  primaryUrl: string
+  assets: { x64: string; arm64: string; portableX64: string } | null
   size: 'sm' | 'lg'
   align: 'start' | 'end'
   className?: string
@@ -135,7 +139,7 @@ function DownloadMenu({
     <Menu.Root>
       <Menu.Trigger render={<Button size={size} className={className} />}>
         {showIcon && <Download data-icon="inline-start" />}
-        Download
+        Download for Windows
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner
@@ -146,35 +150,42 @@ function DownloadMenu({
         >
           <Menu.Popup className="min-w-52 origin-(--transform-origin) rounded-lg border bg-popover p-1 text-popover-foreground shadow-md outline-none data-[side=bottom]:slide-in-from-top-1 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
             <Menu.LinkItem
-              href={downloadUrl}
+              href={primaryUrl}
               closeOnClick
               className={itemClassName}
             >
-              macOS (Apple Silicon)
+              Windows (x86_64 installer)
             </Menu.LinkItem>
             <Menu.LinkItem
-              href="https://github.com/egoist/waku/blob/main/docs/linux.md"
+              href={assets?.arm64 ?? RELEASES_URL}
+              closeOnClick
+              className={itemClassName}
+            >
+              Windows (arm64 installer)
+            </Menu.LinkItem>
+            <Menu.LinkItem
+              href={assets?.portableX64 ?? RELEASES_URL}
+              closeOnClick
+              className={itemClassName}
+            >
+              Portable (.zip)
+            </Menu.LinkItem>
+            <Menu.LinkItem
+              href={RELEASES_URL}
+              closeOnClick
+              className={itemClassName}
+            >
+              All releases
+            </Menu.LinkItem>
+            <Menu.LinkItem
+              href={WINDOWS_DOCS_URL}
               target="_blank"
               rel="noreferrer"
               closeOnClick
               className={itemClassName}
             >
-              Linux (x86_64, arm64)
+              Requirements & docs
             </Menu.LinkItem>
-            {WINDOWS_ARCHITECTURES.map(({ arch, label }) => (
-              <Menu.LinkItem
-                key={arch}
-                href={
-                  version
-                    ? windowsInstallerUrl(version, arch)
-                    : WINDOWS_DOCS_URL
-                }
-                closeOnClick
-                className={itemClassName}
-              >
-                {label}
-              </Menu.LinkItem>
-            ))}
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>
@@ -184,7 +195,7 @@ function DownloadMenu({
 
 function Home() {
   const { data: release } = useQuery(releaseQuery)
-  const downloadUrl = release?.url ?? FALLBACK_DOWNLOAD_URL
+  const primaryUrl = release?.assets?.x64 ?? RELEASES_URL
 
   return (
     <TooltipProvider>
@@ -192,9 +203,9 @@ function Home() {
         <div className="mx-auto w-full max-w-[1100px] border-border/70 md:border-x">
           {/* Header */}
           <header className="flex h-16 items-center justify-between px-5 md:px-10">
-            <a href="/" className="flex items-center gap-2.5">
+            <a href={import.meta.env.BASE_URL} className="flex items-center gap-2.5">
               <img
-                src="/app-icon.png"
+                src={`${import.meta.env.BASE_URL}app-icon.png`}
                 alt=""
                 className="size-8 rounded-[6px]"
               />
@@ -204,7 +215,7 @@ function Home() {
             </a>
             <div className="flex items-center gap-5">
               <a
-                href="https://github.com/egoist/waku"
+                href={GITHUB_URL}
                 target="_blank"
                 rel="noreferrer"
                 aria-label="GitHub"
@@ -222,8 +233,8 @@ function Home() {
                 </svg>
               </a>
               <DownloadMenu
-                downloadUrl={downloadUrl}
-                version={release?.version}
+                primaryUrl={primaryUrl}
+                assets={release?.assets ?? null}
                 size="sm"
                 align="end"
               />
@@ -249,8 +260,8 @@ function Home() {
               </p>
               <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3">
                 <DownloadMenu
-                  downloadUrl={downloadUrl}
-                  version={release?.version}
+                  primaryUrl={primaryUrl}
+                  assets={release?.assets ?? null}
                   size="lg"
                   className="h-10 px-4"
                   align="start"
@@ -281,8 +292,8 @@ function Home() {
                         <span
                           className="provider-mark size-[22px]"
                           style={{
-                            maskImage: `url(/providers/${p.slug}.svg)`,
-                            WebkitMaskImage: `url(/providers/${p.slug}.svg)`,
+                            maskImage: `url(${import.meta.env.BASE_URL}providers/${p.slug}.svg)`,
+                            WebkitMaskImage: `url(${import.meta.env.BASE_URL}providers/${p.slug}.svg)`,
                           }}
                         />
                       </TooltipTrigger>
@@ -298,10 +309,10 @@ function Home() {
               <picture>
                 <source
                   media="(prefers-color-scheme: dark)"
-                  srcSet="/app-screenshot-dark.png"
+                  srcSet={`${import.meta.env.BASE_URL}app-screenshot-dark.png`}
                 />
                 <img
-                  src="/app-screenshot-light.png"
+                  src={`${import.meta.env.BASE_URL}app-screenshot-light.png`}
                   alt="Waku showing a coding-agent session"
                   width={2266}
                   height={1752}
@@ -338,8 +349,8 @@ function Home() {
               </h2>
               <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
                 <DownloadMenu
-                  downloadUrl={downloadUrl}
-                  version={release?.version}
+                  primaryUrl={primaryUrl}
+                  assets={release?.assets ?? null}
                   size="lg"
                   className="h-10 px-4"
                   align="start"
@@ -372,13 +383,30 @@ function Home() {
           </main>
 
           {/* Footer */}
-          <footer className="flex items-center gap-2 border-t px-5 py-10 text-xs text-muted-foreground md:px-10">
+          <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-5 py-10 text-xs text-muted-foreground md:px-10">
             <img
-              src="/app-icon.png"
+              src={`${import.meta.env.BASE_URL}app-icon.png`}
               alt=""
               className="size-4 rounded-[4px] opacity-80 grayscale"
             />
-            <span>© 2026 Waku</span>
+            <span>© 2026 Waku — a fork by</span>
+            <a
+              href="https://yafialhakim.netlify.app"
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Yafi Alhakim
+            </a>
+            <span aria-hidden="true">·</span>
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              Source
+            </a>
           </footer>
         </div>
       </div>

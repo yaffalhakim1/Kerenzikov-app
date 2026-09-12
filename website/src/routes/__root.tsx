@@ -9,10 +9,10 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import appCss from '@/styles.css?url'
 
-const SITE_URL = 'https://waku.sh'
-const TITLE = 'Waku — one native app for all your coding agents'
+const SITE_URL = 'https://yaffalhakim1.github.io/waku'
+const TITLE = 'Waku — one native Windows app for your coding agents'
 const DESCRIPTION =
-  'A fast, native app for local coding agents. Amp, Claude Code, Codex, Cursor, OpenCode, Grok, and Pi — one timeline, entirely on your machine.'
+  'A fast, native Windows app for local coding agents. OpenCode first, plus Amp, Claude Code, Codex, Cursor, Grok, and Pi — one timeline, entirely on your machine.'
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
@@ -42,24 +42,14 @@ export const Route = createRootRouteWithContext<{
     ],
     links: [
       { rel: 'stylesheet', href: appCss },
-      { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon.png' },
-      { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
+      { rel: 'icon', type: 'image/png', sizes: '32x32', href: `${SITE_URL}/favicon.png` },
+      { rel: 'apple-touch-icon', sizes: '180x180', href: `${SITE_URL}/apple-touch-icon.png` },
     ],
     scripts: [
       {
         // Mirror the system color scheme onto <html> before first paint.
         children: `try{var m=matchMedia('(prefers-color-scheme: dark)'),d=document.documentElement,s=function(){d.classList.toggle('dark',m.matches)};s();m.addEventListener('change',s)}catch(e){}`,
       },
-      // Analytics, production builds only.
-      ...(import.meta.env.PROD
-        ? [
-            {
-              defer: true,
-              src: 'https://u.egoist.dev/script.js',
-              'data-website-id': '5dc2da71-cd6e-4862-8d60-e1cfb782f54f',
-            },
-          ]
-        : []),
     ],
   }),
   component: RootComponent,
