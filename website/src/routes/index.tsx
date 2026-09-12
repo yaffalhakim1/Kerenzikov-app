@@ -399,6 +399,18 @@ function Home() {
               Yafi Alhakim
             </a>
             <span aria-hidden="true">·</span>
+            <span>
+              original by{' '}
+              <a
+                href="https://github.com/egoist/waku"
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                egoist
+              </a>
+            </span>
+            <span aria-hidden="true">·</span>
             <a
               href={GITHUB_URL}
               target="_blank"
