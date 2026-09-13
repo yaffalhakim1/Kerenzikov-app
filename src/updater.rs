@@ -1046,6 +1046,12 @@ mod windows {
             if cfg!(debug_assertions) && !forced {
                 return None;
             }
+            // No feed means no updater, not an updater that fails on every
+            // check. Constructing one anyway would leave "Check for
+            // Updates…" in the app menu and "Automatic updates" in Settings
+            // as controls that can only report "this build ships no update
+            // feed" — the Linux updater already bails here, so mirror it.
+            FEED_URL?;
             if verifying_key().is_none() {
                 eprintln!("Kerenzikov updater: SUPublicEDKey is not a valid ed25519 key");
                 return None;

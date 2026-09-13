@@ -138,10 +138,11 @@ sibling `kerenzikov` checkout; point it elsewhere with
 ## Releasing
 
 Releases are cut from GitHub Actions on a `v*` tag, or manually from the
-**Actions** tab. The desktop workflow builds Windows only; a separate
-**Android release** workflow assembles the APK and attaches it; there is no
-update feed or artifact upload to any bucket. See [RELEASING.md](RELEASING.md)
-for what is still upstream's and what this fork replaced.
+**Actions** tab. One workflow builds the Windows installers and portable zips,
+assembles the Android APK, and opens a draft GitHub release with all of them;
+there is no update feed or artifact upload to any bucket. See
+[RELEASING.md](RELEASING.md) for what is still upstream's and what this fork
+replaced.
 
 ## Upstream
 
@@ -181,10 +182,16 @@ Modifications to the original work (GPLv3 §5a):
   an ACP replay that fails on real sessions.
 - **2026-09-11** — `6c744e5` Ship no update feed. The updater pointed at
   upstream's `releases.waku.sh` and could replace an install with an upstream
-  binary. The updater no longer initializes.
+  binary. `FEED_URL` is now `None` on every platform, so `Updater::init`
+  returns `None` and the app shows no update UI.
 - **2026-09-11** — Release automation reduced to what this fork ships:
-  `.github/workflows/release.yml` builds Windows only, `release-android.yml`
-  builds the APK, and `sync-release.yml` (the R2 upload) is removed.
+  `.github/workflows/release.yml` builds the Windows installers and the Android
+  APK into one draft release, and `sync-release.yml` (the R2 upload) is
+  disabled.
+- **2026-09-13** — Rebrand to Kerenzikov in every user-visible string (window
+  title, menus, locales, installers, release artifact names) while leaving the
+  data layer, the `waku_*`/`WAKU_*` identifiers, and the `sh.waku` bundle ids
+  as they were, so existing installs keep their tasks and settings.
 
 Bundled fonts under `assets/fonts/` are third-party and stay under their own
 license ([MIT](assets/fonts/LICENSE-nerd-fonts.txt)).

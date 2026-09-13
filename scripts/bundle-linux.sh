@@ -21,8 +21,8 @@ package_dir="$staging/$package"
 install -Dm755 "$target_dir/release/waku" "$package_dir/bin/waku"
 install -Dm755 "$target_dir/release/waku-updater" "$package_dir/bin/waku-updater"
 install -Dm755 "$target_dir/release/waku-daemon" "$package_dir/bin/waku-daemon"
-install -Dm644 resources/linux/sh.kerenzikov.desktop \
-  "$package_dir/share/applications/sh.kerenzikov.desktop"
+install -Dm644 resources/linux/sh.waku.desktop \
+  "$package_dir/share/applications/sh.waku.desktop"
 install -Dm644 resources/linux/self-update-v1 \
   "$package_dir/share/waku/self-update-v1"
 install -Dm644 assets/brand/logo-1024.png \
