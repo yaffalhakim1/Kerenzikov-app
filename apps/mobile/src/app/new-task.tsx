@@ -24,6 +24,7 @@ import { AppPressable } from '@/components/app-pressable';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { AttachmentChip } from '@/components/attachment-chip';
+import { AgentPresetMenu } from '@/components/agent-preset-menu';
 import { ComposerAccessMenu } from '@/components/composer-access-menu';
 import {
   ComposerAttachmentMenu,
@@ -49,6 +50,7 @@ import {
   useAllProviderModels,
   useComposerCommands,
   useProviderCatalog,
+  useProviderModels,
   useTaskState,
 } from '@/hooks/use-daemon-data';
 import { resolvedComposerSubmission } from '@/lib/composer-commands';
@@ -94,6 +96,7 @@ export default function NewTaskScreen() {
   const catalog = useProviderCatalog();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [provider, setProvider] = useState<ProviderKind | null>(null);
+  const [agentPreset, setAgentPreset] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [serviceTier, setServiceTier] = useState<string | null>(null);
@@ -147,6 +150,7 @@ export default function NewTaskScreen() {
     const preferred = installedProviders.includes('codex') ? 'codex' : installedProviders[0];
     if (preferred) {
       setProvider(preferred);
+      setAgentPreset(null);
       setModel(null);
       setReasoningEffort(null);
       setServiceTier(null);
@@ -351,6 +355,7 @@ export default function NewTaskScreen() {
     const remembered = preferences && selection.model
       ? rememberedModelTraits(preferences, selection.provider, selection.model)
       : undefined;
+    if (selection.provider !== provider) setAgentPreset(null);
     setProvider(selection.provider);
     setModel(selection.model);
     setReasoningEffort(remembered ? remembered.reasoningEffort : selection.reasoningEffort);
@@ -392,6 +397,7 @@ export default function NewTaskScreen() {
           contextWindow,
           runtimeMode,
           baseBranch,
+          agentPreset,
         },
         submittedAttachments,
       );
@@ -434,6 +440,12 @@ export default function NewTaskScreen() {
 
   const providerModels = modelCatalog.find((entry) => entry.id === provider)?.models ?? [];
   const disconnected = daemon.phase !== 'connected';
+  // Mirrors desktop AgentSession::can_choose_agent_preset: presets are offered
+  // by DeepSeek | OpenCode | OpenCode2.
+  const supportsAgentPreset =
+    provider === 'deepSeek' || provider === 'openCode' || provider === 'openCode2';
+  const agentPresetProbe = useProviderModels(supportsAgentPreset ? provider : null);
+  const agentPresets = agentPresetProbe.data?.agent_presets ?? [];
   const activeModel = model
     ? providerModels.find((item) => item.id === model)
     : providerModels.find((item) => item.is_default) ?? providerModels[0];
@@ -575,6 +587,16 @@ export default function NewTaskScreen() {
           placeholder={`Work on ${daemon.activeProfile?.name ?? 'your daemon'}`}
           right={(
             <>
+              {supportsAgentPreset && agentPresets.length > 0 && !submitting && (
+                <AgentPresetMenu
+                  agentPreset={agentPreset}
+                  onApply={(selection) => {
+                    void Haptics.selectionAsync();
+                    setAgentPreset(selection.agentPreset);
+                  }}
+                  provider={provider}
+                />
+              )}
               {activeModel && modelHasConfigurableTraits(activeModel) && (
                 <ComposerIconButton
                   icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}

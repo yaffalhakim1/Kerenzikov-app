@@ -29,7 +29,7 @@ export function ComposerAttachmentMenu({
       accessibilityState={{ disabled }}
       style={[styles.trigger, { opacity: disabled ? 0.35 : 1 }]}>
       <AppSymbol
-        name={{ ios: 'plus', android: 'add', web: 'add' }}
+        name={{ ios: 'paperclip', android: 'attach_file', web: 'attach_file' }}
         size={20}
         tintColor={theme.textSecondary}
       />

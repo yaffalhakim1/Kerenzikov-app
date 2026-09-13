@@ -829,10 +829,17 @@ const styles = StyleSheet.create({
   messageHeading: { alignItems: 'center', flexDirection: 'row', gap: 5 },
   messageTitle: { flex: 1, fontSize: 14.5, fontWeight: '500' },
   messageSnippet: { fontSize: 12.5, lineHeight: 17 },
-  sessionMenu: { height: 62, marginHorizontal: 12 },
+  sessionMenu: {
+    // Clip to the daemon chooser's card radius so the selected fill and the
+    // Android ripple both take the row's rounded shape.
+    borderRadius: Radius.large,
+    overflow: 'hidden',
+    height: 62,
+    marginHorizontal: 12,
+  },
   sessionRow: {
     alignItems: 'center',
-    borderRadius: Radius.medium,
+    borderRadius: Radius.large,
     flexDirection: 'row',
     height: 62,
     paddingHorizontal: 12,
