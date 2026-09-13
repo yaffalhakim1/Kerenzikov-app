@@ -1,22 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Menu } from '@base-ui/react/menu'
-import {
-  Command,
-  Download,
-  HardDrive,
-  History,
-  Layers,
-  RefreshCw,
-  Zap,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion'
+import { Download, Moon, Smartphone, Sun } from 'lucide-react'
 import {
   Tooltip,
   TooltipContent,
@@ -24,131 +9,203 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import {
+  GITHUB_URL,
   RELEASES_URL,
   releaseQuery,
 } from '@/lib/release'
-import type { ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 
 export const Route = createFileRoute('/')({
   loader: ({ context }) => {
-    // Fire-and-forget: the version chip streams in when the appcast answers.
+    // Fire-and-forget: the version chip streams in when the GitHub API answers.
     void context.queryClient.prefetchQuery(releaseQuery)
   },
   component: Home,
 })
 
-const WINDOWS_DOCS_URL =
-  'https://github.com/yaffalhakim1/waku/blob/main/docs/windows.md'
+const UPSTREAM_URL = 'https://github.com/egoist/waku'
+const WINDOWS_DOCS_URL = `${GITHUB_URL}/blob/main/docs/windows.md`
 
-const GITHUB_URL = 'https://github.com/yaffalhakim1/waku'
+const APP_NAME = 'Kerenzikov'
+const THEME_KEY = 'kerenzikov-theme'
 
+/** Marks that exist in `public/providers/`. The rest are named in the line below. */
 const PROVIDERS = [
   { slug: 'opencode', label: 'OpenCode' },
-  { slug: 'amp', label: 'Amp' },
   { slug: 'claude', label: 'Claude Code' },
-  { slug: 'openai', label: 'Codex' },
-  { slug: 'cursor', label: 'Cursor' },
-  { slug: 'grok', label: 'Grok' },
+  { slug: 'openai', label: 'Codex CLI' },
+  { slug: 'amp', label: 'Amp' },
+  { slug: 'cursor', label: 'Cursor CLI' },
+  { slug: 'grok', label: 'Grok Build' },
+  { slug: 'kimi', label: 'Kimi Code' },
   { slug: 'pi', label: 'Pi' },
-  { slug: 'kimi', label: 'Kimi' },
+  { slug: 'ohmypi', label: 'Oh My Pi' },
 ]
 
-const FEATURES = [
-  {
-    icon: Zap,
-    title: 'Native down to the frame',
-    body: 'Rust and GPUI — the GPU-accelerated framework behind Zed. Instant launch, smooth scrolling through years of transcript, no Electron.',
-  },
-  {
-    icon: Layers,
-    title: 'Every agent, one timeline',
-    body: 'Each agent is connected over its strongest native interface — stream-json, JSON-RPC, live events — and normalized into one provider-neutral model.',
-  },
-  {
-    icon: History,
-    title: 'Rewind that means it',
-    body: 'Every prompt checkpoints your working tree under a hidden git ref. Roll back the code and the provider conversation together, not just the chat log.',
-  },
-  {
-    icon: Command,
-    title: 'Keyboard first',
-    body: '⌘N starts a session, ⏎ queues a follow-up while the agent works, ⌘⏎ steers it mid-turn, Escape stops. Every control works without a mouse.',
-  },
-  {
-    icon: HardDrive,
-    title: 'Local by architecture',
-    body: 'Projects, sessions, transcripts, and provider IDs live on your disk. No account, no telemetry, no Waku cloud between you and your agents.',
-  },
-  {
-    icon: RefreshCw,
-    title: 'Manual updates, no surprises',
-    body: 'No auto-updater and no update feed. Grab a new release from the releases page when you want one — nothing ever swaps your binary behind your back.',
-  },
+const ALSO_DRIVES = 'Copilot CLI · Fx · DeepSeek Harness'
+
+/** The spec sheet is the identity: the facts, stated flatly. */
+const SPEC: { key: string; value: string }[] = [
+  { key: 'Form factor', value: 'One native binary. Rust + GPUI, no browser engine.' },
+  { key: 'Platforms', value: 'Windows x86_64 · Windows arm64 · Android (building)' },
+  { key: 'Agents', value: '12 providers over their own native protocols' },
+  { key: 'Session model', value: 'One long-lived process per conversation' },
+  { key: 'Storage', value: 'Local. SQLite, blob store, your user profile.' },
+  { key: 'Updates', value: 'Manual. No updater, no feed.' },
+  { key: 'Licence', value: 'GPL-3.0-only' },
+  { key: 'Origin', value: 'Forked from an open-source GPL project' },
 ]
 
-const FAQ = [
+/** The interview. Real questions, answered concretely. */
+const INTERVIEW: { q: string; a: string[] }[] = [
   {
-    q: 'Is this another Electron app?',
-    a: 'No. Waku is a single Rust binary rendered by GPUI, the UI framework Zed is built on. The window you see is drawn by the GPU, not by a browser engine.',
+    q: 'What is this, exactly?',
+    a: [
+      'A native desktop app for running and managing local coding agents. One window holds every project, every session, every transcript.',
+      'It is a single Rust binary rendered by GPUI — the GPU-accelerated framework behind Zed — not a browser engine wearing a window frame.',
+    ],
   },
   {
-    q: 'Do I need new API keys?',
-    a: 'No. Waku detects amp, claude, codex, cursor-agent, opencode, grok, pi, and kimi on your machine and drives them directly — your existing logins, plans, and rate limits apply unchanged.',
+    q: 'Do I need new API keys or subscriptions?',
+    a: [
+      'No. Kerenzikov drives the agent CLIs already installed and authenticated on your machine. It detects each binary on launch and talks to it directly, so your existing logins, plans, and rate limits apply unchanged.',
+    ],
+  },
+  {
+    q: 'How can one app drive twelve different agents?',
+    a: [
+      'Each provider is reached through its strongest native interface — stream-json, JSON-RPC, the Agent Client Protocol, HTTP with server-sent events, or NDJSON — and normalized into one provider-neutral model.',
+      'A session spans the whole conversation. Switching providers mid-project keeps each agent’s own context instead of replaying a transcript at it.',
+    ],
+  },
+  {
+    q: 'What happens when an agent edits my code?',
+    a: [
+      'Every prompt checkpoints your working tree under a hidden git ref. Rolling back restores the code and the provider conversation together, so the two never drift apart. You can also branch from an earlier turn.',
+    ],
   },
   {
     q: 'Where does my data live?',
-    a: 'On your machine. Projects, sessions, transcripts, and provider session IDs are stored locally. There is no Waku account and no telemetry.',
+    a: [
+      'On your disk. Tasks and transcripts in a local SQLite database, attachments in a local blob store, settings in your user profile.',
+      'There is no account and no hosted service between you and your agents.',
+    ],
   },
   {
-    q: 'What is the future plan?',
-    a: 'Windows-first with OpenCode as the best-supported provider, plus an Android companion that is already building as an APK. macOS and iOS builds are not maintained here.',
+    q: 'Can I drive it without a mouse?',
+    a: [
+      'Yes. Ctrl+N starts a session, Ctrl+Tab switches tasks, Ctrl+L focuses the composer, Escape stops a turn. Enter queues a follow-up while the agent is working; Ctrl+Enter steers the turn already in flight.',
+      'Every control is reachable from the keyboard, and focus is always visible.',
+    ],
   },
   {
-    q: 'Is this the same Waku from waku.sh?',
-    a: 'This is a fork of egoist/waku, tuned for Windows and OpenCode. If you are on macOS or Linux, use the upstream releases instead.',
+    q: 'Does it phone home?',
+    a: [
+      'Only when the build was compiled with an analytics endpoint, and then only coarse events — app version, platform, and which provider ran.',
+      'Prompts, file paths, project names, and provider output never leave the machine. The switch is in Settings.',
+    ],
+  },
+  {
+    q: 'What about macOS and Linux?',
+    a: [
+      'Not built here. This fork targets Windows. The desktop app that was native on macOS is still carried in the source, but nobody maintains or ships those builds, so treat them as unavailable rather than broken.',
+      'If you are on macOS or Linux, use the upstream project instead — the link is in the footer.',
+    ],
+  },
+  {
+    q: 'Is this a fork?',
+    a: [
+      'Yes, of an open-source GPL-3.0 coding-agent client, tuned here for Windows with OpenCode as the best-supported provider. The licence and the upstream attribution travel with it.',
+    ],
+  },
+  {
+    q: 'How do updates work?',
+    a: [
+      'Manually. Kerenzikov ships no auto-updater and no update feed, so nothing replaces your binary behind your back. Download a new release when you want one.',
+    ],
   },
 ]
 
-function SectionLabel({ children }: { children: ReactNode }) {
+function Label({ children }: { children: React.ReactNode }) {
+  return <p className="label">{children}</p>
+}
+
+/** Dark is the default; the choice persists across visits. */
+function ThemeToggle() {
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+
+  useEffect(() => {
+    setTheme(
+      document.documentElement.classList.contains('light') ? 'light' : 'dark',
+    )
+  }, [])
+
+  const toggle = () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    const root = document.documentElement
+    root.classList.toggle('light', next === 'light')
+    root.classList.toggle('dark', next === 'dark')
+    try {
+      localStorage.setItem(THEME_KEY, next)
+    } catch {
+      // Private mode: the choice just does not persist.
+    }
+  }
+
+  const isDark = theme === 'dark'
   return (
-    <div className="font-mono text-[11px] tracking-[0.14em] text-muted-foreground/80 uppercase">
-      {children}
-    </div>
+    <button
+      type="button"
+      onClick={toggle}
+      className="icon-btn"
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+    >
+      {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+    </button>
   )
 }
 
 function DownloadMenu({
   primaryUrl,
   assets,
-  size,
-  align,
-  className,
+  variant = 'primary',
   showIcon = false,
 }: {
   primaryUrl: string
-  assets: { x64: string; arm64: string; portableX64: string } | null
-  size: 'sm' | 'lg'
-  align: 'start' | 'end'
-  className?: string
+  assets: {
+    x64: string
+    arm64: string
+    portableX64: string
+    apk: string
+  } | null
+  variant?: 'primary' | 'outline'
   showIcon?: boolean
 }) {
   const itemClassName =
-    'flex h-8 cursor-default items-center rounded-md px-2.5 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45'
+    'flex h-8 cursor-default items-center gap-2 rounded-[4px] px-2.5 text-sm outline-none data-highlighted:bg-[var(--color-paper-3)] data-highlighted:text-[var(--color-ink)] data-disabled:pointer-events-none data-disabled:opacity-45'
 
   return (
     <Menu.Root>
-      <Menu.Trigger render={<Button size={size} className={className} />}>
+      <Menu.Trigger
+        aria-label="Download for Windows"
+        className={variant === 'primary' ? 'btn btn-primary' : 'btn btn-outline'}
+      >
         {showIcon && <Download data-icon="inline-start" />}
-        Download for Windows
+        {/* The header row cannot fit the full label at 320px, so the visible
+            text shortens while aria-label keeps the accessible name complete. */}
+        <span className="hidden sm:inline">Download for Windows</span>
+        <span className="sm:hidden">Download</span>
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner
           side="bottom"
           sideOffset={6}
-          align={align}
+          align="start"
           className="isolate z-50"
         >
-          <Menu.Popup className="min-w-52 origin-(--transform-origin) rounded-lg border bg-popover p-1 text-popover-foreground shadow-md outline-none data-[side=bottom]:slide-in-from-top-1 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
+          <Menu.Popup className="min-w-64 origin-(--transform-origin) rounded-[6px] border border-[var(--color-rule)] bg-[var(--color-paper-2)] p-1 text-[var(--color-ink)] shadow-md outline-none data-[side=bottom]:slide-in-from-top-1 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95">
             <Menu.LinkItem
               href={primaryUrl}
               closeOnClick
@@ -169,6 +226,14 @@ function DownloadMenu({
               className={itemClassName}
             >
               Portable (.zip)
+            </Menu.LinkItem>
+            <Menu.LinkItem
+              href={assets?.apk ?? RELEASES_URL}
+              closeOnClick
+              className={itemClassName}
+            >
+              <Smartphone className="size-3.5 shrink-0 opacity-70" />
+              Android (universal APK)
             </Menu.LinkItem>
             <Menu.LinkItem
               href={RELEASES_URL}
@@ -193,234 +258,244 @@ function DownloadMenu({
   )
 }
 
+function VersionChip({ version }: { version: string }) {
+  return (
+    <span className="mono text-xs text-[var(--color-muted)]">v{version}</span>
+  )
+}
+
 function Home() {
   const { data: release } = useQuery(releaseQuery)
   const primaryUrl = release?.assets?.x64 ?? RELEASES_URL
 
   return (
     <TooltipProvider>
-      <div className="min-h-dvh antialiased">
-        <div className="mx-auto w-full max-w-[1100px] border-border/70 md:border-x">
-          {/* Header */}
-          <header className="flex h-16 items-center justify-between px-5 md:px-10">
-            <a href={import.meta.env.BASE_URL} className="flex items-center gap-2.5">
-              <img
-                src={`${import.meta.env.BASE_URL}app-icon.png`}
-                alt=""
-                className="size-8 rounded-[6px]"
-              />
-              <span className="text-[15px] font-semibold tracking-tight">
-                Waku
-              </span>
-            </a>
-            <div className="flex items-center gap-5">
-              <a
-                href={GITHUB_URL}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="GitHub"
-                className="rounded-full text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  className='size-6'
-                >
-                  <path
-                    fill="currentColor"
-                    d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5c.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34c-.46-1.16-1.11-1.47-1.11-1.47c-.91-.62.07-.6.07-.6c1 .07 1.53 1.03 1.53 1.03c.87 1.52 2.34 1.07 2.91.83c.09-.65.35-1.09.63-1.34c-2.22-.25-4.55-1.11-4.55-4.92c0-1.11.38-2 1.03-2.71c-.1-.25-.45-1.29.1-2.64c0 0 .84-.27 2.75 1.02c.79-.22 1.65-.33 2.5-.33s1.71.11 2.5.33c1.91-1.29 2.75-1.02 2.75-1.02c.55 1.35.2 2.39.1 2.64c.65.71 1.03 1.6 1.03 2.71c0 3.82-2.34 4.66-4.57 4.91c.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2"
-                  />
-                </svg>
-              </a>
+      <div className="min-h-dvh">
+        {/* N9 · Edge-aligned minimal. Wordmark left, one action right, and a
+            deliberate void between them. The absence is the design. */}
+        <header className="flex items-center justify-between px-[var(--page-gutter)] py-[var(--space-md)]">
+          <a
+            href={import.meta.env.BASE_URL}
+            className="wordmark text-[1.0625rem] text-[var(--color-ink)] no-underline"
+          >
+            {APP_NAME}
+          </a>
+          <div className="flex items-center gap-[var(--space-2xs)]">
+            <ThemeToggle />
+            <DownloadMenu
+              primaryUrl={primaryUrl}
+              assets={release?.assets ?? null}
+              variant="outline"
+            />
+          </div>
+        </header>
+
+        <main>
+          {/* Opener — a statement and the facts. No badge, no eyebrow. */}
+          <section className="px-[var(--page-gutter)] pt-[var(--space-xl)] pb-[var(--space-2xl)]">
+            <h1 className="display rise text-[length:var(--text-display)]">
+              One window for every coding agent.
+            </h1>
+
+            <p className="prose-measure mt-[var(--space-md)] text-[length:var(--text-md)] leading-[1.55] text-[var(--color-ink-2)] text-pretty">
+              A single native binary that drives the agent CLIs already on your
+              machine — over their own protocols, on your own disk, with no
+              account in between.
+            </p>
+
+            <div className="mt-[var(--space-lg)] flex flex-wrap items-center gap-x-[var(--space-sm)] gap-y-[var(--space-xs)]">
               <DownloadMenu
                 primaryUrl={primaryUrl}
                 assets={release?.assets ?? null}
-                size="sm"
-                align="end"
+                showIcon
               />
+              {release && <VersionChip version={release.version} />}
             </div>
-          </header>
 
-          <main>
-            {/* Hero */}
-            <section className="px-5 pt-14 pb-14 md:px-10 md:pt-24">
-              <div className="mb-7 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-muted-foreground">
-                <span className="flex size-3.5 items-center justify-center rounded-[3px] bg-[#f26522] text-[10px] font-bold text-white">
-                  Y
-                </span>
-                Not backed by Y Combinator
-              </div>
-              <h1 className="max-w-4xl text-4xl font-semibold tracking-[-0.03em] text-balance md:text-[3.4rem] md:leading-[1.04]">
-                One native app for all your coding agents.
-              </h1>
-              <p className="mt-5 max-w-[36rem] text-[17px] leading-relaxed text-pretty text-muted-foreground">
-                Waku drives the agent CLIs you already have — sessions,
-                transcripts, tool activity, and checkpoints in one fast
-                graphite window, entirely on your machine.
-              </p>
-              <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3">
-                <DownloadMenu
-                  primaryUrl={primaryUrl}
-                  assets={release?.assets ?? null}
-                  size="lg"
-                  className="h-10 px-4"
-                  align="start"
-                  showIcon
-                />
-                {release && (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    v{release.version}
-                  </span>
-                )}
-              </div>
-
-              {/* Providers */}
-              <div className="mt-16">
-                <SectionLabel>Drives the agents you already use</SectionLabel>
-                <div className="mt-4 flex flex-wrap items-center gap-x-7 gap-y-4">
-                  {PROVIDERS.map((p) => (
-                    <Tooltip key={p.slug}>
-                      <TooltipTrigger
-                        render={
-                          <button
-                            type="button"
-                            aria-label={p.label}
-                            className="cursor-default rounded-sm text-muted-foreground/70 transition-colors outline-none hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring/60"
-                          />
-                        }
-                      >
-                        <span
-                          className="provider-mark size-[22px]"
-                          style={{
-                            maskImage: `url(${import.meta.env.BASE_URL}providers/${p.slug}.svg)`,
-                            WebkitMaskImage: `url(${import.meta.env.BASE_URL}providers/${p.slug}.svg)`,
-                          }}
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent>{p.label}</TooltipContent>
-                    </Tooltip>
-                  ))}
+            {/* F3 · Tabular spec sheet. The facts carry the opener. */}
+            <dl className="mt-[var(--space-2xl)] grid grid-cols-[minmax(0,1fr)] border-t border-[var(--color-rule)]">
+              {SPEC.map((row) => (
+                <div
+                  key={row.key}
+                  className="grid grid-cols-[minmax(0,1fr)] gap-x-[var(--space-md)] gap-y-[var(--space-3xs)] border-b border-[var(--color-rule-2)] py-[var(--space-sm)] sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]"
+                >
+                  <dt className="label pt-[0.2em]">{row.key}</dt>
+                  <dd className="text-[length:var(--text-sm)] leading-[1.6] text-[var(--color-ink-2)]">
+                    {row.value}
+                  </dd>
                 </div>
-              </div>
-            </section>
+              ))}
+            </dl>
+          </section>
 
-            {/* Product */}
-            <section>
-              <picture>
-                <source
-                  media="(prefers-color-scheme: dark)"
-                  srcSet={`${import.meta.env.BASE_URL}app-screenshot-dark.png`}
-                />
-                <img
-                  src={`${import.meta.env.BASE_URL}app-screenshot-light.png`}
-                  alt="Waku showing a coding-agent session"
-                  width={2266}
-                  height={1752}
-                  className="block h-auto w-full"
-                />
-              </picture>
-            </section>
+          {/* Providers — the marks, then the ones without marks named. */}
+          <section className="px-[var(--page-gutter)] pb-[var(--space-2xl)]">
+            <Label>Drives the agents you already use</Label>
+            <div className="mt-[var(--space-sm)] flex flex-wrap items-center gap-x-[var(--space-lg)] gap-y-[var(--space-sm)]">
+              {PROVIDERS.map((p) => (
+                <Tooltip key={p.slug}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={p.label}
+                        className="cursor-default rounded-[2px] text-[var(--color-muted)] outline-none transition-colors hover:text-[var(--color-ink)] focus-visible:text-[var(--color-ink)]"
+                      />
+                    }
+                  >
+                    <span
+                      className="provider-mark size-[20px]"
+                      style={{
+                        maskImage: `url(${import.meta.env.BASE_URL}providers/${p.slug}.svg)`,
+                        WebkitMaskImage: `url(${import.meta.env.BASE_URL}providers/${p.slug}.svg)`,
+                      }}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent>{p.label}</TooltipContent>
+                </Tooltip>
+              ))}
+            </div>
+            <p className="mono mt-[var(--space-sm)] text-xs text-[var(--color-muted)]">
+              Also {ALSO_DRIVES}
+            </p>
+          </section>
 
-            {/* Features */}
-            <section className="border-t">
-              <div className="px-5 pt-14 md:px-10">
-                <SectionLabel>Why native</SectionLabel>
-              </div>
-              <div className="mt-8 grid grid-cols-1 gap-px border-t bg-border/70 sm:grid-cols-2 lg:grid-cols-3">
-                {FEATURES.map((f) => (
-                  <div key={f.title} className="bg-background p-6 md:p-8">
-                    <div className="flex items-center gap-2.5">
-                      <f.icon className="size-4 text-muted-foreground" />
-                      <h3 className="text-sm font-medium">{f.title}</h3>
-                    </div>
-                    <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-                      {f.body}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* Download */}
-            <section id="download" className="border-t px-5 py-16 md:px-10 md:py-20">
-              <SectionLabel>Download</SectionLabel>
-              <h2 className="mt-3 text-2xl font-semibold tracking-tight">
-                Get Waku
-              </h2>
-              <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
-                <DownloadMenu
-                  primaryUrl={primaryUrl}
-                  assets={release?.assets ?? null}
-                  size="lg"
-                  className="h-10 px-4"
-                  align="start"
-                  showIcon
-                />
-                {release && (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    v{release.version}
-                  </span>
-                )}
-              </div>
-            </section>
-
-            {/* FAQ */}
-            <section className="border-t px-5 py-16 md:px-10">
-              <SectionLabel>Questions</SectionLabel>
-              <Accordion className="mt-6 max-w-2xl">
-                {FAQ.map((item) => (
-                  <AccordionItem key={item.q} value={item.q}>
-                    <AccordionTrigger className="text-[15px]">
-                      {item.q}
-                    </AccordionTrigger>
-                    <AccordionContent className="max-w-[38rem] text-muted-foreground">
-                      {item.a}
-                    </AccordionContent>
-                  </AccordionItem>
-                ))}
-              </Accordion>
-            </section>
-          </main>
-
-          {/* Footer */}
-          <footer className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t px-5 py-10 text-xs text-muted-foreground md:px-10">
+          {/* The product, shown plainly. No re-drawn chrome around it.
+              Both captures ship and CSS picks one, so the screenshot follows
+              the site's theme toggle rather than the OS preference. */}
+          <figure className="border-y border-[var(--color-rule)]">
             <img
-              src={`${import.meta.env.BASE_URL}app-icon.png`}
-              alt=""
-              className="size-4 rounded-[4px] opacity-80 grayscale"
+              src={`${import.meta.env.BASE_URL}app-screenshot-dark.png`}
+              alt={`${APP_NAME} showing a coding-agent session: task list on the left, transcript and tool activity in the centre, file diffs on the right`}
+              width={2266}
+              height={1752}
+              className="shot shot-dark block h-auto w-full"
             />
-            <span>© 2026 Waku — a fork by</span>
+            <img
+              src={`${import.meta.env.BASE_URL}app-screenshot-light.png`}
+              alt={`${APP_NAME} showing a coding-agent session: task list on the left, transcript and tool activity in the centre, file diffs on the right`}
+              width={2266}
+              height={1752}
+              className="shot shot-light block h-auto w-full"
+            />
+            <figcaption className="mono border-t border-[var(--color-rule-2)] px-[var(--page-gutter)] py-[var(--space-sm)] text-xs text-[var(--color-muted)]">
+              A session in progress. Tasks left, transcript centre, diffs right.
+            </figcaption>
+          </figure>
+
+          {/* The interview. Each heading is the question. */}
+          <section
+            aria-labelledby="interview-heading"
+            className="px-[var(--page-gutter)] py-[var(--space-2xl)]"
+          >
+            <h2
+              id="interview-heading"
+              className="display text-[length:var(--text-xl)]"
+            >
+              Straight answers
+            </h2>
+
+            <div className="mt-[var(--space-lg)]">
+              {INTERVIEW.map((item) => (
+                <div
+                  key={item.q}
+                  className="flex flex-col gap-[var(--space-sm)] border-t border-[var(--color-rule)] py-[var(--space-lg)]"
+                >
+                  <h3 className="display max-w-[24ch] text-[length:var(--text-lg)] text-[var(--color-ink)]">
+                    {item.q}
+                  </h3>
+                  <div className="prose-measure flex flex-col gap-[var(--space-sm)]">
+                    {item.a.map((paragraph) => (
+                      <p
+                        key={paragraph}
+                        className="text-[length:var(--text-base)] leading-[1.65] text-[var(--color-ink-2)]"
+                      >
+                        {paragraph}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Download. */}
+          <section
+            id="download"
+            aria-labelledby="download-heading"
+            className="border-t border-[var(--color-rule)] px-[var(--page-gutter)] py-[var(--space-2xl)]"
+          >
+            <h2
+              id="download-heading"
+              className="display text-[length:var(--text-xl)]"
+            >
+              Get {APP_NAME}
+            </h2>
+            <p className="prose-measure mt-[var(--space-sm)] text-[length:var(--text-base)] leading-[1.65] text-[var(--color-ink-2)]">
+              Per-user installer for Windows, with a portable archive beside
+              it and an arm64 build for ARM machines. The Android companion
+              ships as a universal APK. Install and authenticate at least one
+              agent CLI first — {APP_NAME} drives those, it does not replace
+              them.
+            </p>
+            <div className="mt-[var(--space-lg)] flex flex-wrap items-center gap-x-[var(--space-sm)] gap-y-[var(--space-xs)]">
+              <DownloadMenu
+                primaryUrl={primaryUrl}
+                assets={release?.assets ?? null}
+                showIcon
+              />
+              <a
+                className="link text-[length:var(--text-sm)]"
+                href={WINDOWS_DOCS_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Requirements
+              </a>
+              <a
+                className="link text-[length:var(--text-sm)]"
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Source
+              </a>
+              {release && <VersionChip version={release.version} />}
+            </div>
+          </section>
+        </main>
+
+        {/* Ft4 · Dense typographic colophon. */}
+        <footer className="colophon border-t border-[var(--color-rule)] px-[var(--page-gutter)] py-[var(--space-xl)]">
+          <p className="mono max-w-[70ch] text-xs leading-[1.8] text-[var(--color-muted)]">
+            {APP_NAME}
+            {release ? ` v${release.version}` : ''} — built by{' '}
             <a
+              className="link"
               href="https://yafialhakim.netlify.app"
               target="_blank"
               rel="noreferrer"
-              className="underline underline-offset-2 hover:text-foreground"
             >
               Yafi Alhakim
             </a>
-            <span aria-hidden="true">·</span>
-            <span>
-              original by{' '}
-              <a
-                href="https://github.com/egoist/waku"
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2 hover:text-foreground"
-              >
-                egoist
-              </a>
-            </span>
-            <span aria-hidden="true">·</span>
+            . A fork of an open-source GPL-3.0 coding-agent client by{' '}
             <a
-              href={GITHUB_URL}
+              className="link"
+              href={UPSTREAM_URL}
               target="_blank"
               rel="noreferrer"
-              className="underline underline-offset-2 hover:text-foreground"
             >
-              Source
+              egoist
             </a>
-          </footer>
-        </div>
+            . Built with Rust, GPUI, Space Grotesk, Geist, and Geist Mono.
+            Windows and Android only; macOS and Linux builds are unmaintained
+            here. Source and releases at{' '}
+            <a className="link" href={GITHUB_URL} target="_blank" rel="noreferrer">
+              {GITHUB_URL.replace('https://', '')}
+            </a>
+            .
+          </p>
+        </footer>
       </div>
     </TooltipProvider>
   )

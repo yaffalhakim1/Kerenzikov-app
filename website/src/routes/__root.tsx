@@ -7,12 +7,12 @@ import {
 } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { SITE_URL } from '@/lib/release'
 import appCss from '@/styles.css?url'
 
-const SITE_URL = 'https://yaffalhakim1.github.io/waku'
-const TITLE = 'Waku — one native Windows app for your coding agents'
+const TITLE = 'Kerenzikov — one native Windows window for every coding agent'
 const DESCRIPTION =
-  'A fast, native Windows app for local coding agents. OpenCode first, plus Amp, Claude Code, Codex, Cursor, Grok, and Pi — one timeline, entirely on your machine.'
+  'A native Windows app for local coding agents. Twelve providers over their own protocols, one timeline, sessions and transcripts on your own disk. OpenCode first, plus Claude Code, Codex, Amp, Cursor, Grok, Kimi, and Pi.'
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient
@@ -32,12 +32,12 @@ export const Route = createRootRouteWithContext<{
       {
         name: 'theme-color',
         media: '(prefers-color-scheme: light)',
-        content: '#ffffff',
+        content: '#f2f9f4',
       },
       {
         name: 'theme-color',
         media: '(prefers-color-scheme: dark)',
-        content: '#1e1e1e',
+        content: '#070d09',
       },
     ],
     links: [
@@ -47,8 +47,11 @@ export const Route = createRootRouteWithContext<{
     ],
     scripts: [
       {
-        // Mirror the system color scheme onto <html> before first paint.
-        children: `try{var m=matchMedia('(prefers-color-scheme: dark)'),d=document.documentElement,s=function(){d.classList.toggle('dark',m.matches)};s();m.addEventListener('change',s)}catch(e){}`,
+        // Resolve the theme before first paint. A saved choice wins; otherwise
+        // the system preference decides. Dark is the default register, so an
+        // unreadable preference store still lands on dark rather than flashing
+        // a light page.
+        children: `try{var s=localStorage.getItem('kerenzikov-theme');var d=s?s==='dark':!window.matchMedia('(prefers-color-scheme: light)').matches;var e=document.documentElement;e.classList.toggle('light',!d);e.classList.toggle('dark',d)}catch(x){document.documentElement.classList.add('dark')}`,
       },
     ],
   }),

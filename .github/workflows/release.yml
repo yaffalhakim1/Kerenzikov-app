@@ -207,10 +207,21 @@ jobs:
         working-directory: apps/mobile/android
         run: ./gradlew assembleRelease --no-daemon
 
+      # Gradle emits the generic `app-release.apk`; rename it so the asset names
+      # its version and variant the way the Windows artifacts do. The APK is
+      # universal — `reactNativeArchitectures` builds every ABI into it — so
+      # there is no per-arch suffix to add.
+      - name: Name the APK
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          dir="apps/mobile/android/app/build/outputs/apk/release"
+          mv "$dir/app-release.apk" "$dir/Waku-${VERSION}-universal.apk"
+
       - uses: actions/upload-artifact@v7
         with:
           name: android-apk
-          path: apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          path: apps/mobile/android/app/build/outputs/apk/release/Waku-*-universal.apk
           if-no-files-found: error
 
   draft-release:

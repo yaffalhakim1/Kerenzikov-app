@@ -1,0 +1,129 @@
+/* Hallmark · macrostructure: Conversational FAQ · opener: statement + spec sheet · nav: N9 · footer: Ft4
+ * theme: custom · vibe: "industrial precision, austere, honest instrument" · paper: oklch(15% 0.014 155) · accent: oklch(80% 0.19 155)
+ * display: Space Grotesk · body: Geist · mono: Geist Mono · axes: dark-first / geometric-sans / chromatic-green (~155°)
+ * studied: no · context: explicit · reference: vantis.sh (palette register only, no structure copied)
+ *
+ * Single source of truth for colour, type, space, motion and radius.
+ * Dark is the default register; `.light` on <html> switches to light.
+ *
+ * Every neutral carries a trace of the green anchor so nothing reads as flat
+ * grey. Contrast was verified numerically — body text ≥ 7:1, accent text
+ * ≥ 4.5:1, focus ring ≥ 3:1, button label ≥ 4.5:1.
+ */
+
+/* ── Dark (default) ───────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces — higher elevation is lighter, never darker. */
+  --color-paper: oklch(15% 0.014 155);
+  --color-paper-2: oklch(19.5% 0.016 155);
+  --color-paper-3: oklch(23.5% 0.016 155);
+
+  /* Text */
+  --color-ink: oklch(95.5% 0.01 155);
+  --color-ink-2: oklch(73% 0.012 155);
+  --color-muted: oklch(61% 0.012 155);
+
+  /* Lines */
+  --color-rule: oklch(30% 0.016 155);
+  --color-rule-2: oklch(25.5% 0.016 155);
+
+  /* Signal — a bright mint, used as a highlighter, never a flood. */
+  --color-accent: oklch(80% 0.19 155);
+  --color-accent-text: oklch(83% 0.17 155);
+  --color-accent-ink: oklch(15% 0.014 155);
+  --color-focus: oklch(84% 0.2 155);
+  --color-destructive: oklch(70% 0.17 25);
+}
+
+/* ── Light ────────────────────────────────────────────────────── */
+.light {
+  color-scheme: light;
+
+  --color-paper: oklch(97.5% 0.01 155);
+  --color-paper-2: oklch(95% 0.012 155);
+  --color-paper-3: oklch(91.8% 0.014 155);
+
+  --color-ink: oklch(19.5% 0.016 155);
+  --color-ink-2: oklch(41.5% 0.014 155);
+  --color-muted: oklch(51% 0.014 155);
+
+  --color-rule: oklch(85.5% 0.014 155);
+  --color-rule-2: oklch(89.2% 0.014 155);
+
+  /* Same hue; darker L so it holds contrast on a light surface. The CTA fill
+     stays bright and takes dark ink, so the green reads identically in both
+     modes instead of turning into a muddy olive. */
+  --color-accent: oklch(78% 0.195 155);
+  --color-accent-text: oklch(50% 0.15 155);
+  --color-accent-ink: oklch(19.5% 0.016 155);
+  --color-focus: oklch(56% 0.2 155);
+  --color-destructive: oklch(52% 0.18 27);
+}
+
+/* ── Type ─────────────────────────────────────────────────────── */
+:root {
+  --font-display-family: 'Space Grotesk Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-body-family: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono-family: 'Geist Mono Variable', ui-monospace, 'SF Mono', monospace;
+
+  /* Major third (1.25) from a 16px base. Five sizes carry the page. */
+  --text-xs: 0.64rem;
+  --text-sm: 0.8rem;
+  --text-base: 1rem;
+  --text-md: 1.25rem;
+  --text-lg: 1.5625rem;
+  --text-xl: 1.9531rem;
+  --text-2xl: 2.4414rem;
+  --text-3xl: 3.0518rem;
+  /* Austere register: composed, not shouty. */
+  --text-display: clamp(2.25rem, 4vw + 0.75rem, 3.75rem);
+
+  /* ── Space — 4pt scale ──────────────────────────────────────── */
+  --space-3xs: 0.25rem;
+  --space-2xs: 0.5rem;
+  --space-xs: 0.75rem;
+  --space-sm: 1rem;
+  --space-md: 1.5rem;
+  --space-lg: 2rem;
+  --space-xl: 3rem;
+  --space-2xl: 4.5rem;
+  --space-3xl: 7rem;
+  --page-gutter: clamp(1.25rem, 5vw, 4rem);
+  --measure: 68ch;
+
+  /* ── Motion ─────────────────────────────────────────────────── */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-short: 160ms;
+  --dur-med: 220ms;
+  --dur-long: 320ms;
+
+  /* ── Radius — tight and engineered ──────────────────────────── */
+  --radius-input: 4px;
+  --radius-card: 6px;
+  --radius-pill: 999px;
+
+  /* ── shadcn / Tailwind semantic mapping ─────────────────────── */
+  --background: var(--color-paper);
+  --foreground: var(--color-ink);
+  --card: var(--color-paper-2);
+  --card-foreground: var(--color-ink);
+  --popover: var(--color-paper-2);
+  --popover-foreground: var(--color-ink);
+  --primary: var(--color-accent);
+  --primary-foreground: var(--color-accent-ink);
+  --secondary: var(--color-paper-3);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-paper-2);
+  --muted-foreground: var(--color-muted);
+  --accent: var(--color-paper-3);
+  --accent-foreground: var(--color-ink);
+  --destructive: var(--color-destructive);
+  --border: var(--color-rule);
+  --input: var(--color-rule);
+  --ring: var(--color-focus);
+  --radius: 0.25rem;
+}

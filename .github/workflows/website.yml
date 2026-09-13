@@ -30,8 +30,16 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      # The Pages URL and the download links are derived from the repo the
+      # workflow actually runs in, so moving the site to its own repo needs no
+      # code change. Override RELEASE_REPO if the site and the app split.
       - name: Build
         working-directory: website
+        env:
+          BASE_PATH: /${{ github.event.repository.name }}/
+          VITE_SITE_OWNER: ${{ github.repository_owner }}
+          VITE_SITE_REPO: ${{ github.event.repository.name }}
+          VITE_RELEASE_REPO: ${{ vars.RELEASE_REPO || github.event.repository.name }}
         run: bun run build
 
       - name: Upload artifact

@@ -110,6 +110,31 @@ The embedded browser and experimental computer-use integration remain
 macOS-only and are not built here. Agent sessions, projects, transcripts,
 skills, usage, diffs, file editing, and the terminal run natively on Windows.
 
+## Icons
+
+Every icon is a checked-in binary; nothing generates them during a build.
+`build.rs` embeds `resources/windows/AppIcon.ico` and `scripts/bundle.sh`
+copies the `.icns` into the app bundle, so both must exist before you build.
+
+To replace them from one master image:
+
+```sh
+python scripts/icons.py path/to/logo-1024.png          # desktop + Android
+python scripts/icons.py path/to/logo-1024.png --web    # also the site repo
+```
+
+The master must be a square PNG at 1024x1024 or larger. Keep the artwork
+inside the centre 66% of the canvas: macOS masks the corners with its own
+squircle and Android's adaptive launcher crops the outer ring. Pillow is the
+only requirement.
+
+The script writes the macOS icons (`AppIcon.icns`, `AppIconDev.icns`), the
+Windows `.ico` with all seven sizes embedded, and the Android launcher,
+adaptive-foreground, and splash assets for all five densities. `--web` also
+writes the landing page's favicon, Apple touch icon, and social card into a
+sibling `kerenzikov` checkout; point it elsewhere with
+`--web-dir=/path/to/kerenzikov/public`.
+
 ## Releasing
 
 Releases are cut from GitHub Actions on a `v*` tag, or manually from the
