@@ -12,6 +12,19 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.26]
+
+- The app is now called Kerenzikov: the window title, app menu, tray tooltip,
+  settings, installers, and every translated string use the new name. Your
+  tasks, transcripts, and settings are untouched — they live in the same
+  directories as before.
+- The accent color is the brand green instead of coral, in both light and dark
+  themes, across the desktop, web, and mobile clients.
+- Release downloads are named `Kerenzikov-*` (`Kerenzikov-<version>-x86_64-Setup.exe`,
+  `Kerenzikov-<version>-universal.apk`, and so on).
+- Updates are manual. The app no longer shows a "Check for Updates…" menu item
+  or an "Automatic updates" setting, because this build ships no update feed.
+
 ## [0.1.19]
 
 - Refresh a resumed session from its provider transcript: a session continued
