@@ -81,8 +81,8 @@ Source: "{#StageDir}\waku-daemon.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}Kerenzikov"; Filename: "{app}\waku.exe"
-Name: "{userdesktop}Kerenzikov"; Filename: "{app}\waku.exe"; Tasks: desktopicon
+Name: "{group}\Kerenzikov"; Filename: "{app}\waku.exe"
+Name: "{userdesktop}\Kerenzikov"; Filename: "{app}\waku.exe"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
