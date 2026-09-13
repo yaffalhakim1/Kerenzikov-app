@@ -12,6 +12,19 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.27]
+
+- Provider failures now say what actually went wrong. When a task cannot
+  start, the message carries the provider's own explanation — the HTTP status
+  and error reference from its server, or the error its CLI printed — instead
+  of only the outermost line. A broken OpenCode database that made every task
+  fail with "could not open an OpenCode session" now names the missing database
+  column.
+- The model list warns you when it is stale. If a provider's catalog cannot be
+  read, the provider row in Settings says so and shows the reason, rather than
+  silently keeping the previous list — which made a newly added model look like
+  it had never been configured.
+
 ## [0.1.26]
 
 - The app is now called Kerenzikov: the window title, app menu, tray tooltip,
