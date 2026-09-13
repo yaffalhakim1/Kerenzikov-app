@@ -120,6 +120,7 @@ interface RuntimeContextValue {
     isolated: boolean,
     prompt: string,
     options?: NewSessionOptions,
+    attachments?: MessageAttachment[],
   ) => Promise<AgentSession>;
   cancel: (sessionId: string) => Promise<void>;
   respond: (sessionId: string, requestId: string, optionId: string) => Promise<void>;
@@ -690,6 +691,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     isolated: boolean,
     prompt: string,
     options: NewSessionOptions = {},
+    attachments: MessageAttachment[] = [],
   ): Promise<AgentSession> => {
     const profileId = daemon.activeProfile?.id;
     if (!profileId || !daemon.client || daemon.phase !== 'connected') {
@@ -699,7 +701,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     cacheSession(draft);
     const saved = await persistOrdered(draft);
     try {
-      return await sendPrompt(saved, prompt);
+      return await sendPrompt(saved, prompt, attachments);
     } catch (cause) {
       setErrors((values) => ({ ...values, [saved.id]: errorMessage(cause) }));
       return queryClient.getQueryData<AgentSession>(
