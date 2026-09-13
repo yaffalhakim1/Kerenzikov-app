@@ -807,7 +807,7 @@ mod tests {
         let output = directory.join("output");
         fs::create_dir(&output).unwrap();
         let triple = target_triple().unwrap();
-        let root = format!("waku-9.8.7-{triple}");
+        let root = format!("kerenzikov-9.8.7-{triple}");
         let encoder = flate2::write::GzEncoder::new(
             File::create(&archive_path).unwrap(),
             flate2::Compression::default(),
