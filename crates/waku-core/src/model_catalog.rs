@@ -2529,8 +2529,14 @@ mod opencode_catalog_failure {
     /// exactly like a healthy one, and a newly configured model silently never
     /// appears — the failure that motivated this.
     #[test]
-    fn an_unrunnable_cli_reports_a_reason_and_still_offers_a_catalog() {
+    fn an_unrunnable_cli_reports_a_reason_and_keeps_the_previous_catalog() {
         let absent = std::env::temp_dir().join("waku-catalog-probe-absent-binary");
+        // What the failed probe must fall back to. Computed rather than
+        // assumed non-empty: a machine with no cache and no fallback catalog
+        // legitimately yields nothing, and asserting otherwise would make this
+        // test pass or fail on the developer's disk instead of on the code.
+        let expected = cached_models(ProviderKind::OpenCode)
+            .unwrap_or_else(|| fallback_models(ProviderKind::OpenCode));
 
         let (models, _presets, error) = discover_catalog(ProviderKind::OpenCode, &absent);
 
@@ -2538,11 +2544,12 @@ mod opencode_catalog_failure {
             error.is_some(),
             "an unrunnable CLI must report why the catalog is stale"
         );
-        assert!(
-            !models.is_empty(),
-            "a failed probe must still offer a usable catalog"
+        assert_eq!(
+            models, expected,
+            "a failed probe must fall back to the previous catalog"
         );
     }
+
     /// Proves the whole path against the real CLI: a config OpenCode refuses to
     /// load makes the probe report *why* instead of silently serving the cached
     /// catalog. Ignored by default because it needs the CLI installed.
@@ -2585,9 +2592,14 @@ mod opencode_catalog_failure {
             error.chars().count() < 400,
             "the reason must stay a status line, not a config dump: {error}"
         );
-        assert!(
-            !models.is_empty(),
-            "a failed probe must still offer the cached catalog"
+        // The failed probe retains the previous catalog rather than shrinking
+        // the picker. Computed rather than assumed non-empty, so the assertion
+        // tests the code instead of whatever happens to be cached on this disk.
+        let expected = cached_models(ProviderKind::OpenCode)
+            .unwrap_or_else(|| fallback_models(ProviderKind::OpenCode));
+        assert_eq!(
+            models, expected,
+            "a failed probe must keep the catalog it had"
         );
     }
 }
