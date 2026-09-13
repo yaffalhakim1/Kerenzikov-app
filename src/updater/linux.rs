@@ -155,7 +155,7 @@ impl Updater {
         }
         FEED_URL?;
         if verifying_key().is_none() {
-            eprintln!("Waku updater: SUPublicEDKey is not a valid ed25519 key");
+            eprintln!("Kerenzikov updater: SUPublicEDKey is not a valid ed25519 key");
             return None;
         }
 
@@ -244,7 +244,7 @@ impl Updater {
                         if report {
                             let _ = events.try_send(UpdaterEvent::Failed(error.to_string()));
                         } else {
-                            eprintln!("Waku updater: {error:#}");
+                            eprintln!("Kerenzikov updater: {error:#}");
                         }
                     }
                 }
@@ -440,7 +440,7 @@ fn verifying_key() -> Option<VerifyingKey> {
 fn extract_release_archive(path: &Path, destination: &Path, version: &str) -> anyhow::Result<()> {
     let triple =
         target_triple().ok_or_else(|| anyhow::anyhow!("unsupported Linux architecture"))?;
-    let expected_root = format!("waku-{version}-{triple}");
+    let expected_root = format!("kerenzikov-{version}-{triple}");
     let decoder = GzDecoder::new(File::open(path)?);
     let mut archive = tar::Archive::new(decoder);
     let mut seen = HashSet::new();
@@ -510,7 +510,7 @@ fn validate_packaged_layout(prefix: &Path) -> anyhow::Result<()> {
     anyhow::ensure!(
         marker_metadata.file_type().is_file()
             && fs::read_to_string(&marker).ok().as_deref() == Some(MANAGED_MARKER_CONTENTS),
-        "the install is not marked as a Waku-managed tarball"
+        "the install is not marked as a Kerenzikov-managed tarball"
     );
     for executable in ["waku", "waku-daemon", HELPER_EXECUTABLE] {
         let path = prefix.join("bin").join(executable);

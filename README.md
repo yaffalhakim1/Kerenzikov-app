@@ -1,12 +1,12 @@
-# Waku
+# Kerenzikov
 
-Waku is a fast, native app for working with local coding agents. It is built in
+Kerenzikov is a fast, native app for working with local coding agents. It is built in
 Rust with [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 and keeps projects, sessions, transcripts on your machine.
 
 ## Install
 
-On Windows, run `Waku-<version>-x64-Setup.exe` from the
+On Windows, run `Kerenzikov-<version>-x86_64-Setup.exe` from the
 [latest release](https://github.com/yaffalhakim1/waku/releases/latest). It
 installs per-user. A portable `.zip` is published alongside it, and an
 `aarch64` build ships for ARM machines. See
@@ -20,12 +20,12 @@ macOS and iOS are not built. The desktop app was native on macOS and the
 project still carries that code, but nobody maintains or ships those builds
 here, so treat them as unavailable rather than broken.
 
-Updates are manual: Waku ships no auto-updater and no update feed, so install
+Updates are manual: Kerenzikov ships no auto-updater and no update feed, so install
 a new release from the releases page when you want one.
 
 ## Supported agents
 
-Waku works with:
+Kerenzikov works with:
 
 - [OpenCode](https://opencode.ai) — the focus of this fork
 - [Amp](https://ampcode.com/)
@@ -37,8 +37,8 @@ Waku works with:
 - Kimi Code
 - Pi
 
-Install and authenticate at least one supported agent CLI before starting Waku.
-Waku detects available CLIs automatically and uses each provider's native
+Install and authenticate at least one supported agent CLI before starting Kerenzikov.
+Kerenzikov detects available CLIs automatically and uses each provider's native
 structured protocol and session continuity.
 
 The desktop app keeps working with every provider above, but development
@@ -51,14 +51,14 @@ sessions are expected to keep working.
 - Switch models, reasoning effort, and access modes from a shared interface.
 - Queue or steer follow-up messages while an agent is working.
 - Rewind Git-backed tasks with conversation-aware checkpoints.
-- Store app state locally, with no Waku account or remote service required.
+- Store app state locally, with no Kerenzikov account or remote service required.
 
 ## Architecture
 
 The native desktop is an RPC client of the standalone `waku-daemon` process.
 Provider sessions run in [`waku-core`](crates/waku-core), behind the
 authenticated, versioned WebSocket contract in
-[`waku-protocol`](crates/waku-protocol). Waku Desktop depends on
+[`waku-protocol`](crates/waku-protocol). Kerenzikov Desktop depends on
 [`waku-client`](crates/waku-client), not on the daemon implementation. The
 daemon owns task SQLite data, uploaded attachments, provider-native session
 forks, and all workspace filesystem and Git operations; paths returned by it
@@ -84,7 +84,7 @@ desktop's Settings → Daemon page can explicitly
 expose the child daemon on a fixed port, configure exact browser origins, and
 copy its stable authentication token. It remains loopback-only by default.
 
-When connected to a daemon managed outside the desktop process, Waku never
+When connected to a daemon managed outside the desktop process, Kerenzikov never
 interprets daemon paths on the client machine. The local folder picker and PTY
 are therefore unavailable until the protocol gains daemon-host picker and
 terminal-stream endpoints; files, diffs, Git, skills, usage, task state, and
@@ -92,7 +92,7 @@ attachments already use daemon RPC.
 
 Release apps bundle and sign `waku-daemon`. Development keeps the daemon at
 `target/debug/waku-debug-daemon`, allowing provider-only edits to rebuild and
-replace the daemon without relaunching Waku Debug.
+replace the daemon without relaunching Kerenzikov Debug.
 
 ## Development
 
@@ -153,7 +153,7 @@ release instead:
 - [Upstream releases](https://github.com/egoist/waku/releases/latest)
 - [waku.sh](https://waku.sh) — signed macOS `.dmg`, and `curl -fsSL https://waku.sh/install.sh | sh` on Linux
 
-All credit for Waku goes to [egoist](https://github.com/egoist), who wrote it
+All credit for the original Waku goes to [egoist](https://github.com/egoist), who wrote it
 and continues to develop it. Nothing here is monetized; if you want to support
 the work, support upstream via
 [GitHub Sponsors](https://github.com/sponsors/egoist).
@@ -191,4 +191,4 @@ license ([MIT](assets/fonts/LICENSE-nerd-fonts.txt)).
 
 ## License
 
-Waku is licensed under the [GNU General Public License v3.0 only](LICENSE).
+This fork of Waku is licensed under the [GNU General Public License v3.0 only](LICENSE).

@@ -18,7 +18,7 @@ import {
   type SessionItem,
 } from '@/lib/sidebar-presentation'
 import { cn } from '@/lib/utils'
-import wakuAppIconUrl from '../../../../website/public/app-icon.png'
+import wakuAppIconUrl from '../../../../resources/AppIcon.png'
 
 interface SidebarProps {
   taskState: TaskState
@@ -109,7 +109,7 @@ export function Sidebar({
       >
         <header className="flex h-12 shrink-0 items-center px-2.5">
           <img
-            alt="Waku"
+            alt="Kerenzikov"
             className="size-6 rounded-md"
             draggable={false}
             src={wakuAppIconUrl}

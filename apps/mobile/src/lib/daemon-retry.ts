@@ -43,18 +43,18 @@ export function describeConnectionFailure(
       case 'rejected':
         return {
           message:
-            'The daemon rejected this token. Edit the connection and paste the current token from Waku’s Daemon settings.',
+            'The daemon rejected this token. Edit the connection and paste the current token from Kerenzikov’s Daemon settings.',
           retryable: false,
         };
       case 'protocol':
         return {
           message:
-            'This daemon runs a different Waku version than the app. Update Waku on the host, or update this app.',
+            'This daemon runs a different Kerenzikov version than the app. Update Kerenzikov on the host, or update this app.',
           retryable: false,
         };
       case 'handshake':
         return {
-          message: 'Something other than a Waku daemon answered at this address. Check the address and port.',
+          message: 'Something other than a Kerenzikov daemon answered at this address. Check the address and port.',
           retryable: false,
         };
       case 'timeout':
@@ -67,8 +67,8 @@ export function describeConnectionFailure(
       case 'refused':
         return {
           message: authority
-            ? `Nothing is listening at ${authority}. Is Waku Desktop running with Daemon exposure on?`
-            : 'The daemon is not listening. Is Waku Desktop running with Daemon exposure on?',
+            ? `Nothing is listening at ${authority}. Is Kerenzikov Desktop running with Daemon exposure on?`
+            : 'The daemon is not listening. Is Kerenzikov Desktop running with Daemon exposure on?',
           retryable: true,
         };
       case 'unresolved':

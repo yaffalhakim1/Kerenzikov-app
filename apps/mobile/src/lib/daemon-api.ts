@@ -535,7 +535,7 @@ export async function forkSessionFromResponse(
 }
 
 /** Sessions an agent CLI started on the daemon host, but Waku has not pulled
- * in yet. `/resume` lets the user adopt one as a Waku task. */
+ * in yet. `/resume` lets the user adopt one as a Kerenzikov task. */
 export async function listProviderSessions(
   client: WakuClient,
   provider: ProviderKind,

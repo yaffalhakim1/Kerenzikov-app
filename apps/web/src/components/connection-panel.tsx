@@ -6,7 +6,7 @@ import { WakuIcon } from '@/components/waku-icon'
 import { useDocumentTitle } from '@/hooks/use-document-title'
 import { useDaemon } from '@/lib/daemon-context'
 import { useI18n } from '@/lib/i18n'
-import wakuAppIconUrl from '../../../../website/public/app-icon.png'
+import wakuAppIconUrl from '../../../../resources/AppIcon.png'
 
 export function ConnectionPanel({ title }: { title?: string } = {}) {
   const { t } = useI18n()
@@ -45,7 +45,7 @@ export function ConnectionPanel({ title }: { title?: string } = {}) {
       <div className="w-full max-w-[520px]">
         <div className="text-center">
           <img
-            alt="Waku"
+            alt="Kerenzikov"
             className="mx-auto size-8 rounded-[8px]"
             draggable={false}
             src={wakuAppIconUrl}

@@ -109,8 +109,8 @@ jobs:
         with:
           name: windows-x86_64
           path: |
-            target/release/waku-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
-            target/release/Waku-${{ needs.version.outputs.version }}-x86_64-Setup.exe
+            target/release/kerenzikov-${{ needs.version.outputs.version }}-x86_64-pc-windows-msvc.zip
+            target/release/Kerenzikov-${{ needs.version.outputs.version }}-x86_64-Setup.exe
           if-no-files-found: error
 
   windows-arm64:
@@ -150,8 +150,8 @@ jobs:
         with:
           name: windows-arm64
           path: |
-            target/release/waku-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
-            target/release/Waku-${{ needs.version.outputs.version }}-aarch64-Setup.exe
+            target/release/kerenzikov-${{ needs.version.outputs.version }}-aarch64-pc-windows-msvc.zip
+            target/release/Kerenzikov-${{ needs.version.outputs.version }}-aarch64-Setup.exe
           if-no-files-found: error
 
   # Sibling of the Windows jobs, not a chained workflow: desktop and Android
@@ -216,12 +216,12 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           dir="apps/mobile/android/app/build/outputs/apk/release"
-          mv "$dir/app-release.apk" "$dir/Waku-${VERSION}-universal.apk"
+          mv "$dir/app-release.apk" "$dir/Kerenzikov-${VERSION}-universal.apk"
 
       - uses: actions/upload-artifact@v7
         with:
           name: android-apk
-          path: apps/mobile/android/app/build/outputs/apk/release/Waku-*-universal.apk
+          path: apps/mobile/android/app/build/outputs/apk/release/Kerenzikov-*-universal.apk
           if-no-files-found: error
 
   draft-release:

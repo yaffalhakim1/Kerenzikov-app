@@ -160,7 +160,7 @@ describe("DaemonLink", () => {
     expect(link.state.outage).toMatchObject({
       attempts: 1,
       nextRetryAt: clock.now + 750,
-      reason: "Nothing is listening at 127.0.0.1:4312. Is Waku Desktop running with Daemon exposure on?",
+      reason: "Nothing is listening at 127.0.0.1:4312. Is Kerenzikov Desktop running with Daemon exposure on?",
     });
     await clock.advance(749);
     expect(sockets).toHaveLength(2);
@@ -189,7 +189,7 @@ describe("DaemonLink", () => {
       outage: {
         attempts: 1,
         interrupted: false,
-        reason: "Nothing is listening at 127.0.0.1:4312. Is Waku Desktop running with Daemon exposure on?",
+        reason: "Nothing is listening at 127.0.0.1:4312. Is Kerenzikov Desktop running with Daemon exposure on?",
       },
     });
     expect(link.state.outage?.nextRetryAt).toBe(clock.now + 750);

@@ -168,7 +168,7 @@ function AppNavigator() {
         name="index"
         options={daemonRoutesAvailable
           ? { ...homeHeader, title: "New Task" }
-          : { headerShown: false, title: "Waku" }}
+          : { headerShown: false, title: "Kerenzikov" }}
       />
       {/* Removing the final saved daemon also removes every daemon-backed
        * route from navigation, returning restored and open tasks to home. */}

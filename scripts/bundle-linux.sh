@@ -8,7 +8,7 @@ cd "$root"
 target_dir="${CARGO_TARGET_DIR:-target}"
 version="$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"name":"waku","version":"\([^"]*\)".*/\1/p')"
 target_triple="$(rustc -vV | sed -n 's/^host: //p')"
-package="waku-${version}-${target_triple}"
+package="kerenzikov-${version}-${target_triple}"
 archive="$target_dir/release/$package.tar.gz"
 staging="$(mktemp -d)"
 trap 'rm -rf -- "$staging"' EXIT
@@ -21,11 +21,11 @@ package_dir="$staging/$package"
 install -Dm755 "$target_dir/release/waku" "$package_dir/bin/waku"
 install -Dm755 "$target_dir/release/waku-updater" "$package_dir/bin/waku-updater"
 install -Dm755 "$target_dir/release/waku-daemon" "$package_dir/bin/waku-daemon"
-install -Dm644 resources/linux/sh.waku.desktop \
-  "$package_dir/share/applications/sh.waku.desktop"
+install -Dm644 resources/linux/sh.kerenzikov.desktop \
+  "$package_dir/share/applications/sh.kerenzikov.desktop"
 install -Dm644 resources/linux/self-update-v1 \
   "$package_dir/share/waku/self-update-v1"
-install -Dm644 website/public/app-icon.png \
+install -Dm644 assets/brand/logo-1024.png \
   "$package_dir/share/icons/hicolor/256x256/apps/sh.waku.png"
 install -Dm644 LICENSE "$package_dir/share/licenses/waku/LICENSE"
 

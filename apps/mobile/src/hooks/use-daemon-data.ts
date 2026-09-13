@@ -337,6 +337,6 @@ export function usePlanUsages(providers: ProviderKind[]) {
 }
 
 function requireClient(client: ReturnType<typeof useDaemon>['client']) {
-  if (!client) throw new Error('Waku daemon is disconnected');
+  if (!client) throw new Error('Kerenzikov daemon is disconnected');
   return client;
 }
