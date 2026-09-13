@@ -47,8 +47,8 @@ import {
 } from '@/lib/composer-commands';
 import { useTheme } from '@/hooks/use-theme';
 import {
+  imagePickerFiles,
   importLocalAttachment,
-  localFileName,
   type LocalAttachmentFile,
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
@@ -660,23 +660,6 @@ export function MobileComposer({
   );
 }
 
-function imagePickerFiles(
-  assets: ImagePicker.ImagePickerAsset[],
-  fallbackPrefix: string,
-): LocalAttachmentFile[] {
-  const timestamp = Date.now();
-  return assets.map((asset, index) => ({
-    uri: asset.uri,
-    name: asset.fileName ?? localFileName(
-      asset.uri,
-      `${fallbackPrefix}-${timestamp}${assets.length > 1 ? `-${index + 1}` : ''}.jpg`,
-    ),
-    mimeType: asset.mimeType,
-    size: asset.fileSize,
-    base64: asset.base64,
-  }));
-}
-
 function PermissionPanel({
   permission,
   onRespond,
@@ -975,8 +958,9 @@ const styles = StyleSheet.create({
     width: 36,
   },
   sendButton: {
+    // Rounded box echoing the composer card's rounding, not a full circle.
     alignItems: 'center',
-    borderRadius: Radius.pill,
+    borderRadius: Radius.medium,
     height: 36,
     justifyContent: 'center',
     marginLeft: 4,

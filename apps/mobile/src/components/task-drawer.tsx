@@ -307,10 +307,12 @@ function TaskDrawerContent({
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
-      <View
-        pointerEvents="box-none"
-        style={[styles.daemonFloat, { top: insets.top + 8 }]}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={[styles.screen, { backgroundColor: theme.background }]}>
+      {/* Pill and search dock are in normal flow, so the list scrolls in its
+        own region between them and never slides underneath either. */}
+      <View style={[styles.drawerHeader, { paddingTop: insets.top + 8 }]}>
         <DaemonPill onPress={() => setDaemonPickerOpen(true)} />
       </View>
 
@@ -320,9 +322,6 @@ function TaskDrawerContent({
         keyExtractor={(item) => item.session.id}
         contentContainerStyle={[
           styles.listContent,
-          {
-            paddingTop: insets.top + DaemonPickerHeight + 20,
-          },
           sections.length === 0 && styles.listContentEmpty,
         ]}
         refreshControl={(
@@ -343,22 +342,18 @@ function TaskDrawerContent({
               header so it stays top-right whether the title reads "Today"
               or a project name. */}
             {section === sections[0] && (
-              <GlassSurface
-                interactive
-                style={[styles.filterButton, Platform.OS === 'android' && styles.rippleClip]}>
-                <AppPressable
-                  accessibilityLabel="Group and order tasks"
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => setFilterOpen(true)}
-                  style={({ pressed }) => [styles.filterInner, { opacity: pressed ? 0.5 : 1 }]}>
-                  <AppSymbol
-                    name={{ ios: 'arrow.up.arrow.down', android: 'sort', web: 'sort' }}
-                    size={14}
-                    tintColor={theme.text}
-                  />
-                </AppPressable>
-              </GlassSurface>
+              <AppPressable
+                accessibilityLabel="Group and order tasks"
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={() => setFilterOpen(true)}
+                style={({ pressed }) => [styles.filterInner, { opacity: pressed ? 0.5 : 1 }]}>
+                <AppSymbol
+                  name={{ ios: 'arrow.up.arrow.down', android: 'sort', web: 'sort' }}
+                  size={14}
+                  tintColor={theme.text}
+                />
+              </AppPressable>
             )}
           </View>
         )}
@@ -404,13 +399,10 @@ function TaskDrawerContent({
       />
 
       {(daemon.profiles.length > 0 || daemon.phase === 'booting') && (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'position' : undefined}
-          keyboardVerticalOffset={SearchDockGap}
+        <View
           pointerEvents="box-none"
-          style={[styles.searchDockAvoider, { bottom: insets.bottom + SearchDockGap + keyboardHeight }]}>
-          <View pointerEvents="box-none" style={styles.searchDock}>
-            <GlassSurface interactive style={styles.searchCapsule}>
+          style={[styles.searchDock, { paddingBottom: insets.bottom + SearchDockGap + keyboardHeight }]}>
+          <GlassSurface interactive style={styles.searchCapsule}>
               <View style={styles.searchCapsuleInner}>
                 <AppSymbol
                   name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
@@ -464,8 +456,7 @@ function TaskDrawerContent({
                 </AppPressable>
               </GlassSurface>
             )}
-          </View>
-        </KeyboardAvoidingView>
+        </View>
       )}
 
       {renameTarget && (
@@ -504,7 +495,7 @@ function TaskDrawerContent({
           onPress={() => updatePrefs({ ordering: 'oldest' })}
         />
       </Sheet>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -684,32 +675,41 @@ const SessionRow = memo(function SessionRow({
             styles.sessionRow,
             {
               backgroundColor: pressed
-                ? theme.surfaceMuted
-                : selected ? theme.backgroundSelected : 'transparent',
+                ? theme.overlayStrong
+                : selected ? theme.overlay : 'transparent',
               width: rowWidth,
             },
           ]}>
-          <View style={styles.sessionHeading}>
-            <Text numberOfLines={1} style={[styles.sessionTitle, { color: theme.text }]}>
-              {displaySessionTitle(session)}
-            </Text>
-            {running && (
-              <ActivityIndicator
-                accessibilityLabel="Running"
-                color={theme.textTertiary}
-                size="small"
-                style={styles.sessionSpinner}
-              />
-            )}
+          <View style={styles.sessionContent}>
+            <View style={styles.sessionHeading}>
+              <Text numberOfLines={1} style={[styles.sessionTitle, { color: theme.text }]}>
+                {displaySessionTitle(session)}
+              </Text>
+              {running && (
+                <ActivityIndicator
+                  accessibilityLabel="Running"
+                  color={theme.textTertiary}
+                  size="small"
+                  style={styles.sessionSpinner}
+                />
+              )}
+            </View>
+            <View style={styles.sessionMetadata}>
+              <ProviderIcon color={theme.textTertiary} provider={session.provider} size={12} />
+              <Text
+                numberOfLines={1}
+                style={[styles.sessionProject, { color: theme.textTertiary }]}>
+                {item.projectName}
+              </Text>
+            </View>
           </View>
-          <View style={styles.sessionMetadata}>
-            <ProviderIcon color={theme.textTertiary} provider={session.provider} size={12} />
-            <Text
-              numberOfLines={1}
-              style={[styles.sessionProject, { color: theme.textTertiary }]}>
-              {item.projectName}
-            </Text>
-          </View>
+          {selected && (
+            <AppSymbol
+              name={{ ios: 'checkmark', android: 'check', web: 'check' }}
+              size={16}
+              tintColor={NativeTint}
+            />
+          )}
         </View>
       )}
       selected={selected}
@@ -731,22 +731,16 @@ const styles = StyleSheet.create({
     top: 0,
     zIndex: 1000,
   },
-  daemonFloat: {
-    left: 12,
-    position: 'absolute',
-    zIndex: 30,
+  drawerHeader: {
+    paddingHorizontal: 12,
+    paddingBottom: 10,
   },
   sectionHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     paddingRight: 12,
   },
-  filterButton: {
-    borderRadius: Radius.pill,
-    height: 30,
-    width: 30,
-  },
-  filterInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  filterInner: { alignItems: 'center', justifyContent: 'center' },
   filterHeading: {
     fontSize: 12,
     fontWeight: '600',
@@ -756,16 +750,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   roundInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  searchDockAvoider: {
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    zIndex: 20,
-  },
   searchDock: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
+    marginTop: 6,
     paddingHorizontal: Spacing.three,
   },
   searchCapsule: { borderRadius: Radius.pill, flex: 1 },
@@ -789,7 +778,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   daemonButtonText: { flexShrink: 1, fontSize: 13, fontWeight: '600' },
-  listContent: { paddingBottom: 96 },
+  listContent: { paddingBottom: 4 },
   listContentEmpty: { flexGrow: 1 },
   sectionTitle: {
     flex: 1,
@@ -842,12 +831,13 @@ const styles = StyleSheet.create({
   messageSnippet: { fontSize: 12.5, lineHeight: 17 },
   sessionMenu: { height: 62, marginHorizontal: 12 },
   sessionRow: {
-    borderRadius: 10,
-    gap: 3,
+    alignItems: 'center',
+    borderRadius: Radius.medium,
+    flexDirection: 'row',
     height: 62,
-    justifyContent: 'center',
     paddingHorizontal: 12,
   },
+  sessionContent: { flex: 1, gap: 3 },
   sessionHeading: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   sessionMetadata: { alignItems: 'center', flexDirection: 'row', gap: 5 },
   sessionProject: { flex: 1, fontSize: 12.5, lineHeight: 17 },
