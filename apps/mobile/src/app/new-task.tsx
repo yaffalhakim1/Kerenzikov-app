@@ -1,11 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
-import type { ProviderKind, RuntimeMode } from '@waku/client';
+import type { MessageAttachment, ProviderKind, RuntimeMode } from '@waku/client';
 import {
   rememberedModelTraits,
   rememberComposerSession,
   type ComposerPreferences,
 } from '@waku/client/composer-preferences';
+import * as DocumentPicker from 'expo-document-picker';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -21,7 +23,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppPressable } from '@/components/app-pressable';
 
 import { AppSymbol } from '@/components/app-symbol';
+import { AttachmentChip } from '@/components/attachment-chip';
+import { AgentPresetMenu } from '@/components/agent-preset-menu';
 import { ComposerAccessMenu } from '@/components/composer-access-menu';
+import {
+  ComposerAttachmentMenu,
+  type ComposerAttachmentSource,
+} from '@/components/composer-attachment-menu';
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
 import {
   ComposerCard,
@@ -42,6 +50,7 @@ import {
   useAllProviderModels,
   useComposerCommands,
   useProviderCatalog,
+  useProviderModels,
   useTaskState,
 } from '@/hooks/use-daemon-data';
 import { resolvedComposerSubmission } from '@/lib/composer-commands';
@@ -49,6 +58,11 @@ import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useTheme } from '@/hooks/use-theme';
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { daemonKeys, inspectBranches } from '@/lib/daemon-api';
+import {
+  imagePickerFiles,
+  importLocalAttachment,
+  type LocalAttachmentFile,
+} from '@/lib/attachments';
 import {
   loadComposerPreferences,
   loadNewTaskExtras,
@@ -82,6 +96,7 @@ export default function NewTaskScreen() {
   const catalog = useProviderCatalog();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [provider, setProvider] = useState<ProviderKind | null>(null);
+  const [agentPreset, setAgentPreset] = useState<string | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [serviceTier, setServiceTier] = useState<string | null>(null);
@@ -90,6 +105,8 @@ export default function NewTaskScreen() {
   const [isolated, setIsolated] = useState(false);
   const [baseBranch, setBaseBranch] = useState<string | null>(null);
   const [prompt, setPrompt] = useState('');
+  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
+  const [importingAttachments, setImportingAttachments] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [openSheet, setOpenSheet] = useState<SheetKind | null>(null);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
@@ -133,6 +150,7 @@ export default function NewTaskScreen() {
     const preferred = installedProviders.includes('codex') ? 'codex' : installedProviders[0];
     if (preferred) {
       setProvider(preferred);
+      setAgentPreset(null);
       setModel(null);
       setReasoningEffort(null);
       setServiceTier(null);
@@ -237,6 +255,91 @@ export default function NewTaskScreen() {
     };
   }
 
+  // Same import pipeline the session composer uses: each file is uploaded to
+  // the daemon once and referenced by blob from the first prompt on.
+  const attachmentImportTail = useRef<Promise<void>>(Promise.resolve());
+  const pendingAttachmentImports = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
+
+  async function addLocalFiles(files: LocalAttachmentFile[]) {
+    if (!files.length) return;
+    pendingAttachmentImports.current += 1;
+    setImportingAttachments(true);
+    setError(null);
+    const operation = attachmentImportTail.current.catch(() => {}).then(async () => {
+      const client = daemon.client;
+      if (!client || daemon.phase !== 'connected') {
+        throw new Error('Waku daemon is disconnected');
+      }
+      for (const file of files) {
+        const imported = await importLocalAttachment(client, file);
+        if (mounted.current) setAttachments((current) => [...current, imported]);
+      }
+    });
+    attachmentImportTail.current = operation;
+    try {
+      await operation;
+      await Haptics.selectionAsync();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    } finally {
+      pendingAttachmentImports.current -= 1;
+      if (mounted.current && pendingAttachmentImports.current === 0) {
+        setImportingAttachments(false);
+      }
+    }
+  }
+
+  async function chooseAttachment(source: ComposerAttachmentSource) {
+    try {
+      if (source === 'files') {
+        const result = await DocumentPicker.getDocumentAsync({
+          copyToCacheDirectory: true,
+          multiple: true,
+          type: '*/*',
+        });
+        if (!result.canceled) {
+          await addLocalFiles(result.assets.map((asset) => ({
+            uri: asset.uri,
+            name: asset.name,
+            mimeType: asset.mimeType,
+            size: asset.size,
+            base64: asset.base64,
+          })));
+        }
+        return;
+      }
+
+      if (source === 'camera') {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          throw new Error('Camera access is required to take a photo');
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+        });
+        if (!result.canceled) await addLocalFiles(imagePickerFiles(result.assets, 'Photo'));
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsMultipleSelection: true,
+        mediaTypes: ['images'],
+        quality: 1,
+        selectionLimit: 0,
+      });
+      if (!result.canceled) await addLocalFiles(imagePickerFiles(result.assets, 'Photo'));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
+  }
+
   function applyModelSelection(selection: ProviderModelSelection) {
     let preferences = preferencesRef.current;
     if (preferences && provider && model) {
@@ -252,6 +355,7 @@ export default function NewTaskScreen() {
     const remembered = preferences && selection.model
       ? rememberedModelTraits(preferences, selection.provider, selection.model)
       : undefined;
+    if (selection.provider !== provider) setAgentPreset(null);
     setProvider(selection.provider);
     setModel(selection.model);
     setReasoningEffort(remembered ? remembered.reasoningEffort : selection.reasoningEffort);
@@ -270,7 +374,14 @@ export default function NewTaskScreen() {
     const value = provider
       ? resolvedComposerSubmission(provider, typed, commandCatalog.data ?? []) ?? typed
       : typed;
-    if (!selectedProject || !provider || !typed || submitting) return;
+    if (
+      !selectedProject
+      || !provider
+      || (!typed && attachments.length === 0)
+      || submitting
+      || importingAttachments
+    ) return;
+    const submittedAttachments = attachments;
     setSubmitting(true);
     setError(null);
     try {
@@ -286,7 +397,9 @@ export default function NewTaskScreen() {
           contextWindow,
           runtimeMode,
           baseBranch,
+          agentPreset,
         },
+        submittedAttachments,
       );
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       const address = daemon.activeProfile?.address;
@@ -315,6 +428,7 @@ export default function NewTaskScreen() {
       }
       draftSync.removeSubmittedDraft();
       setPrompt('');
+      setAttachments([]);
       setSubmitting(false);
       router.push({ pathname: '/session/[id]', params: { id: session.id } });
     } catch (cause) {
@@ -325,6 +439,13 @@ export default function NewTaskScreen() {
   }
 
   const providerModels = modelCatalog.find((entry) => entry.id === provider)?.models ?? [];
+  const disconnected = daemon.phase !== 'connected';
+  // Mirrors desktop AgentSession::can_choose_agent_preset: presets are offered
+  // by DeepSeek | OpenCode | OpenCode2.
+  const supportsAgentPreset =
+    provider === 'deepSeek' || provider === 'openCode' || provider === 'openCode2';
+  const agentPresetProbe = useProviderModels(supportsAgentPreset ? provider : null);
+  const agentPresets = agentPresetProbe.data?.agent_presets ?? [];
   const activeModel = model
     ? providerModels.find((item) => item.id === model)
     : providerModels.find((item) => item.is_default) ?? providerModels[0];
@@ -335,7 +456,11 @@ export default function NewTaskScreen() {
     ?? branches.data?.default_branch
     ?? branches.data?.current
     ?? 'Default branch';
-  const startDisabled = !selectedProject || !provider || !prompt.trim() || submitting;
+  const startDisabled = !selectedProject
+    || !provider
+    || (!prompt.trim() && attachments.length === 0)
+    || submitting
+    || importingAttachments;
 
   return (
     <KeyboardAvoidingView
@@ -409,15 +534,69 @@ export default function NewTaskScreen() {
           accessibilityLabel="Task prompt"
           autoFocus
           editable={!submitting}
+          beforeInput={attachments.length || importingAttachments ? (
+            <View style={styles.attachmentStack}>
+              {attachments.map((attachment, index) => (
+                <View
+                  key={`${attachment.blob_reference ?? attachment.path}:${index}`}
+                  style={styles.attachmentItem}>
+                  <AttachmentChip attachment={attachment} />
+                  <AppPressable
+                    accessibilityLabel={`Remove ${attachment.name}`}
+                    accessibilityRole="button"
+                    disabled={submitting}
+                    hitSlop={8}
+                    onPress={() => {
+                      draftSync.markEdited();
+                      setAttachments((current) => current.filter((_, item) => item !== index));
+                    }}
+                    style={({ pressed }) => [
+                      styles.attachmentRemove,
+                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
+                    ]}>
+                    <AppSymbol
+                      name={{ ios: 'xmark', android: 'close', web: 'close' }}
+                      size={11}
+                      tintColor={theme.textSecondary}
+                    />
+                  </AppPressable>
+                </View>
+              ))}
+              {importingAttachments && (
+                <View style={[styles.attachmentChipLoading, { backgroundColor: theme.overlayStrong }]}>
+                  <ActivityIndicator color={theme.textSecondary} size="small" />
+                  <Text style={[styles.attachmentName, { color: theme.textSecondary }]}>
+                    Attaching…
+                  </Text>
+                </View>
+              )}
+            </View>
+          ) : undefined}
           left={(
-            <ComposerAccessMenu
-              mode={runtimeMode}
-              onApply={setRuntimeMode}
-            />
+            <>
+              <ComposerAttachmentMenu
+                disabled={disconnected || submitting || importingAttachments}
+                onChoose={(source) => void chooseAttachment(source)}
+              />
+              <ComposerAccessMenu
+                mode={runtimeMode}
+                onApply={setRuntimeMode}
+              />
+            </>
           )}
           placeholder={`Work on ${daemon.activeProfile?.name ?? 'your daemon'}`}
           right={(
             <>
+              {supportsAgentPreset && agentPresets.length > 0 && !submitting && (
+                <AgentPresetMenu
+                  agentPreset={agentPreset}
+                  onApply={(selection) => {
+                    void Haptics.selectionAsync();
+                    setAgentPreset(selection.agentPreset);
+                  }}
+                  provider={provider}
+                />
+              )}
               {activeModel && modelHasConfigurableTraits(activeModel) && (
                 <ComposerIconButton
                   icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}
@@ -610,6 +789,33 @@ const styles = StyleSheet.create({
   },
   rowValue: { flexShrink: 1, fontSize: 16.5, fontWeight: '500' },
   composerShell: { paddingHorizontal: 12 },
+  attachmentStack: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 4,
+    paddingTop: 4,
+  },
+  attachmentItem: { position: 'relative' },
+  attachmentRemove: {
+    alignItems: 'center',
+    borderRadius: 10,
+    height: 20,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: -4,
+    top: -4,
+    width: 20,
+  },
+  attachmentChipLoading: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    flexDirection: 'row',
+    gap: 6,
+    height: 30,
+    paddingHorizontal: 9,
+  },
+  attachmentName: { fontSize: 12, fontWeight: '600' },
   error: { borderRadius: Radius.medium, marginBottom: 8, padding: 11 },
   errorText: { fontSize: 12.5, fontWeight: '600', lineHeight: 17 },
   sheetLoading: { alignItems: 'center', paddingVertical: 14 },

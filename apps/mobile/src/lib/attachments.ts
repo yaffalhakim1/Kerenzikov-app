@@ -109,6 +109,25 @@ export function localFileName(uri: string, fallback: string): string {
   }
 }
 
+/** Image-picker assets arrive unnamed more often than not; give them a
+ * stable, colliding-free name before import. */
+export function imagePickerFiles(
+  assets: { uri: string; fileName?: string | null; mimeType?: string | null; fileSize?: number | null; base64?: string | null }[],
+  fallbackPrefix: string,
+): LocalAttachmentFile[] {
+  const timestamp = Date.now();
+  return assets.map((asset, index) => ({
+    uri: asset.uri,
+    name: asset.fileName ?? localFileName(
+      asset.uri,
+      `${fallbackPrefix}-${timestamp}${assets.length > 1 ? `-${index + 1}` : ''}.jpg`,
+    ),
+    mimeType: asset.mimeType,
+    size: asset.fileSize,
+    base64: asset.base64,
+  }));
+}
+
 async function readBase64(uri: string): Promise<string> {
   // Kept behind the async boundary so Bun's pure projection tests do not load
   // an Expo native module. Metro still bundles the module for device builds.
