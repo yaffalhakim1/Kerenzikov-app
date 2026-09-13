@@ -6,7 +6,7 @@ Only the latest release of Kerenzikov receives security fixes.
 
 Updates are **manual**: this fork ships no auto-updater and no update feed, so
 install a newer release from the
-[releases page](https://github.com/yaffalhakim1/waku/releases/latest) when one is
+[releases page](https://github.com/yaffalhakim1/Kerenzikov-app/releases/latest) when one is
 available.
 
 ## Reporting a Vulnerability

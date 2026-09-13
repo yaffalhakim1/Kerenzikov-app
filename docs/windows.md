@@ -4,7 +4,7 @@
 
 Download `Kerenzikov-<version>-x86_64-Setup.exe` (or the `aarch64` installer on
 an Arm device) from the
-[latest release](https://github.com/yaffalhakim1/waku/releases/latest) and run
+[latest release](https://github.com/yaffalhakim1/Kerenzikov-app/releases/latest) and run
 it. It installs per-user into `%LOCALAPPDATA%\Programs\Waku`, so it never asks
 for administrator rights — and upgrading later never does either.
 
@@ -40,7 +40,7 @@ release was not code-signed. Choose **More info → Run anyway**.
 Kerenzikov does not update itself. This build ships no auto-updater and no
 update feed, so the app has no **Check for Updates…** menu item and no
 **Automatic updates** setting. Install a newer release from the
-[releases page](https://github.com/yaffalhakim1/waku/releases/latest) when you
+[releases page](https://github.com/yaffalhakim1/Kerenzikov-app/releases/latest) when you
 want one.
 
 Running a newer installer over an existing install replaces it in place: tasks,

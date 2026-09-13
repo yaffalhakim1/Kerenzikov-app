@@ -7,7 +7,7 @@ and keeps projects, sessions, transcripts on your machine.
 ## Install
 
 On Windows, run `Kerenzikov-<version>-x86_64-Setup.exe` from the
-[latest release](https://github.com/yaffalhakim1/waku/releases/latest). It
+[latest release](https://github.com/yaffalhakim1/Kerenzikov-app/releases/latest). It
 installs per-user. A portable `.zip` is published alongside it, and an
 `aarch64` build ships for ARM machines. See
 [docs/windows.md](docs/windows.md) for requirements and what is not available
