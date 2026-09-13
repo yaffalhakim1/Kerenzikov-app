@@ -1,0 +1,15 @@
+[
+  {
+    "date": "2026-09-13",
+    "scope": "page",
+    "macrostructure": "Conversational FAQ",
+    "theme": "custom",
+    "theme_axes": "dark-first / geometric-sans / chromatic-green (~155)",
+    "vibe": "industrial precision, austere, honest instrument",
+    "enrichment": "none (typography + one real screenshot in a plain figure)",
+    "nav": "N9 edge-aligned minimal",
+    "footer": "Ft4 dense typographic colophon",
+    "brief": "Kerenzikov · Waku fork rebrand, Windows + Android landing page",
+    "notes": "Rebrand of the fork landing page. Dark default with a light toggle persisted in localStorage. Reference: vantis.sh for palette register only; no structure copied."
+  }
+]

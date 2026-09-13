@@ -1,6 +1,6 @@
 # Waku Mobile
 
-Expo client for connecting to one or more remote Waku daemons from iOS,
+Expo client for connecting to one or more remote Kerenzikov daemons from iOS,
 Android.
 
 ## Run
@@ -15,7 +15,7 @@ bun --filter @waku/mobile android
 
 ## Connect
 
-In Waku Desktop, enable the remote daemon and copy its WebSocket address and
+In Kerenzikov Desktop, enable the remote daemon and copy its WebSocket address and
 token. Add those values in the mobile app. Use `wss://` outside a trusted LAN
 or private tailnet; the token grants full control of the daemon host.
 

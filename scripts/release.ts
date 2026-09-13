@@ -14,11 +14,11 @@ import { parseArgs } from "node:util";
 import { defaultDownloadUrlPrefix, generateAppcast } from "./appcast";
 import { extractReleaseNotes } from "./changelog";
 
-const appName = "Waku";
-const executableName = "Waku";
+const appName = "Kerenzikov";
+const executableName = "Kerenzikov";
 const jsReplExecutableName = "waku_js_repl";
 const daemonExecutableName = "waku-daemon";
-const computerUseHelperName = "Waku Computer Use";
+const computerUseHelperName = "Kerenzikov Computer Use";
 const packageName = "waku";
 const defaultNotaryProfile = "NOTARY";
 const projectRoot = resolve(import.meta.dir, "..");

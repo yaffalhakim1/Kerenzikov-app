@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { WakuIcon } from '@/components/waku-icon'
 import { useI18n } from '@/lib/i18n'
-import wakuAppIconUrl from '../../../../website/public/app-icon.png'
+import wakuAppIconUrl from '../../../../resources/AppIcon.png'
 
 export function StartupScreen({
   error,

@@ -29,7 +29,7 @@ pub fn is_active() -> bool {
 }
 
 fn tray_image() -> Option<tray_icon::Icon> {
-    let image = image::load_from_memory(include_bytes!("../website/public/app-icon.png")).ok()?;
+    let image = image::load_from_memory(include_bytes!("../resources/AppIcon.png")).ok()?;
     let rgba = image.into_rgba8();
     let (width, height) = (rgba.width(), rgba.height());
     tray_icon::Icon::from_rgba(rgba.into_raw(), width, height).ok()
@@ -46,7 +46,7 @@ pub fn install() -> Option<smol::channel::Receiver<TrayAction>> {
         return None;
     }
     let tray = TrayIconBuilder::new()
-        .with_tooltip("Waku")
+        .with_tooltip("Kerenzikov")
         .with_icon(icon)
         .with_menu(Box::new(menu))
         .build()

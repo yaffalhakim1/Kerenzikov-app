@@ -116,11 +116,11 @@ if (!targetTriple || !architecture) {
   throw new Error(`Unsupported Windows target ${targetTriple ?? "(unknown)"}`);
 }
 
-const packageDirectoryName = `waku-${version}-${targetTriple}`;
+const packageDirectoryName = `kerenzikov-${version}-${targetTriple}`;
 const archive = join(releaseDirectory, `${packageDirectoryName}.zip`);
 const installer = join(
   releaseDirectory,
-  `Waku-${version}-${architecture}-Setup.exe`,
+  `Kerenzikov-${version}-${architecture}-Setup.exe`,
 );
 
 await $`cargo build --locked --release --package waku --bin waku --package waku-daemon --bin waku-daemon`;

@@ -589,7 +589,7 @@ function optionDescription(description: string | null | undefined, isDefault: bo
   return description ?? (isDefault ? 'Default' : undefined);
 }
 
-/** Adopts a session an agent CLI started on the daemon host as a Waku task.
+/** Adopts a session an agent CLI started on the daemon host as a Kerenzikov task.
  *
  * The sheet first lists installed providers, then the external sessions for
  * the chosen one. Picking a session hands the imported task back through

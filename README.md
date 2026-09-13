@@ -1,13 +1,13 @@
-# Waku
+# Kerenzikov
 
-Waku is a fast, native app for working with local coding agents. It is built in
+Kerenzikov is a fast, native app for working with local coding agents. It is built in
 Rust with [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
 and keeps projects, sessions, transcripts on your machine.
 
 ## Install
 
-On Windows, run `Waku-<version>-x64-Setup.exe` from the
-[latest release](https://github.com/yaffalhakim1/waku/releases/latest). It
+On Windows, run `Kerenzikov-<version>-x86_64-Setup.exe` from the
+[latest release](https://github.com/yaffalhakim1/Kerenzikov-app/releases/latest). It
 installs per-user. A portable `.zip` is published alongside it, and an
 `aarch64` build ships for ARM machines. See
 [docs/windows.md](docs/windows.md) for requirements and what is not available
@@ -20,12 +20,12 @@ macOS and iOS are not built. The desktop app was native on macOS and the
 project still carries that code, but nobody maintains or ships those builds
 here, so treat them as unavailable rather than broken.
 
-Updates are manual: Waku ships no auto-updater and no update feed, so install
+Updates are manual: Kerenzikov ships no auto-updater and no update feed, so install
 a new release from the releases page when you want one.
 
 ## Supported agents
 
-Waku works with:
+Kerenzikov works with:
 
 - [OpenCode](https://opencode.ai) — the focus of this fork
 - [Amp](https://ampcode.com/)
@@ -37,8 +37,8 @@ Waku works with:
 - Kimi Code
 - Pi
 
-Install and authenticate at least one supported agent CLI before starting Waku.
-Waku detects available CLIs automatically and uses each provider's native
+Install and authenticate at least one supported agent CLI before starting Kerenzikov.
+Kerenzikov detects available CLIs automatically and uses each provider's native
 structured protocol and session continuity.
 
 The desktop app keeps working with every provider above, but development
@@ -51,14 +51,14 @@ sessions are expected to keep working.
 - Switch models, reasoning effort, and access modes from a shared interface.
 - Queue or steer follow-up messages while an agent is working.
 - Rewind Git-backed tasks with conversation-aware checkpoints.
-- Store app state locally, with no Waku account or remote service required.
+- Store app state locally, with no Kerenzikov account or remote service required.
 
 ## Architecture
 
 The native desktop is an RPC client of the standalone `waku-daemon` process.
 Provider sessions run in [`waku-core`](crates/waku-core), behind the
 authenticated, versioned WebSocket contract in
-[`waku-protocol`](crates/waku-protocol). Waku Desktop depends on
+[`waku-protocol`](crates/waku-protocol). Kerenzikov Desktop depends on
 [`waku-client`](crates/waku-client), not on the daemon implementation. The
 daemon owns task SQLite data, uploaded attachments, provider-native session
 forks, and all workspace filesystem and Git operations; paths returned by it
@@ -84,7 +84,7 @@ desktop's Settings → Daemon page can explicitly
 expose the child daemon on a fixed port, configure exact browser origins, and
 copy its stable authentication token. It remains loopback-only by default.
 
-When connected to a daemon managed outside the desktop process, Waku never
+When connected to a daemon managed outside the desktop process, Kerenzikov never
 interprets daemon paths on the client machine. The local folder picker and PTY
 are therefore unavailable until the protocol gains daemon-host picker and
 terminal-stream endpoints; files, diffs, Git, skills, usage, task state, and
@@ -92,7 +92,7 @@ attachments already use daemon RPC.
 
 Release apps bundle and sign `waku-daemon`. Development keeps the daemon at
 `target/debug/waku-debug-daemon`, allowing provider-only edits to rebuild and
-replace the daemon without relaunching Waku Debug.
+replace the daemon without relaunching Kerenzikov Debug.
 
 ## Development
 
@@ -110,13 +110,39 @@ The embedded browser and experimental computer-use integration remain
 macOS-only and are not built here. Agent sessions, projects, transcripts,
 skills, usage, diffs, file editing, and the terminal run natively on Windows.
 
+## Icons
+
+Every icon is a checked-in binary; nothing generates them during a build.
+`build.rs` embeds `resources/windows/AppIcon.ico` and `scripts/bundle.sh`
+copies the `.icns` into the app bundle, so both must exist before you build.
+
+To replace them from one master image:
+
+```sh
+python scripts/icons.py path/to/logo-1024.png          # desktop + Android
+python scripts/icons.py path/to/logo-1024.png --web    # also the site repo
+```
+
+The master must be a square PNG at 1024x1024 or larger. Keep the artwork
+inside the centre 66% of the canvas: macOS masks the corners with its own
+squircle and Android's adaptive launcher crops the outer ring. Pillow is the
+only requirement.
+
+The script writes the macOS icons (`AppIcon.icns`, `AppIconDev.icns`), the
+Windows `.ico` with all seven sizes embedded, and the Android launcher,
+adaptive-foreground, and splash assets for all five densities. `--web` also
+writes the landing page's favicon, Apple touch icon, and social card into a
+sibling `kerenzikov` checkout; point it elsewhere with
+`--web-dir=/path/to/kerenzikov/public`.
+
 ## Releasing
 
 Releases are cut from GitHub Actions on a `v*` tag, or manually from the
-**Actions** tab. The desktop workflow builds Windows only; a separate
-**Android release** workflow assembles the APK and attaches it; there is no
-update feed or artifact upload to any bucket. See [RELEASING.md](RELEASING.md)
-for what is still upstream's and what this fork replaced.
+**Actions** tab. One workflow builds the Windows installers and portable zips,
+assembles the Android APK, and opens a draft GitHub release with all of them;
+there is no update feed or artifact upload to any bucket. See
+[RELEASING.md](RELEASING.md) for what is still upstream's and what this fork
+replaced.
 
 ## Upstream
 
@@ -128,7 +154,7 @@ release instead:
 - [Upstream releases](https://github.com/egoist/waku/releases/latest)
 - [waku.sh](https://waku.sh) — signed macOS `.dmg`, and `curl -fsSL https://waku.sh/install.sh | sh` on Linux
 
-All credit for Waku goes to [egoist](https://github.com/egoist), who wrote it
+All credit for the original Waku goes to [egoist](https://github.com/egoist), who wrote it
 and continues to develop it. Nothing here is monetized; if you want to support
 the work, support upstream via
 [GitHub Sponsors](https://github.com/sponsors/egoist).
@@ -156,14 +182,20 @@ Modifications to the original work (GPLv3 §5a):
   an ACP replay that fails on real sessions.
 - **2026-09-11** — `6c744e5` Ship no update feed. The updater pointed at
   upstream's `releases.waku.sh` and could replace an install with an upstream
-  binary. The updater no longer initializes.
+  binary. `FEED_URL` is now `None` on every platform, so `Updater::init`
+  returns `None` and the app shows no update UI.
 - **2026-09-11** — Release automation reduced to what this fork ships:
-  `.github/workflows/release.yml` builds Windows only, `release-android.yml`
-  builds the APK, and `sync-release.yml` (the R2 upload) is removed.
+  `.github/workflows/release.yml` builds the Windows installers and the Android
+  APK into one draft release, and `sync-release.yml` (the R2 upload) is
+  disabled.
+- **2026-09-13** — Rebrand to Kerenzikov in every user-visible string (window
+  title, menus, locales, installers, release artifact names) while leaving the
+  data layer, the `waku_*`/`WAKU_*` identifiers, and the `sh.waku` bundle ids
+  as they were, so existing installs keep their tasks and settings.
 
 Bundled fonts under `assets/fonts/` are third-party and stay under their own
 license ([MIT](assets/fonts/LICENSE-nerd-fonts.txt)).
 
 ## License
 
-Waku is licensed under the [GNU General Public License v3.0 only](LICENSE).
+This fork of Waku is licensed under the [GNU General Public License v3.0 only](LICENSE).

@@ -607,7 +607,7 @@ mod macos {
                         .to_string_lossy()
                         .into_owned()
                 };
-                eprintln!("Waku updater: failed to load Sparkle: {reason}");
+                eprintln!("Kerenzikov updater: failed to load Sparkle: {reason}");
                 return None;
             }
 
@@ -656,7 +656,7 @@ mod macos {
                 ]
             };
             if !started {
-                eprintln!("Waku updater: Sparkle rejected its updater configuration");
+                eprintln!("Kerenzikov updater: Sparkle rejected its updater configuration");
                 return None;
             }
 
@@ -1046,8 +1046,14 @@ mod windows {
             if cfg!(debug_assertions) && !forced {
                 return None;
             }
+            // No feed means no updater, not an updater that fails on every
+            // check. Constructing one anyway would leave "Check for
+            // Updates…" in the app menu and "Automatic updates" in Settings
+            // as controls that can only report "this build ships no update
+            // feed" — the Linux updater already bails here, so mirror it.
+            FEED_URL?;
             if verifying_key().is_none() {
-                eprintln!("Waku updater: SUPublicEDKey is not a valid ed25519 key");
+                eprintln!("Kerenzikov updater: SUPublicEDKey is not a valid ed25519 key");
                 return None;
             }
 
@@ -1148,7 +1154,7 @@ mod windows {
                             if report {
                                 let _ = events.try_send(UpdaterEvent::Failed(error.to_string()));
                             } else {
-                                eprintln!("Waku updater: {error}");
+                                eprintln!("Kerenzikov updater: {error}");
                             }
                         }
                     }
@@ -1272,7 +1278,7 @@ mod windows {
         ));
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory)?;
-        let installer = directory.join("Waku-Setup.exe");
+        let installer = directory.join("Kerenzikov-Setup.exe");
 
         curl(&["-fsSL", "--max-time", "600", "-o"], &installer, &item.url)?;
 

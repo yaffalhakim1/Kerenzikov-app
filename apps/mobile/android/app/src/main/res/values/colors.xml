@@ -1,5 +1,7 @@
 <resources>
-  <color name="splashscreen_background">#1a1a1a</color>
-  <color name="iconBackground">#ffffff</color>
+  <!-- Both match the brand mark's own ground so the logo tile blends into the
+       splash screen and the adaptive-icon background layer without a seam. -->
+  <color name="splashscreen_background">#07120A</color>
+  <color name="iconBackground">#07120A</color>
   <color name="colorPrimary">#023c69</color>
 </resources>

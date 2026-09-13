@@ -218,7 +218,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const loadFullSession = useCallback(async (sessionId: string): Promise<AgentSession> => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
-    if (!client || !profileId) throw new Error('Waku daemon is disconnected');
+    if (!client || !profileId) throw new Error('Kerenzikov daemon is disconnected');
     const cached = queryClient.getQueryData<AgentSession>(
       daemonKeys.session(profileId, sessionId),
     );
@@ -232,7 +232,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const persistOrdered = useCallback((session: AgentSession): Promise<AgentSession> => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
-    if (!client || !profileId) return Promise.reject(new Error('Waku daemon is disconnected'));
+    if (!client || !profileId) return Promise.reject(new Error('Kerenzikov daemon is disconnected'));
     const generation = cacheGenerations.current.get(session.id);
     const previous = persistTails.current.get(session.id);
     const operation = (previous ?? Promise.resolve(session))
@@ -325,7 +325,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   ): RuntimeEntry => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
-    if (!client || !profileId) throw new Error('Waku daemon is disconnected');
+    if (!client || !profileId) throw new Error('Kerenzikov daemon is disconnected');
     const existing = entries.current.get(session.id);
     if (existing) return existing;
 
@@ -536,7 +536,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
     if (!client || !profileId || daemon.phase !== 'connected') {
-      throw new Error('Waku daemon is disconnected');
+      throw new Error('Kerenzikov daemon is disconnected');
     }
     const prompt = rawPrompt.trim();
     if (!prompt && attachments.length === 0) return inputSession;
@@ -670,7 +670,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const providerPrompt = providerPromptOverride === undefined
       ? providerPromptForSubmission(prompt, attachments)
       : providerPromptOverride.trim();
-    if (!client || daemon.phase !== 'connected') throw new Error('Waku daemon is disconnected');
+    if (!client || daemon.phase !== 'connected') throw new Error('Kerenzikov daemon is disconnected');
     const runtime = entries.current.get(session.id);
     if (
       !runtime || !runtime.supportsSteer ||
@@ -695,7 +695,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   ): Promise<AgentSession> => {
     const profileId = daemon.activeProfile?.id;
     if (!profileId || !daemon.client || daemon.phase !== 'connected') {
-      throw new Error('Waku daemon is disconnected');
+      throw new Error('Kerenzikov daemon is disconnected');
     }
     const draft = createSession(projectId, provider, isolated, clock, options);
     cacheSession(draft);
@@ -712,7 +712,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   const cancel = useCallback(async (sessionId: string) => {
     const client = daemon.client;
-    if (!client) throw new Error('Waku daemon is disconnected');
+    if (!client) throw new Error('Kerenzikov daemon is disconnected');
     const runtime = entries.current.get(sessionId);
     if (!runtime) throw new Error('This task has no live agent runtime');
     await client.request({ type: 'cancel' }, sessionId, runtime.runtimeId);
@@ -767,7 +767,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
     if (!client || !profileId || daemon.phase !== 'connected') {
-      throw new Error('Waku daemon is disconnected');
+      throw new Error('Kerenzikov daemon is disconnected');
     }
     const current = await loadFullSession(sessionId);
     const next = applySessionOptions(current, changes, clock);
@@ -813,7 +813,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
     if (!client || !profileId || daemon.phase !== 'connected') {
-      throw new Error('Waku daemon is disconnected');
+      throw new Error('Kerenzikov daemon is disconnected');
     }
     const runtime = entries.current.get(sessionId);
     if (runtime) {
@@ -838,7 +838,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   const removeQueuedMessage = useCallback(async (sessionId: string, messageId: string) => {
     const profileId = daemon.activeProfile?.id;
-    if (!profileId) throw new Error('Waku daemon is disconnected');
+    if (!profileId) throw new Error('Kerenzikov daemon is disconnected');
     const current = queryClient.getQueryData<AgentSession>(
       daemonKeys.session(profileId, sessionId),
     );
@@ -861,7 +861,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
     if (!client || !profileId || daemon.phase !== 'connected') {
-      throw new Error('Waku daemon is disconnected');
+      throw new Error('Kerenzikov daemon is disconnected');
     }
     const runtime = entries.current.get(sessionId);
     const response = await rewindSessionToMessage(
@@ -893,7 +893,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
     if (!client || !profileId || daemon.phase !== 'connected') {
-      throw new Error('Waku daemon is disconnected');
+      throw new Error('Kerenzikov daemon is disconnected');
     }
     const runtime = entries.current.get(sessionId);
     const response = await forkSessionFromResponse(
@@ -916,7 +916,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
     if (!client || !profileId || daemon.phase !== 'connected') {
-      throw new Error('Waku daemon is disconnected');
+      throw new Error('Kerenzikov daemon is disconnected');
     }
     const state = await loadTaskState(client);
     const existing = state.sessions.find((session) =>

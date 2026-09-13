@@ -93,7 +93,7 @@ export function planResetLabel(
   return `Resets ${date}`;
 }
 
-/** Usage history reports spend per CLI, not per Waku provider id, and Claude's
+/** Usage history reports spend per CLI, not per Kerenzikov provider id, and Claude's
  * CLI is branded "Claude Code" everywhere else in the product. */
 export function usageProviderLabel(provider: UsageProvider): string {
   return provider === 'claude' ? 'Claude Code' : 'Codex';

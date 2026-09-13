@@ -12,13 +12,13 @@ export function DaemonOnboarding() {
   return (
     <View style={[styles.screen, { backgroundColor: theme.background }]}>
       <Image
-        accessibilityLabel="Waku"
+        accessibilityLabel="Kerenzikov"
         source={require('@/assets/images/icon.png')}
         style={styles.appIcon}
       />
       <Text style={[styles.title, { color: theme.text }]}>Your agents, everywhere.</Text>
       <Text style={[styles.body, { color: theme.textSecondary }]}>
-        Connect to Waku running on your Mac, workstation, or private server. Add more than one and
+        Connect to Kerenzikov running on your Mac, workstation, or private server. Add more than one and
         switch whenever you need.
       </Text>
       <AppPressable
