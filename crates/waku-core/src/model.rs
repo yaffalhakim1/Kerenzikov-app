@@ -15,6 +15,7 @@ pub fn provider_probe(provider: ProviderKind, binary_override: Option<&str>) -> 
         path,
         models: crate::model_catalog::fallback_models(provider),
         agent_presets: crate::model_catalog::fallback_agent_presets(provider),
+        catalog_error: None,
     }
 }
 
@@ -48,9 +49,11 @@ pub fn discover_provider_models(mut probe: ProviderProbe) -> ProviderProbe {
     if probe.provider.supports_model_discovery()
         && let Some(path) = probe.path.as_deref()
     {
-        let (models, agent_presets) = crate::model_catalog::discover_catalog(probe.provider, path);
+        let (models, agent_presets, catalog_error) =
+            crate::model_catalog::discover_catalog(probe.provider, path);
         probe.models = models;
         probe.agent_presets = agent_presets;
+        probe.catalog_error = catalog_error;
     }
     probe
 }
@@ -82,6 +85,7 @@ mod tests {
             path: Some("/usr/bin/codex".into()),
             models: crate::model_catalog::fallback_models(ProviderKind::Codex),
             agent_presets: Vec::new(),
+            catalog_error: None,
         };
         let cached = vec![ProviderModel::new("cached-model", "Cached model").default()];
 

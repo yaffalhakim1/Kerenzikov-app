@@ -466,8 +466,13 @@ pub struct RpcError {
 
 impl From<anyhow::Error> for RpcError {
     fn from(error: anyhow::Error) -> Self {
+        // `{:#}` prints the whole cause chain. `Display` alone stops at the
+        // outermost context, so a failure the provider explained in detail —
+        // an HTTP status, a server error reference, a SQLite message — reached
+        // the user as a bare "could not open an OpenCode session" with the
+        // cause discarded.
         Self {
-            message: error.to_string(),
+            message: format!("{error:#}"),
         }
     }
 }
@@ -497,6 +502,24 @@ mod base64_bytes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A provider failure is usually explained several contexts deep — an HTTP
+    /// status, a server error reference, a database message. Reporting only the
+    /// outermost context is what turned a precise OpenCode startup failure into
+    /// a bare "could not open an OpenCode session".
+    #[test]
+    fn rpc_errors_keep_the_whole_cause_chain() {
+        let error = anyhow::anyhow!("no such column: project_id")
+            .context("OpenCode session request failed with HTTP 500: {\"ref\":\"err_9ba2c429\"}")
+            .context("could not open an OpenCode session");
+
+        let message = RpcError::from(error).message;
+
+        assert!(message.contains("could not open an OpenCode session"));
+        assert!(message.contains("HTTP 500"));
+        assert!(message.contains("err_9ba2c429"));
+        assert!(message.contains("no such column: project_id"));
+    }
 
     #[test]
     fn binary_payloads_use_base64_json_strings() {

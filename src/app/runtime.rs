@@ -1536,6 +1536,7 @@ impl Waku {
                             path: None,
                             models: crate::model_catalog::fallback_models(provider),
                             agent_presets: crate::model_catalog::fallback_agent_presets(provider),
+                            catalog_error: None,
                         },
                     };
                     if provider_detection_tx.send(probe).is_ok() {

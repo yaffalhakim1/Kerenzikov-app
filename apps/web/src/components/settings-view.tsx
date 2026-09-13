@@ -425,6 +425,7 @@ function providerProbeDetail(
   const parts = []
   if (probe.path) parts.push(abbreviateHomePath(probe.path))
   if (disabled) parts.push(t('providers.disabled_for_new_tasks'))
+  else if (probe.catalog_error) parts.push(probe.catalog_error)
   else if (probe.models.length) parts.push(t(
     probe.models.length === 1 ? 'providers.model_count_one' : 'providers.model_count_many',
     { count: probe.models.length },

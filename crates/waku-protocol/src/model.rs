@@ -587,6 +587,14 @@ pub struct ProviderProbe {
     pub models: Vec<ProviderModel>,
     #[serde(default)]
     pub agent_presets: Vec<ProviderAgentPreset>,
+    /// Why the last live catalog discovery failed, when the provider can tell
+    /// a failure apart from an empty catalog.
+    ///
+    /// A failed probe retains the previously cached catalog, so without this
+    /// the picker shows a stale list that is indistinguishable from a healthy
+    /// one — a newly added model simply never appears and nothing says why.
+    #[serde(default)]
+    pub catalog_error: Option<String>,
 }
 
 impl ProviderProbe {

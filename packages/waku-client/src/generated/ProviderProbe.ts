@@ -3,4 +3,13 @@ import type { ProviderAgentPreset } from "./ProviderAgentPreset";
 import type { ProviderKind } from "./ProviderKind";
 import type { ProviderModel } from "./ProviderModel";
 
-export type ProviderProbe = { provider: ProviderKind, installed: boolean, path: string | null, models: Array<ProviderModel>, agent_presets: Array<ProviderAgentPreset>, };
+export type ProviderProbe = { provider: ProviderKind, installed: boolean, path: string | null, models: Array<ProviderModel>, agent_presets: Array<ProviderAgentPreset>,
+/**
+ * Why the last live catalog discovery failed, when the provider can tell
+ * a failure apart from an empty catalog.
+ *
+ * A failed probe retains the previously cached catalog, so without this
+ * the picker shows a stale list that is indistinguishable from a healthy
+ * one — a newly added model simply never appears and nothing says why.
+ */
+catalog_error: string | null, };

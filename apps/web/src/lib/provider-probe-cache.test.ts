@@ -30,6 +30,7 @@ const probe: ProviderProbeResult = {
     context_windows: [],
   }],
   agent_presets: [],
+  catalog_error: null,
   version: '1.2.3',
 }
 

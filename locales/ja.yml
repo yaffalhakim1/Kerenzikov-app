@@ -202,6 +202,9 @@ providers.disable: "%{provider} を無効にする"
 providers.disabled_for_new_tasks: 新規タスクでは無効
 providers.model_count_one: "%{count} 個のモデル"
 providers.model_count_many: "%{count} 個のモデル"
+providers.catalog_probe_failed: "モデル一覧が古い可能性があります — %{error}"
+providers.catalog_probe_failed_to_run: "モデル一覧が古い可能性があります — %{command} を実行できませんでした"
+providers.catalog_probe_exited: "モデル一覧が古い可能性があります — CLI がコード %{code} で終了しました"
 providers.not_detected_as: PATH 上に %{command} が見つかりません
 providers.using_override: PATH の自動検出ではなく %{path} を使用しています
 providers.invalid_override: このパスには実行可能なファイルがありません。空欄にすると PATH から自動検出します

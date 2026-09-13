@@ -396,6 +396,12 @@ providers.model_count_one:
   en: "%{count} model"
 providers.model_count_many:
   en: "%{count} models"
+providers.catalog_probe_failed:
+  en: "Model list is stale — %{error}"
+providers.catalog_probe_failed_to_run:
+  en: "Model list is stale — could not run %{command}"
+providers.catalog_probe_exited:
+  en: "Model list is stale — the CLI exited with code %{code}"
 providers.not_detected_as:
   en: Not detected on PATH as %{command}
 providers.using_override:

@@ -1585,6 +1585,7 @@ impl Waku {
                 .and_then(|probe| probe.path.as_deref())
                 .map(|path| abbreviate_home_path(path, self.home_directory.as_deref()));
             let model_count = probe.map(|probe| probe.models.len()).unwrap_or(0);
+            let catalog_error = probe.and_then(|probe| probe.catalog_error.clone());
             let version = self
                 .provider_versions
                 .get(&kind)
@@ -1606,6 +1607,10 @@ impl Waku {
                 }
                 if disabled {
                     parts.push(tr!("providers.disabled_for_new_tasks"));
+                } else if let Some(error) = catalog_error.clone() {
+                    // The count comes from the retained cache, so it says
+                    // nothing about whether the live catalog is current.
+                    parts.push(error);
                 } else if model_count > 0 {
                     parts.push(if model_count == 1 {
                         tr!("providers.model_count_one", count = model_count)

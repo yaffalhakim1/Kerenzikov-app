@@ -194,6 +194,9 @@ providers.disable: 禁用 %{provider}
 providers.disabled_for_new_tasks: 新建任务时不可用
 providers.model_count_one: "%{count} 个模型"
 providers.model_count_many: "%{count} 个模型"
+providers.catalog_probe_failed: "模型列表可能已过期 — %{error}"
+providers.catalog_probe_failed_to_run: "模型列表可能已过期 — 无法运行 %{command}"
+providers.catalog_probe_exited: "模型列表可能已过期 — CLI 以代码 %{code} 退出"
 providers.not_detected_as: 未在 PATH 中找到 %{command}
 providers.using_override: 正在使用 %{path}，不再从 PATH 自动检测
 providers.invalid_override: 此路径下没有可执行文件。清空后可恢复从 PATH 自动检测

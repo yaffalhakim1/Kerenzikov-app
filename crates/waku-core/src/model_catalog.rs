@@ -145,7 +145,13 @@ enum CatalogProbe {
     /// masked by the stale cache.
     Authoritative(Vec<ProviderModel>),
     /// The CLI could not run or exited unsuccessfully. Retain the prior cache.
-    Failed,
+    ///
+    /// The reason is `None` for a probe that cannot distinguish "failed" from
+    /// "this provider never enumerates anything", which keeps the historical
+    /// don't-shrink behavior without inventing an error to report. A probe that
+    /// *can* tell the difference carries the reason, because a stale catalog
+    /// otherwise looks exactly like a healthy one that has no new models.
+    Failed(Option<String>),
 }
 
 impl CatalogProbe {
@@ -154,7 +160,7 @@ impl CatalogProbe {
     /// discovery does not yet distinguish success from failure.
     fn legacy(models: Vec<ProviderModel>) -> CatalogProbe {
         if models.is_empty() {
-            CatalogProbe::Failed
+            CatalogProbe::Failed(None)
         } else {
             CatalogProbe::Authoritative(models)
         }
@@ -164,10 +170,15 @@ impl CatalogProbe {
 /// Discovers both ordinary models and provider-owned agent compositions in
 /// one provider process. Harness serves both catalogs from the same resident
 /// Host, so querying them together avoids starting it twice during detection.
+///
+/// The third element is the reason a probe that can distinguish failure from
+/// an empty catalog failed. It is `None` on success, and also `None` for the
+/// providers whose discovery still cannot tell the two apart — those keep the
+/// historical silent-fallback behavior rather than reporting a guess.
 pub fn discover_catalog(
     provider: ProviderKind,
     binary: &Path,
-) -> (Vec<ProviderModel>, Vec<ProviderAgentPreset>) {
+) -> (Vec<ProviderModel>, Vec<ProviderAgentPreset>, Option<String>) {
     let (discovered, discovered_presets) = match provider {
         // Amp exposes stable agent modes rather than a model inventory. Keep
         // the picker aligned with the modes advertised by the current CLI.
@@ -193,20 +204,20 @@ pub fn discover_catalog(
             (CatalogProbe::legacy(discover_pi_models(binary, PiDialect::OhMyPi)), None)
         }
     };
-    let models = match discovered {
+    let (models, catalog_error) = match discovered {
         CatalogProbe::Authoritative(models) => {
             let models = deduplicate(models);
             // Write even an empty catalog so a removal shrinks the picker; a
             // stale cache would otherwise resurrect the deleted provider.
             write_cached_models(provider, &models);
-            models
+            (models, None)
         }
-        CatalogProbe::Failed => {
-            cached_models(provider).unwrap_or_else(|| fallback_models(provider))
+        CatalogProbe::Failed(error) => {
+            (cached_models(provider).unwrap_or_else(|| fallback_models(provider)), error)
         }
     };
     let presets = discovered_presets.unwrap_or_else(|| fallback_agent_presets(provider));
-    (models, presets)
+    (models, presets, catalog_error)
 }
 
 /// Where a provider's last discovered catalog is cached. Debug builds keep it
@@ -415,12 +426,16 @@ fn discover_opencode_models(binary: &Path) -> CatalogProbe {
     let Ok(output) = crate::command_env::output(command) else {
         // The CLI could not run at all; keep the last good cache rather than
         // shrink the picker on a launch/transport failure.
-        return CatalogProbe::Failed;
+        return CatalogProbe::Failed(Some(
+            tr!("providers.catalog_probe_failed_to_run", command = "opencode models"),
+        ));
     };
     if !output.status.success() {
         // A non-zero exit (e.g. opencode rejecting its own config) is a failed
-        // probe, not an authoritative empty catalog. Retain the cache.
-        return CatalogProbe::Failed;
+        // probe, not an authoritative empty catalog. Retain the cache, and keep
+        // the CLI's own explanation: without it a broken provider is
+        // indistinguishable from one that simply has no new models.
+        return CatalogProbe::Failed(Some(cli_failure_reason(&output)));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let verbose = parse_opencode_verbose_models(&stdout);
@@ -433,6 +448,63 @@ fn discover_opencode_models(binary: &Path) -> CatalogProbe {
     // The CLI ran successfully: trust whatever it enumerated, even when that is
     // nothing, so removing a provider from opencode shrinks the picker.
     CatalogProbe::Authoritative(models)
+}
+
+/// A one-line reason from a provider CLI that exited unsuccessfully.
+///
+/// The CLIs report failures on stderr, sometimes after an ANSI-colored
+/// `Error:` banner and sometimes above a dump of the offending file. Keeping
+/// only the explanatory lines keeps the message renderable in the picker's
+/// status line while preserving the actual cause.
+fn cli_failure_reason(output: &std::process::Output) -> String {
+    failure_reason_from_parts(output.status.code(), &output.stderr, &output.stdout)
+}
+
+/// The portable half of [`cli_failure_reason`], split out because a
+/// `std::process::ExitStatus` cannot be constructed in a test.
+fn failure_reason_from_parts(code: Option<i32>, stderr: &[u8], stdout: &[u8]) -> String {
+    /// Enough for the CLI's headline and its first explanatory line, which is
+    /// where the cause lives. A config error then dumps the offending file and
+    /// a caret diagram; none of that belongs in a status line.
+    const MAX_LINES: usize = 2;
+    const MAX_CHARS: usize = 240;
+
+    let stderr = String::from_utf8_lossy(stderr);
+    let stdout = String::from_utf8_lossy(stdout);
+    let text = if stderr.trim().is_empty() {
+        stdout.as_ref()
+    } else {
+        stderr.as_ref()
+    };
+    // Every detail line is considered, not just the first: OpenCode prints a
+    // generic "Unexpected error" banner above the line that actually says what
+    // broke, so keeping only the first would discard the cause. Section rules
+    // like "--- JSONC Input ---" are decoration, not explanation.
+    let detail = text
+        .lines()
+        .map(strip_ansi)
+        .filter_map(|line| {
+            let line = line.trim();
+            let line = line.strip_prefix("Error:").unwrap_or(line).trim();
+            let is_section_rule = line.starts_with("---") && line.ends_with("---");
+            (!line.is_empty() && !is_section_rule).then(|| line.to_owned())
+        })
+        .take(MAX_LINES)
+        .collect::<Vec<_>>()
+        .join(" — ");
+    if detail.is_empty() {
+        return tr!(
+            "providers.catalog_probe_exited",
+            code = code.unwrap_or(-1)
+        );
+    }
+    let detail = if detail.chars().count() > MAX_CHARS {
+        let truncated = detail.chars().take(MAX_CHARS).collect::<String>();
+        format!("{}…", truncated.trim_end())
+    } else {
+        detail
+    };
+    tr!("providers.catalog_probe_failed", error = detail)
 }
 
 /// OpenCode's server is the authority on agents: builtins and every agent the
@@ -2389,6 +2461,134 @@ done
                     .join(",")
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod opencode_catalog_failure {
+    use super::*;
+
+    /// OpenCode reports its own startup failures on stderr behind an ANSI
+    /// banner, and a config error then dumps the offending file. The reason has
+    /// to survive the color codes and the banner while dropping the dump: it is
+    /// the only thing that tells the user their catalog is stale rather than
+    /// simply unchanged.
+    #[test]
+    fn a_failed_probe_reports_the_cli_reason_without_ansi_noise() {
+        // Captured verbatim from `opencode models` with an invalid config.
+        let reason = failure_reason_from_parts(
+            Some(1),
+            b"\x1b[91m\x1b[1mError: \x1b[0mConfig file at C:\\tmp\\opencode.json is not valid JSON(C): \n--- JSONC Input ---\n{ this is not valid json\n\n--- Errors ---\nInvalidSymbol at line 1, column 3\n",
+            b"",
+        );
+
+        assert!(reason.contains("is not valid JSON"), "{reason}");
+        assert!(!reason.contains('\u{1b}'), "ANSI codes leaked: {reason}");
+        assert!(!reason.contains('\n'), "must stay one line: {reason}");
+        assert!(
+            !reason.contains("JSONC Input") && !reason.contains("InvalidSymbol"),
+            "the config dump is not a status line: {reason}"
+        );
+    }
+
+    /// OpenCode's generic banner sits above the line that actually says what
+    /// broke, so the real cause has to survive alongside it.
+    #[test]
+    fn a_generic_banner_does_not_hide_the_underlying_cause() {
+        let reason = failure_reason_from_parts(
+            Some(1),
+            b"\x1b[91m\x1b[1mError: \x1b[0mUnexpected error\n\nno such column: project_id\n",
+            b"",
+        );
+
+        assert!(reason.contains("no such column: project_id"), "{reason}");
+        assert!(!reason.contains('\u{1b}'), "ANSI codes leaked: {reason}");
+        assert!(!reason.contains('\n'), "must stay one line: {reason}");
+    }
+
+    /// A provider's own message can contain a percent sign, which must reach
+    /// the UI literally rather than being read as another interpolation slot.
+    #[test]
+    fn a_percent_sign_in_the_cli_message_survives_interpolation() {
+        let reason = failure_reason_from_parts(Some(1), b"quota 100% exceeded\n", b"");
+
+        assert!(reason.contains("100%"), "{reason}");
+    }
+
+    /// A silent failure still has to say something, so the exit code is the
+    /// fallback rather than an empty status line.
+    #[test]
+    fn a_silent_failure_falls_back_to_the_exit_code() {
+        let reason = failure_reason_from_parts(Some(3), b"", b"");
+
+        assert!(reason.contains('3'), "{reason}");
+    }
+
+    /// The picker keeps the last good catalog when a probe fails, so the reason
+    /// has to arrive alongside that catalog. Without it a stale list looks
+    /// exactly like a healthy one, and a newly configured model silently never
+    /// appears — the failure that motivated this.
+    #[test]
+    fn an_unrunnable_cli_reports_a_reason_and_still_offers_a_catalog() {
+        let absent = std::env::temp_dir().join("waku-catalog-probe-absent-binary");
+
+        let (models, _presets, error) = discover_catalog(ProviderKind::OpenCode, &absent);
+
+        assert!(
+            error.is_some(),
+            "an unrunnable CLI must report why the catalog is stale"
+        );
+        assert!(
+            !models.is_empty(),
+            "a failed probe must still offer a usable catalog"
+        );
+    }
+    /// Proves the whole path against the real CLI: a config OpenCode refuses to
+    /// load makes the probe report *why* instead of silently serving the cached
+    /// catalog. Ignored by default because it needs the CLI installed.
+    #[test]
+    #[ignore = "requires an installed opencode"]
+    fn a_rejected_config_surfaces_the_cli_reason() {
+        let binary =
+            crate::command_env::find_executable("opencode").expect("opencode is not installed");
+        let config_root = std::env::temp_dir().join(format!(
+            "waku-catalog-bad-config-{}",
+            std::process::id()
+        ));
+        let config_directory = config_root.join("opencode");
+        std::fs::create_dir_all(&config_directory).expect("the config directory should be created");
+        std::fs::write(
+            config_directory.join("opencode.json"),
+            "{ this is not valid json",
+        )
+        .expect("the broken config should be written");
+
+        // The probe shells out through this process's environment, so the
+        // override has to be scoped to the call and then restored.
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        // SAFETY: single-threaded test binary section; no other thread reads
+        // the environment while this is set.
+        unsafe { std::env::set_var("XDG_CONFIG_HOME", &config_root) };
+        let (models, _presets, error) = discover_catalog(ProviderKind::OpenCode, &binary);
+        match previous {
+            Some(value) => unsafe { std::env::set_var("XDG_CONFIG_HOME", value) },
+            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
+        }
+        let _ = std::fs::remove_dir_all(&config_root);
+
+        let error = error.expect("a rejected config must be reported as a failed probe");
+        assert!(
+            error.contains("not valid JSON") || error.contains("Config file"),
+            "the CLI's own explanation should survive: {error}"
+        );
+        assert!(
+            error.chars().count() < 400,
+            "the reason must stay a status line, not a config dump: {error}"
+        );
+        assert!(
+            !models.is_empty(),
+            "a failed probe must still offer the cached catalog"
+        );
     }
 }
 
