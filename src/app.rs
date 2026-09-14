@@ -1618,6 +1618,7 @@ mod sidebar;
 mod skills_page;
 mod streaming;
 mod task_switcher;
+mod todo_panel;
 mod transcript;
 mod transcript_search;
 mod transcript_view;

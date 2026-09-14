@@ -9,6 +9,12 @@ const isMacOS = process.platform === "darwin";
 const appName = "Kerenzikov Debug";
 const targetDir = resolve(root, process.env.CARGO_TARGET_DIR || "target");
 const executableSuffix = process.platform === "win32" ? ".exe" : "";
+/// Windows holds an exclusive lock on a running executable, so cargo cannot
+/// link over `waku.exe` or `waku-debug-daemon.exe` while they are up: every
+/// save failed with "Access is denied (os error 5)" and the watcher kept the
+/// stale app. Unix unlinks the old inode and leaves the live process running,
+/// so only Windows needs the app down before the build starts.
+const mustStopBeforeBuild = process.platform === "win32";
 const appPath = isMacOS
   ? join(targetDir, "debug/Kerenzikov Debug.app")
   : join(targetDir, `debug/waku${executableSuffix}`);
@@ -449,9 +455,24 @@ async function drainBuildQueue(): Promise<void> {
       queuedBuild = undefined;
       const buildAppRevision = appChangeRevision;
       const buildDaemonRevision = daemonChangeRevision;
-      if (!(await build(target)) || stopping) continue;
 
-      if (target === "daemon") {
+      // The app owns the daemon (the daemon watches `--parent-pid` and exits
+      // within ~400ms of it), so stopping the app releases both binaries. That
+      // ordering has to come first on Windows, where cargo cannot replace a
+      // file it still has open.
+      if (mustStopBeforeBuild) await stopApp();
+
+      if (!(await build(target)) || stopping) {
+        // A failed build leaves the previous binary in place, so bring the app
+        // back rather than letting one typo cost a running window.
+        if (mustStopBeforeBuild && !stopping) app = launchApp();
+        continue;
+      }
+
+      // A daemon-only edit keeps the app up on the platforms that can swap the
+      // daemon underneath it. On Windows the app was already stopped above, so
+      // this falls through to the relaunch instead.
+      if (target === "daemon" && !mustStopBeforeBuild) {
         if (daemonChangeRevision === buildDaemonRevision) {
           console.log(
             "[waku-dev] Daemon rebuilt; Waku will swap the process without relaunching.",
@@ -463,7 +484,7 @@ async function drainBuildQueue(): Promise<void> {
       // App changes make a bundle compiled from an older revision stale. A
       // daemon-only edit does not: launch the app, then let its supervisor pick
       // up the independently rebuilt daemon.
-      if (appChangeRevision !== buildAppRevision) {
+      if (target === "app" && appChangeRevision !== buildAppRevision) {
         console.log(
           "[waku-dev] More changes arrived during the build; waiting to rebuild.",
         );

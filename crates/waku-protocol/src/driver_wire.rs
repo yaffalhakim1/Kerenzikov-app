@@ -115,6 +115,7 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
         ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
+        DriverEvent::TodoUpdated(todos) => ("todoUpdated", serde_json::to_value(todos)?),
         DriverEvent::TurnFinished { success, summary } => (
             "turnFinished",
             json!({ "success": success, "summary": summary }),
@@ -205,6 +206,7 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
         }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
+        "todoUpdated" => DriverEvent::TodoUpdated(serde_json::from_value(payload)?),
         "turnFinished" => {
             let finished: TurnFinishedWire = serde_json::from_value(payload)?;
             DriverEvent::TurnFinished {
@@ -288,7 +290,9 @@ struct TurnFinishedWire {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{ThreadGoal, ThreadGoalStatus, UserInputOption, UserInputQuestion};
+    use crate::model::{
+        ThreadGoal, ThreadGoalStatus, TodoItem, TodoStatus, UserInputOption, UserInputQuestion,
+    };
 
     #[test]
     fn goal_updates_round_trip_through_the_daemon_wire() {
@@ -316,6 +320,44 @@ mod tests {
             event_from_wire(cleared).unwrap(),
             DriverEvent::GoalUpdated(None)
         ));
+    }
+
+    /// The status spelling is OpenCode's own snake_case vocabulary, and the
+    /// browser and mobile clients decode it, so it is pinned here rather than
+    /// left to serde's default.
+    #[test]
+    fn todo_updates_round_trip_through_the_daemon_wire() {
+        let wire = event_to_wire(DriverEvent::TodoUpdated(vec![
+            TodoItem {
+                content: "Read the driver".into(),
+                status: TodoStatus::Completed,
+                priority: "high".into(),
+            },
+            TodoItem {
+                content: "Write the panel".into(),
+                status: TodoStatus::InProgress,
+                priority: "medium".into(),
+            },
+        ]))
+        .unwrap();
+        assert_eq!(wire.kind, "todoUpdated");
+        assert_eq!(wire.payload[0]["status"], "completed");
+        assert_eq!(wire.payload[1]["status"], "in_progress");
+
+        let DriverEvent::TodoUpdated(todos) = event_from_wire(wire).unwrap() else {
+            panic!("the event changed variants during its wire round trip");
+        };
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[1].status, TodoStatus::InProgress);
+
+        // An empty list is how a finished plan is cleared, so it must survive
+        // the round trip as an empty list rather than becoming an error.
+        let cleared = event_to_wire(DriverEvent::TodoUpdated(Vec::new())).unwrap();
+        let DriverEvent::TodoUpdated(todos) = event_from_wire(cleared).unwrap() else {
+            panic!("the cleared event changed variants");
+        };
+        assert!(todos.is_empty());
     }
 
     #[test]

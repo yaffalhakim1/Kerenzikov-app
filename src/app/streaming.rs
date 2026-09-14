@@ -652,6 +652,17 @@ impl Waku {
                     }
                 }
             }
+            DriverEvent::TodoUpdated(todos) => {
+                // The agent owns this list and republishes all of it, so a
+                // change replaces rather than merges. An empty payload clears
+                // the panel instead of leaving the last plan on screen.
+                if let Some(session) = self.state.session_mut(session_id)
+                    && session.todos != todos
+                {
+                    session.todos = todos;
+                    self.state.mark_session_dirty(session_id);
+                }
+            }
             DriverEvent::UsageUpdated {
                 context_tokens,
                 context_window,

@@ -1155,6 +1155,12 @@ goal.status_budget_limited:
   en: Budget exhausted
 goal.status_complete:
   en: Complete
+todo.title:
+  en: Tasks
+todo.more:
+  en: "+%{count} more"
+todo.tooltip:
+  en: The agent's task list
 goal.chip_active:
   en: Pursuing goal
 goal.chip_paused:

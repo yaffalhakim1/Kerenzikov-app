@@ -1552,6 +1552,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         provider_cursor: None,
         available_commands: Vec::new(),
         thread_goal: None,
+        todos: Vec::new(),
         context_usage: None,
         runtime_event_cursor: None,
         provider_session_id: None,

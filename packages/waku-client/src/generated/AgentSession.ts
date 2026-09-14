@@ -11,6 +11,7 @@ import type { RuntimeMode } from "./RuntimeMode";
 import type { SessionStatus } from "./SessionStatus";
 import type { SessionWorkspace } from "./SessionWorkspace";
 import type { ThreadGoal } from "./ThreadGoal";
+import type { TodoItem } from "./TodoItem";
 import type { TranscriptBlock } from "./TranscriptBlock";
 
 export type AgentSession = { id: string,
@@ -60,6 +61,12 @@ available_commands?: Array<ReportedCommand>,
  * Currently populated by Codex.
  */
 thread_goal?: ThreadGoal | null,
+/**
+ * The agent's own task list for this session, kept so a resumed session
+ * shows its plan before the runtime reconnects. Empty means the provider
+ * has published no plan, which is also how a completed one is cleared.
+ */
+todos?: Array<TodoItem>,
 /**
  * Context-window occupancy from the live stream, kept so a resumed
  * session's meter starts where the conversation left off.

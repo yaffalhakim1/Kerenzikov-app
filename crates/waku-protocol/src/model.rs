@@ -939,6 +939,35 @@ pub struct ThreadGoal {
     pub time_used_seconds: i64,
 }
 
+/// One entry in the agent's own task list. Field names follow OpenCode's
+/// `todo.updated` payload so its todos deserialize directly.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TodoItem {
+    pub content: String,
+    pub status: TodoStatus,
+    #[serde(default)]
+    pub priority: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TodoStatus {
+    #[default]
+    Pending,
+    InProgress,
+    Completed,
+    Cancelled,
+}
+
+impl TodoStatus {
+    /// Whether the entry is still outstanding, so a list can report how much
+    /// of the plan is left without every caller re-deriving it.
+    pub fn is_open(self) -> bool {
+        matches!(self, Self::Pending | Self::InProgress)
+    }
+}
+
 /// A goal mutation the client asks the provider runtime to perform. Results
 /// come back asynchronously as [`DriverEvent::GoalUpdated`]; failures surface
 /// through [`DriverEvent::Error`].
@@ -1026,6 +1055,11 @@ pub struct AgentSession {
     /// Currently populated by Codex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_goal: Option<ThreadGoal>,
+    /// The agent's own task list for this session, kept so a resumed session
+    /// shows its plan before the runtime reconnects. Empty means the provider
+    /// has published no plan, which is also how a completed one is cleared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub todos: Vec<TodoItem>,
     /// Context-window occupancy from the live stream, kept so a resumed
     /// session's meter starts where the conversation left off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1087,6 +1121,7 @@ impl AgentSession {
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,
+            todos: Vec::new(),
             context_usage: None,
             runtime_event_cursor: None,
             provider_session_id: None,
@@ -1123,6 +1158,7 @@ impl AgentSession {
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,
+            todos: Vec::new(),
             context_usage: None,
             runtime_event_cursor: None,
             provider_session_id: None,
@@ -2018,6 +2054,9 @@ pub enum DriverEvent {
     /// or (`None`) cleared. Carries the whole goal so late subscribers need
     /// no earlier event.
     GoalUpdated(Option<ThreadGoal>),
+    /// The agent rewrote its own task list. Carries the whole list, and an
+    /// empty one clears it, so a late subscriber needs no earlier event.
+    TodoUpdated(Vec<TodoItem>),
     TurnFinished {
         success: bool,
         summary: Option<String>,

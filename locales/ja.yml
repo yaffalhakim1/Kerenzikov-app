@@ -588,6 +588,9 @@ goal.status_stalled: 停滞中
 goal.status_usage_limited: 使用量上限
 goal.status_budget_limited: 予算切れ
 goal.status_complete: 完了
+todo.title: タスク
+todo.more: "他 %{count} 件"
+todo.tooltip: エージェントのタスク一覧
 goal.chip_active: ゴールを追求中
 goal.chip_paused: ゴール一時停止中
 goal.chip_stalled: ゴール停滞中
