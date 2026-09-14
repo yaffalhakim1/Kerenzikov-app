@@ -167,6 +167,52 @@ pub fn remember(project: &Path, text: &str) -> anyhow::Result<PathBuf> {
     Ok(file)
 }
 
+/// The curated sections of `MEMORY.md` as `(title, body)` pairs, in file
+/// order. Empty when the project remembers nothing. This is the editable
+/// surface the Settings page draws from.
+pub fn list_sections(project: &Path) -> Vec<(String, String)> {
+    let path = memory_file(project);
+    let Ok(memory) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    split_sections(&memory).1
+}
+
+/// Forget the single section titled `title`. Returns whether anything was
+/// removed. Unlike [`forget`]'s substring match, this only drops the exact
+/// section the Settings page's delete button names.
+pub fn forget_section(project: &Path, title: &str) -> anyhow::Result<bool> {
+    let path = memory_file(project);
+    let Ok(memory) = std::fs::read_to_string(&path) else {
+        return Ok(false);
+    };
+    let (header, sections) = split_sections(&memory);
+    let retained = sections
+        .iter()
+        .filter(|(section_title, _)| section_title != title)
+        .collect::<Vec<_>>();
+    if retained.len() == sections.len() {
+        return Ok(false);
+    }
+    let mut rewritten = header;
+    for (section_title, body) in retained {
+        rewritten.push_str(&format!("## {section_title}\n{body}"));
+    }
+    std::fs::write(&path, rewritten)?;
+    // The per-fact files mirror MEMORY.md; drop the ones this section owns
+    // so the loader stops recalling them. Titles are unique per section, so
+    // matching the `# {title}` heading is exact enough.
+    for (path, body) in stored_facts(project) {
+        let owns = body.lines().next().is_some_and(|heading| {
+            heading.strip_prefix("# ").unwrap_or_default().trim() == title
+        });
+        if owns {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    Ok(true)
+}
+
 /// Split `MEMORY.md` into its header and `## ` sections.
 fn split_sections(memory: &str) -> (String, Vec<(String, String)>) {
     let mut header = String::new();
@@ -306,6 +352,22 @@ mod tests {
         assert!(!context.contains("pnpm"));
         assert!(context.contains("Fridays"));
         assert_eq!(forget(&project, "nothing matches this").expect("forget none"), 0);
+    }
+
+    #[test]
+    fn section_listing_and_exact_delete_round_trip() {
+        let project = fixture_project("sections");
+        remember(&project, "Uses pnpm, never npm.").expect("remember one");
+        remember(&project, "Deploys on Fridays.").expect("remember two");
+
+        let sections = list_sections(&project);
+        assert_eq!(sections.len(), 2);
+        let title = sections[0].0.clone();
+        assert!(forget_section(&project, &title).expect("delete one"));
+        assert!(!forget_section(&project, &title).expect("delete none"));
+        let sections = list_sections(&project);
+        assert_eq!(sections.len(), 1);
+        assert!(!sections.iter().any(|(section, _)| section == &title));
     }
 
     #[test]

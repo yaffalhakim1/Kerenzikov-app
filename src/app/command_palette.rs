@@ -834,6 +834,12 @@ impl Waku {
                 "settings preferences skills library create disable agent skill",
             ),
             (
+                SettingsPage::Memory,
+                "settings.memory",
+                "icons/sparkle.svg",
+                "settings preferences memory remember forget facts notes",
+            ),
+            (
                 SettingsPage::Usage,
                 "settings.usage",
                 "icons/chart-column.svg",

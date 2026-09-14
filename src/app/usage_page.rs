@@ -53,6 +53,9 @@ impl Waku {
         if page == SettingsPage::Skills {
             self.ensure_skills_catalog(false, cx);
         }
+        if page == SettingsPage::Memory {
+            self.ensure_memory(false, cx);
+        }
         cx.notify();
     }
 

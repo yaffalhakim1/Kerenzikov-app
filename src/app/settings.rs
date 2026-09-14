@@ -19,7 +19,7 @@ const SETTINGS_SEARCH_CONTEXT: &str = "SettingsSidebar > TextInput";
 
 /// The sidebar's rows in display order, each with the keyword haystack the
 /// search field filters against.
-const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 7] = [
+const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 8] = [
     (
         SettingsPage::General,
         "settings.general",
@@ -43,6 +43,12 @@ const SETTINGS_PAGES: [(SettingsPage, &str, &str, &str); 7] = [
         "settings.skills",
         "icons/package.svg",
         "settings.skills_keywords",
+    ),
+    (
+        SettingsPage::Memory,
+        "settings.memory",
+        "icons/sparkle.svg",
+        "settings.memory_keywords",
     ),
     (
         SettingsPage::Usage,
@@ -358,6 +364,7 @@ impl Waku {
                         SettingsPage::General => tr!("settings.general"),
                         SettingsPage::Providers => tr!("settings.providers"),
                         SettingsPage::Skills => tr!("settings.skills"),
+                        SettingsPage::Memory => tr!("settings.memory"),
                         SettingsPage::Usage => tr!("settings.usage"),
                         SettingsPage::Daemon => tr!("settings.daemon"),
                         SettingsPage::ComputerUse => tr!("settings.computer_use"),
@@ -368,6 +375,7 @@ impl Waku {
                 SettingsPage::General => self.render_general_settings(cx),
                 SettingsPage::Providers => self.render_providers_settings(cx),
                 SettingsPage::Skills => self.render_skills_settings(cx),
+                SettingsPage::Memory => self.render_memory_settings(cx),
                 SettingsPage::Usage => self.render_usage_settings(cx),
                 SettingsPage::Daemon => self.render_daemon_settings(cx),
                 SettingsPage::ComputerUse => self.render_computer_use_settings(cx),
@@ -2397,6 +2405,9 @@ impl Waku {
         });
         self.skills_search.update(cx, |input, cx| {
             input.set_placeholder(tr!("skills.search"), cx)
+        });
+        self.memory_input.update(cx, |input, cx| {
+            input.set_placeholder(tr!("memory.add_placeholder"), cx)
         });
         self.provider_path_input.update(cx, |input, cx| {
             input.set_placeholder(tr!("input.detected_automatically"), cx)
