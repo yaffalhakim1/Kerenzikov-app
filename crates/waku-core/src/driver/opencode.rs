@@ -30,7 +30,7 @@ use crate::driver::{
 use crate::http_wire::{Endpoint, StreamControl, open_event_stream};
 use crate::model::{
     ActivityKind, DriverEvent, PermissionOption, ProviderResumeCursor, ReportedCommand,
-    RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
+    RuntimeMode, TodoItem, TodoStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 use crate::opencode_pool::PooledServer;
 use crate::opencode_session::{
@@ -1015,9 +1015,55 @@ fn handle_event(
         }
         "question.asked" => request_user_input(properties, events),
         "question.replied" | "question.rejected" => {}
+        "todo.updated" => {
+            let _ = events.send(DriverEvent::TodoUpdated(todo_items(properties)));
+        }
         // `session.created`, `session.diff`, and the plugin/catalog/reference
         // chatter are not transcript content.
         _ => {}
+    }
+}
+
+/// The agent's own task list, as `todo.updated` carries it.
+///
+/// The payload is `{sessionID, todos: [{content, status, priority}]}`. An
+/// entry with no content is dropped rather than rendered as a blank row, and
+/// an unrecognized status degrades to `Pending` so a provider that grows a
+/// new state shows the task as outstanding instead of losing it.
+fn todo_items(properties: &Value) -> Vec<TodoItem> {
+    properties
+        .get("todos")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|todo| {
+            let content = todo.get("content").and_then(Value::as_str)?.trim();
+            if content.is_empty() {
+                return None;
+            }
+            Some(TodoItem {
+                content: content.to_owned(),
+                status: todo
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(todo_status)
+                    .unwrap_or_default(),
+                priority: todo
+                    .get("priority")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned(),
+            })
+        })
+        .collect()
+}
+
+fn todo_status(status: &str) -> TodoStatus {
+    match status {
+        "in_progress" => TodoStatus::InProgress,
+        "completed" => TodoStatus::Completed,
+        "cancelled" => TodoStatus::Cancelled,
+        _ => TodoStatus::Pending,
     }
 }
 
@@ -1510,6 +1556,103 @@ mod tests {
         assert_eq!(questions[0].id, "question-0-files");
         assert!(questions[0].multi_select);
         assert_eq!(questions[0].options[0].label, "Source");
+    }
+
+    /// The agent's task list arrives as OpenCode's own `todo.updated` payload,
+    /// so the parser is pinned against that exact shape.
+    #[test]
+    fn todo_events_carry_the_agents_plan_through_the_status_ladder() {
+        let (events, event_rx) = unbounded();
+        let mut state = OpenCodeStreamState::default();
+
+        handle_event(
+            &json!({
+                "type": "todo.updated",
+                "properties": {
+                    "sessionID": "session-1",
+                    "todos": [
+                        {"content": "Read the driver", "status": "completed", "priority": "high"},
+                        {"content": "Add the event", "status": "in_progress", "priority": "high"},
+                        {"content": "Write the panel", "status": "pending", "priority": "medium"},
+                        {"content": "Ship it", "status": "cancelled", "priority": "low"},
+                    ]
+                }
+            }),
+            &events,
+            &unbounded().0,
+            &Mutex::new(false),
+            false,
+            &mut state,
+        );
+
+        let DriverEvent::TodoUpdated(todos) = event_rx.try_recv().unwrap() else {
+            panic!("todo.updated must use the structured task-list event");
+        };
+        assert_eq!(todos.len(), 4);
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[0].status, TodoStatus::Completed);
+        assert_eq!(todos[1].status, TodoStatus::InProgress);
+        assert_eq!(todos[2].status, TodoStatus::Pending);
+        assert_eq!(todos[3].status, TodoStatus::Cancelled);
+        assert_eq!(todos[0].priority, "high");
+    }
+
+    /// An entry with no text would render as a blank row, and an unknown status
+    /// must keep the task visible rather than dropping it.
+    #[test]
+    fn todo_events_skip_blank_entries_and_default_unknown_statuses() {
+        let (events, event_rx) = unbounded();
+        let mut state = OpenCodeStreamState::default();
+
+        handle_event(
+            &json!({
+                "type": "todo.updated",
+                "properties": {
+                    "sessionID": "session-1",
+                    "todos": [
+                        {"content": "   ", "status": "pending", "priority": ""},
+                        {"content": "Something new", "status": "blocked", "priority": ""},
+                    ]
+                }
+            }),
+            &events,
+            &unbounded().0,
+            &Mutex::new(false),
+            false,
+            &mut state,
+        );
+
+        let DriverEvent::TodoUpdated(todos) = event_rx.try_recv().unwrap() else {
+            panic!("todo.updated must use the structured task-list event");
+        };
+        assert_eq!(todos.len(), 1, "a blank entry must not become a row");
+        assert_eq!(todos[0].content, "Something new");
+        assert_eq!(todos[0].status, TodoStatus::Pending);
+    }
+
+    /// An empty list is how the provider clears the plan, so it has to travel
+    /// rather than being swallowed as a no-op.
+    #[test]
+    fn an_empty_todo_list_still_reaches_the_client() {
+        let (events, event_rx) = unbounded();
+        let mut state = OpenCodeStreamState::default();
+
+        handle_event(
+            &json!({
+                "type": "todo.updated",
+                "properties": {"sessionID": "session-1", "todos": []}
+            }),
+            &events,
+            &unbounded().0,
+            &Mutex::new(false),
+            false,
+            &mut state,
+        );
+
+        let DriverEvent::TodoUpdated(todos) = event_rx.try_recv().unwrap() else {
+            panic!("todo.updated must use the structured task-list event");
+        };
+        assert!(todos.is_empty());
     }
 
     /// Drives a real `opencode serve` through the actual driver. Ignored by

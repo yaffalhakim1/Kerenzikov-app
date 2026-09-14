@@ -1697,7 +1697,7 @@ fn worked_duration_uses_readable_units() {
 }
 
 #[test]
-fn sidebar_time_labels_prefer_the_live_turn_over_the_last_reply() {
+fn sidebar_time_labels_report_the_last_reply_age() {
     use super::sidebar::{format_time_ago, session_time_label};
 
     assert_eq!(format_time_ago(0), "just now");
@@ -1706,25 +1706,25 @@ fn sidebar_time_labels_prefer_the_live_turn_over_the_last_reply() {
     assert_eq!(format_time_ago(7_200), "2h");
     assert_eq!(format_time_ago(420 * 86_400), "420d");
 
-    // Never replied, nothing running: the row stays quiet.
+    // Never replied: the row stays quiet, so a fresh task shows no age.
     let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
     assert_eq!(session_time_label(&session, 1_000), None);
 
-    // A live turn counts up instead of showing the previous reply's age.
-    session.last_reply_at = Some(40);
+    // The reply's age, whatever the session is doing. A live turn is spoken
+    // for by the row's spinner, and the waiting, background and failed states
+    // by their own icons, so this no longer competes with them for the slot.
+    // `begin_turn` stamps `last_reply_at` with the wall clock, so the age is
+    // set after it to keep the assertion about the status, not the clock.
     session.begin_turn("go");
     session.status = SessionStatus::Working;
-    session.turns[0].started_at = 100;
-    assert_eq!(
-        session_time_label(&session, 109).as_deref(),
-        Some("Working for 9s")
-    );
+    session.last_reply_at = Some(40);
+    assert_eq!(session_time_label(&session, 340).as_deref(), Some("5m"));
 
-    // Settled again: back to how long ago the agent last replied.
-    session.finish_active_turn(TurnStatus::Completed);
-    session.status = SessionStatus::Idle;
-    session.last_reply_at = Some(500);
-    assert_eq!(session_time_label(&session, 800).as_deref(), Some("5m"));
+    session.status = SessionStatus::Background;
+    assert_eq!(session_time_label(&session, 340).as_deref(), Some("5m"));
+
+    session.status = SessionStatus::Waiting;
+    assert_eq!(session_time_label(&session, 340).as_deref(), Some("5m"));
 }
 
 /// The time-label wake-up chain arms exactly one timer, aimed at the next
