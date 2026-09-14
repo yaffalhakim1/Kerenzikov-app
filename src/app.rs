@@ -2812,7 +2812,9 @@ impl Waku {
                 usage_history_scanned_at: None,
                 usage_view: UsageViewMode::Daily,
                 usage_window: crate::usage_history::UsageWindow::TrailingDays(30),
-                usage_metric: UsageMetric::Cost,
+                // Tokens is the default: it is always present, while cost is
+                // $0 for free or unpriced models.
+                usage_metric: UsageMetric::Tokens,
                 usage_breakdown: UsageBreakdown::Model,
                 usage_months_scroll: ScrollHandle::new(),
                 usage_months_scrollbar: ScrollbarState::new(),

@@ -140,14 +140,12 @@ impl Waku {
                 .to_string()
         );
 
+        // The project header is plain text, not a card: it labels the page,
+        // while the add-fact input and the facts below keep the card look.
         let mut column = div().child(
             div()
                 .mt(px(15.0))
                 .w_full()
-                .px(px(20.0))
-                .py(px(14.0))
-                .rounded(px(13.0))
-                .bg(theme.raised)
                 .child(
                     div()
                         .text_size(sp(13.5))
@@ -173,7 +171,7 @@ impl Waku {
                 ),
         );
 
-        let mut column = div().child(
+        column = column.child(
             div()
                 .mt(px(15.0))
                 .w_full()
@@ -254,7 +252,9 @@ impl Waku {
                 .into_any_element(),
             Some(entries) => {
                 let mut list = div();
-                for (title, fact_body) in entries.iter() {
+                // `MEMORY.md` appends, so the file order is oldest-first;
+                // the page leads with the newest fact.
+                for (title, fact_body) in entries.iter().rev() {
                     list = list.child(self.render_memory_row(title, fact_body, &theme, cx));
                 }
                 list.into_any_element()
