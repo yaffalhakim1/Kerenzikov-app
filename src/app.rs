@@ -215,6 +215,7 @@ enum SettingsPage {
     General,
     Providers,
     Skills,
+    Memory,
     Usage,
     Daemon,
     ComputerUse,
@@ -1442,6 +1443,19 @@ pub struct Waku {
     /// The skill directory whose delete button is armed for its confirming
     /// second click.
     skills_delete_arming: Option<PathBuf>,
+    /// The project-memory composer field on the Memory settings page.
+    memory_input: Entity<TextInput>,
+    /// This project's `MEMORY.md` sections, read off-thread. Frames read
+    /// only this; `None` means the first load has not landed yet.
+    memory_entries: Option<Rc<Vec<(String, String)>>>,
+    /// Which project path the cache above was read from. A project switch
+    /// invalidates it.
+    memory_project: Option<PathBuf>,
+    memory_generation: u64,
+    memory_pending: bool,
+    /// The memory title whose delete button is armed for its confirming
+    /// second click.
+    memory_delete_arming: Option<String>,
     /// Scroll position of the settings content column, tracked so the pane
     /// can draw a scrollbar and mark the titlebar boundary once content
     /// slides under it.
@@ -1609,6 +1623,7 @@ mod drafts;
 mod file_search;
 mod goal_dialog;
 mod image_preview;
+mod memory_page;
 mod render;
 mod right_panel;
 mod runtime;
@@ -2015,6 +2030,11 @@ impl Waku {
                 .clear_on_escape()
                 .placeholder(tr!("skills.search"))
         });
+        let memory_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("memory.add_placeholder"))
+        });
         let session_rename_input = cx.new(|cx| TextInput::new(window, cx));
         let provider_path_input = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -2354,6 +2374,11 @@ impl Waku {
                     if this.settings_page == Some(SettingsPage::Skills) {
                         this.ensure_skills_catalog(true, cx);
                     }
+                    // MEMORY.md is the same: edited by hand or by another
+                    // agent while away.
+                    if this.settings_page == Some(SettingsPage::Memory) {
+                        this.ensure_memory(true, cx);
+                    }
                 }
             })
             .detach();
@@ -2562,6 +2587,15 @@ impl Waku {
                     cx.notify();
                 }
             })
+            .detach();
+            cx.subscribe(
+                &memory_input,
+                |this: &mut Self, _, event: &InputEvent, cx| match event {
+                    InputEvent::Submit(_) => this.add_memory_fact(cx),
+                    InputEvent::Edited => cx.notify(),
+                    _ => {}
+                },
+            )
             .detach();
             cx.subscribe(
                 &session_rename_input,
@@ -2778,7 +2812,9 @@ impl Waku {
                 usage_history_scanned_at: None,
                 usage_view: UsageViewMode::Daily,
                 usage_window: crate::usage_history::UsageWindow::TrailingDays(30),
-                usage_metric: UsageMetric::Cost,
+                // Tokens is the default: it is always present, while cost is
+                // $0 for free or unpriced models.
+                usage_metric: UsageMetric::Tokens,
                 usage_breakdown: UsageBreakdown::Model,
                 usage_months_scroll: ScrollHandle::new(),
                 usage_months_scrollbar: ScrollbarState::new(),
@@ -2926,6 +2962,12 @@ impl Waku {
                 skills_detail_scrollbar: ScrollbarState::new(),
                 skills_source_filter: None,
                 skills_delete_arming: None,
+                memory_input,
+                memory_entries: None,
+                memory_project: None,
+                memory_generation: 0,
+                memory_pending: false,
+                memory_delete_arming: None,
                 settings_scroll: ScrollHandle::new(),
                 settings_scrollbar: ScrollbarState::new(),
                 header_drag_armed: false,

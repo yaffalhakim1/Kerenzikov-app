@@ -166,6 +166,36 @@ settings.skills:
   en: Skills
 settings.skills_keywords:
   en: skills skill library agent disable enable delete claude codex cursor opencode pi amp shared
+settings.memory:
+  en: Memory
+settings.memory_keywords:
+  en: memory remember forget facts notes project recalled sessions
+memory.description:
+  en: Facts below are recalled into every session in this project, including /remember and /forget in the composer
+memory.add_title:
+  en: Remember a fact
+memory.add_placeholder:
+  en: e.g. Uses pnpm, never npm…
+memory.remember:
+  en: Remember
+memory.loading:
+  en: Reading MEMORY.md…
+memory.empty_title:
+  en: No facts yet
+memory.empty_description:
+  en: Facts you remember here or with /remember are recalled into every session in this project
+memory.file_caption:
+  en: "Stored in %{path}"
+memory.no_project:
+  en: No project selected
+memory.no_project_description:
+  en: Project memory lives in that project's MEMORY.md. Select a project to see and edit its facts
+memory.delete:
+  en: Delete
+memory.confirm_delete:
+  en: Confirm delete
+memory.deleted:
+  en: Project fact forgotten
 settings.usage_keywords:
   en: usage tokens cost spend cache daily chart model breakdown history claude codex
 settings.daemon_keywords:
