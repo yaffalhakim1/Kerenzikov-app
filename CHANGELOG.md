@@ -12,6 +12,13 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.29]
+
+- Windows updates itself. The app checks this fork's own update feed on
+  launch and offers new versions in place, instead of asking you to download
+  every release by hand. First install is still manual; everything after this
+  version arrives automatically.
+
 ## [0.1.28]
 
 - Sidebar task rows are one line instead of two. The git branch and time
