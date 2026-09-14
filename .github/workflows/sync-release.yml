@@ -1,9 +1,8 @@
 name: Sync release
 
-# Disabled: this fork has no R2 bucket, so nothing to sync. The workflow is
-# kept for reference — it is what copies release assets into the bucket that
-# an update feed points at. Re-enable by restoring the `release` trigger and
-# setting the R2_* secrets.
+# Manual backfill only: the `release` workflow already uploads installers +
+# feeds to R2 inline, so this is just the repair tool for when that step
+# failed or a release needs re-syncing. Needs the R2_* secrets.
 on:
   workflow_dispatch:
     inputs:
