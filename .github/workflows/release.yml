@@ -13,9 +13,6 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
-env:
-  CARGO_TERM_COLOR: always
-
 jobs:
   version:
     name: Resolve version
@@ -92,13 +89,30 @@ jobs:
       # ran 2.6 GB per matrix leg and pushed the repo past GitHub's 10 GB
       # cache budget, so the LRU evicted them before the next release could
       # restore anything.
+      #
+      # The automatic key ends with the job name, and a tag run may only
+      # restore its own tag's cache or the default branch's — so a key
+      # containing `windows-x86_64` could never match the `test`-named entry
+      # the Tests workflow writes on main, and every release built cold.
+      # Dropping the job component makes the restore prefix match main's.
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          toolchain: 1.96.0
+          add-job-id-key: false
+          # A cache written during a tag run is scoped to that tag, so no later
+          # release can ever read it: it just consumes ~1.5 GB of the 10 GB
+          # budget per leg and evicts the main-branch entries that are actually
+          # reusable. Tag runs read main's cache without writing one; a manual
+          # dispatch on main still saves, and that entry does get reused.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Bundle
         env:
+          # Scoped to this step, not the workflow: rust-cache hashes the build
+          # environment into its key, so a workflow-wide CARGO_TERM_COLOR made
+          # this job's key differ from the Tests job's on the same runner and
+          # defeated the restore above.
+          CARGO_TERM_COLOR: always
           WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
           WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -133,13 +147,19 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
+      # Keyed like the x86_64 leg. Nothing on main builds for Windows arm64, so
+      # there is no default-branch entry to restore and this leg stays cold —
+      # as it always did. `save-if` is what keeps it from also writing a cache
+      # scoped to this tag, which no run could ever read.
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          toolchain: 1.96.0
+          add-job-id-key: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Bundle
         env:
+          CARGO_TERM_COLOR: always
           WAKU_ANALYTICS_ENDPOINT: ${{ secrets.WAKU_ANALYTICS_ENDPOINT }}
           WAKU_ANALYTICS_WEBSITE_ID: ${{ secrets.WAKU_ANALYTICS_WEBSITE_ID }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
