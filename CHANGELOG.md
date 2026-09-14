@@ -12,6 +12,18 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.28]
+
+- Sidebar task rows are one line instead of two. The git branch and time
+  label that occupied a second line now share the row: the title, the status
+  icon, and — once a task has settled — how long ago the agent last replied,
+  where the spinner used to sit. More tasks fit on screen without scrolling.
+- The agent's plan is visible while it works. When a provider publishes the
+  task list it is following, an icon beside the context meter shows how many
+  steps are done, and opening it lists them. Cancelled steps count toward the
+  total but never toward the done count, so an abandoned plan does not read as
+  finished. The icon appears only when a plan exists.
+
 ## [0.1.27]
 
 - Provider failures now say what actually went wrong. When a task cannot
