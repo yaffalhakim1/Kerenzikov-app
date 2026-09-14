@@ -12,6 +12,15 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.30]
+
+- Project memory is editable in Settings. The new Memory page lists the
+  selected project's facts newest-first, with a field to remember new ones
+  and per-fact delete, instead of only the `/remember` and `/forget`
+  composer commands.
+- Usage opens on token counts instead of cost, so activity on free and
+  unpriced models reads correctly instead of flatlining at $0.
+
 ## [0.1.29]
 
 - Windows updates itself. The app checks this fork's own update feed on
