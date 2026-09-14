@@ -205,7 +205,7 @@ fn updater_button_available_content(
 /// Height of a session card plus the separation reserved beneath it in the
 /// virtualized sidebar list. Keep the gap inside the list row so measured and
 /// estimated heights stay identical for off-screen sessions.
-const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 51.0;
+const SIDEBAR_SESSION_CARD_HEIGHT: f32 = 32.0;
 const SIDEBAR_SESSION_ROW_GAP: f32 = 1.0;
 const SIDEBAR_SESSION_ROW_HEIGHT: f32 = SIDEBAR_SESSION_CARD_HEIGHT + SIDEBAR_SESSION_ROW_GAP;
 const SIDEBAR_ACTION_ROW_HEIGHT: f32 = 32.0;
@@ -219,24 +219,13 @@ const SIDEBAR_GROUP_CHILD_PADDING: f32 = 28.0;
 const SIDEBAR_PROJECT_RECENT_WINDOW_SECONDS: u64 = 3 * 24 * 60 * 60;
 const SIDEBAR_PROJECT_REVEAL_BATCH: usize = 30;
 
-/// The session row's trailing time: how long the live turn has been working,
-/// or how long ago the agent last replied. A session that has never replied
-/// shows nothing.
+/// How long ago the agent last replied. A session that has never replied shows
+/// nothing.
+///
+/// Only the age lives here. A live turn is spoken for by the row's spinner, and
+/// the waiting, background and failed states by their own icons, so this never
+/// competes with them for the same slot.
 pub(super) fn session_time_label(session: &AgentSession, now: u64) -> Option<String> {
-    if session.status == SessionStatus::Background {
-        return Some(tr!("sidebar.status_background"));
-    }
-    if session.is_busy()
-        && let Some(turn) = session
-            .turns
-            .last()
-            .filter(|turn| turn.status == TurnStatus::Running)
-    {
-        return Some(tr!(
-            "sidebar.working",
-            elapsed = format_working_elapsed(now.saturating_sub(turn.started_at))
-        ));
-    }
     session
         .last_reply_at
         .map(|last_reply_at| format_time_ago(now.saturating_sub(last_reply_at)))
@@ -309,15 +298,6 @@ fn visible_project_sessions(
 
 fn sidebar_project_is_projectless(project: &Project, projectless_root: Option<&Path>) -> bool {
     projectless_root.is_some_and(|root| project.path.starts_with(root))
-}
-
-fn persisted_sidebar_branch_label(workspace: &SessionWorkspace) -> Option<&str> {
-    match workspace {
-        SessionWorkspace::Local => None,
-        SessionWorkspace::NewWorktree { base_branch } => base_branch.as_deref(),
-        SessionWorkspace::Worktree { branch, .. } => Some(branch.as_str()),
-    }
-    .filter(|branch| !branch.is_empty())
 }
 
 /// Compact "how long ago" for the sidebar: "just now", then one coarse unit —
@@ -1801,43 +1781,11 @@ impl Waku {
             session.status,
             SessionStatus::Connecting | SessionStatus::Working
         );
-        let project = self
-            .state
-            .projects
-            .iter()
-            .find(|project| project.id == session.project_id);
         let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project;
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
             8.0
-        };
-        let detail_label = if grouped_by_project {
-            persisted_sidebar_branch_label(&session.workspace)
-                .map(|branch| SharedString::from(branch.to_owned()))
-                .or_else(|| {
-                    if !matches!(&session.workspace, SessionWorkspace::Local) {
-                        return None;
-                    }
-                    project.and_then(|project| {
-                        self.sidebar_branch_labels
-                            .borrow()
-                            .get(&project.path)
-                            .cloned()
-                    })
-                })
-        } else {
-            Some(SharedString::from(
-                project
-                    .map(Project::display_name)
-                    .unwrap_or_else(|| tr!("sidebar.unknown_project")),
-            ))
-        };
-        let has_detail_label = detail_label.is_some();
-        let detail_icon = if grouped_by_project {
-            "icons/git-branch.svg"
-        } else {
-            "icons/folder.svg"
         };
         let rename_input =
             (self.session_rename == Some(session_id)).then(|| self.session_rename_input.clone());
@@ -1886,8 +1834,7 @@ impl Waku {
             .w_full()
             .min_w_0()
             .flex()
-            .flex_col()
-            .gap(px(4.0))
+            .items_center()
             .pl(px(left_padding))
             .pr(px(8.0))
             .py(px(7.0))
@@ -1901,6 +1848,8 @@ impl Waku {
             .child(
                 div()
                     .flex()
+                    .flex_1()
+                    .min_w_0()
                     .items_center()
                     .gap(px(6.0))
                     .overflow_hidden()
@@ -1933,44 +1882,25 @@ impl Waku {
                             12.0,
                             status_color(&theme, session.status),
                         ))
-                    }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(5.0))
-                    .text_size(sp(if grouped_by_project { 12.5 } else { 13.0 }))
-                    .line_height(sp(15.0))
-                    .when_some(detail_label, |element, label| {
-                        element
-                            .child(icon(detail_icon, 12.5, theme.text_tertiary))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .truncate()
-                                    .text_color(theme.text_tertiary)
-                                    .child(label),
-                            )
                     })
-                    .when(!has_detail_label, |element| element.child(div().flex_1()))
-                    .when_some(
-                        session_time_label(session, unix_time()),
-                        |element, label| {
-                            element.child(
-                                div()
-                                    .flex_none()
-                                    .text_size(sp(12.5))
-                                    .text_color(if session.is_busy() {
-                                        theme.text_tertiary
-                                    } else {
-                                        theme.text_ghost
-                                    })
-                                    .child(SharedString::from(label)),
-                            )
-                        },
-                    ),
+                    // The spinner's slot is the row's only trailing element, so
+                    // a settled session puts the last-reply age there instead:
+                    // "5m" says when the agent last spoke, where the spinner
+                    // said it was still speaking.
+                    .when(session.status == SessionStatus::Idle, |element| {
+                        element.when_some(
+                            session_time_label(session, unix_time()),
+                            |element, label| {
+                                element.child(
+                                    div()
+                                        .flex_none()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text_ghost)
+                                        .child(SharedString::from(label)),
+                                )
+                            },
+                        )
+                    }),
             )
             .when(!renaming, |element| {
                 element
@@ -2631,25 +2561,6 @@ mod tests {
     }
 
     #[test]
-    fn persisted_worktree_branches_supply_sidebar_labels() {
-        let local = SessionWorkspace::Local;
-        let planned = SessionWorkspace::NewWorktree {
-            base_branch: Some("develop".to_owned()),
-        };
-        let worktree = SessionWorkspace::Worktree {
-            path: PathBuf::from("/tmp/worktree"),
-            branch: "feature/sidebar".to_owned(),
-        };
-
-        assert_eq!(persisted_sidebar_branch_label(&local), None);
-        assert_eq!(persisted_sidebar_branch_label(&planned), Some("develop"));
-        assert_eq!(
-            persisted_sidebar_branch_label(&worktree),
-            Some("feature/sidebar")
-        );
-    }
-
-    #[test]
     fn pending_session_replaces_sidebar_selection_immediately() {
         let current = Uuid::from_u128(1);
         let pending = Uuid::from_u128(2);
@@ -2679,8 +2590,11 @@ mod tests {
         let offset = sidebar_bottom_aligned_offset(&rows, index, px(400.0));
 
         assert_eq!(index, 32);
-        assert_eq!(offset.item_ix, 25);
-        assert_eq!(offset.offset_in_item, px(16.0));
+        // Recompute these two whenever SIDEBAR_SESSION_ROW_HEIGHT changes:
+        // 13 rows of 33px fill the 400px viewport, leaving 29px clipped off
+        // the topmost one.
+        assert_eq!(offset.item_ix, 20);
+        assert_eq!(offset.offset_in_item, px(29.0));
         let visible_height = rows[offset.item_ix..=index]
             .iter()
             .copied()
