@@ -104,10 +104,16 @@ jobs:
       # every build ran cold. rust-cache stores only crates + built deps
       # pruned against the current lockfile (a few hundred MB), so entries
       # survive and restores actually happen.
+      #
+      # The job name is left out of the key so the Release workflow — whose
+      # jobs are named `windows-x86_64` and `windows-arm64` — can restore this
+      # entry. A tag run may read the default branch's cache, but only under a
+      # matching key, and the automatic key otherwise ends with the job name.
+      # The runner OS and architecture still separate the matrix legs.
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          toolchain: 1.96.0
+          add-job-id-key: false
 
       - name: Run tests
         run: cargo test --locked
