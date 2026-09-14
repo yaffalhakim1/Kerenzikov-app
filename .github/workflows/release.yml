@@ -279,8 +279,42 @@ jobs:
           # What the website's Windows download resolves "latest" to.
           echo "$VERSION" > artifacts/latest-windows.txt
 
-      # No update feed: this fork ships no auto-updater, so nothing to sign.
-      # Installers are trusted by distribution, not by an appcast signature.
+      - name: Generate Windows appcasts
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          WAKU_DOWNLOAD_URL_PREFIX: https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          bun scripts/appcast-windows.ts artifacts "$VERSION"
+          ls -lah artifacts/appcast-windows-*.xml
+
+      - name: Upload installers and feeds to R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          sudo apt-get update && sudo apt-get install --yes rclone
+          export RCLONE_CONFIG_R2_TYPE=s3
+          export RCLONE_CONFIG_R2_PROVIDER=Cloudflare
+          export RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+          export RCLONE_CONFIG_R2_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export RCLONE_CONFIG_R2_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          export RCLONE_CONFIG_R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # Installers never change -> cache 1 year
+          rclone copy artifacts "r2:${R2_BUCKET}" \
+            --s3-no-check-bucket \
+            --include 'Kerenzikov-*-Setup.exe' \
+            --header-upload "Cache-Control: public, max-age=31536000, immutable" \
+            --progress
+          # Feeds change every release -> cache 5 min
+          rclone copy artifacts "r2:${R2_BUCKET}" \
+            --s3-no-check-bucket \
+            --include 'appcast-windows-*.xml' \
+            --include 'latest-windows.txt' \
+            --header-upload "Cache-Control: public, max-age=300, must-revalidate" \
+            --progress
 
       - name: Write release notes
         env:
@@ -338,4 +372,5 @@ jobs:
             artifacts/*.zip
             artifacts/*.exe
             artifacts/*.apk
+            artifacts/*.xml
             artifacts/latest-windows.txt
