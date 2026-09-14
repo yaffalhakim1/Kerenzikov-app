@@ -994,14 +994,14 @@ mod windows {
     /// binary an item is for, and guessing from the enclosure filename would
     /// be a contract hiding in a string.
     ///
-    /// This fork ships no update feed: builds install by downloading a
-    /// release from GitHub, and a live URL here would silently steer every
-    /// install back to upstream's feed. Restore a `Some(...)` value once this
-    /// fork serves its own signed appcast.
+    /// This fork serves its own signed appcast from its own R2 bucket, so
+    /// installs update from here instead of upstream's feed.
     #[cfg(target_arch = "aarch64")]
-    const FEED_URL: Option<&str> = None;
+    const FEED_URL: Option<&str> =
+        Some("https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/appcast-windows-aarch64.xml");
     #[cfg(not(target_arch = "aarch64"))]
-    const FEED_URL: Option<&str> = None;
+    const FEED_URL: Option<&str> =
+        Some("https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/appcast-windows-x86_64.xml");
 
     /// Read out of `resources/Info.plist` by the build script, so macOS and
     /// Windows cannot end up trusting different keys.
