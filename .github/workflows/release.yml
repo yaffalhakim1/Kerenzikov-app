@@ -200,7 +200,12 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - uses: android-actions/setup-android@v3
+      # v4 defaults to cmdline-tools 20.0 and drops the legacy `tools` package
+      # install. v3 pinned cmdline-tools 16.0, whose repository no longer
+      # carries `tools`, so the action died with "Failed to find package
+      # 'tools'" before any build step ran. It also moves the action to Node24,
+      # which the runner's Node 20 deprecation was already warning about.
+      - uses: android-actions/setup-android@v4
 
       # gradle/actions owns caching: the raw actions/cache key included
       # app/build.gradle, so it changed with every app commit and — combined
