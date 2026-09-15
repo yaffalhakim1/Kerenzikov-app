@@ -200,12 +200,16 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # v4 defaults to cmdline-tools 20.0 and drops the legacy `tools` package
-      # install. v3 pinned cmdline-tools 16.0, whose repository no longer
-      # carries `tools`, so the action died with "Failed to find package
-      # 'tools'" before any build step ran. It also moves the action to Node24,
-      # which the runner's Node 20 deprecation was already warning about.
+      # `packages` must be given explicitly: the action defaults to
+      # `tools platform-tools`, and `tools` is the legacy package Google
+      # retired from the SDK repository, so sdkmanager exits 1 with
+      # "Failed to find package 'tools'" and the job dies before any build
+      # step. platform-tools is what Gradle actually needs here; the SDK's
+      # own platform and build-tools are resolved by the Android Gradle
+      # Plugin from compileSdk/buildToolsVersion.
       - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       # gradle/actions owns caching: the raw actions/cache key included
       # app/build.gradle, so it changed with every app commit and — combined
