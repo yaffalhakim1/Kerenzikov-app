@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   availableUpdate,
   currentVersionCode,
+  isDownloadUrl,
   parseManifest,
   type UpdateManifest,
 } from './app-update';
@@ -44,6 +45,29 @@ describe('app update', () => {
     expect(parseManifest({ versionName: '0.1.29', url: 'https://x.test/a.apk' })).toBeNull();
     expect(parseManifest({ versionCode: 11 })).toBeNull();
     expect(parseManifest({ versionCode: 11, url: '' })).toBeNull();
+  });
+
+  test('rejects a download url that is not https', () => {
+    // A manifest is authored by a build script, and the failure worth
+    // catching is a URL that looks plausible but cannot be installed from.
+    expect(isDownloadUrl('https://github.com/o/r/releases/download/v1/a.apk')).toBe(true);
+    expect(isDownloadUrl('http://github.com/o/r/releases/download/v1/a.apk')).toBe(false);
+    expect(isDownloadUrl('github.com/o/r/releases/download/v1/a.apk')).toBe(false);
+    expect(isDownloadUrl('not a url')).toBe(false);
+    expect(isDownloadUrl('')).toBe(false);
+    expect(
+      parseManifest({ versionCode: 12, url: 'http://x.test/a.apk' }),
+    ).toBeNull();
+  });
+
+  test('keeps the version segment a release asset URL needs', () => {
+    // The regression: GitHub versions assets by tag, so a URL assembled
+    // without it 404s. Whatever a build script emits must survive the parser
+    // unchanged for the user to reach the file.
+    const url =
+      'https://github.com/yaffalhakim1/Kerenzikov-app/releases/download/v0.1.31/Kerenzikov-0.1.31-universal.apk';
+    expect(parseManifest({ versionCode: 12, url })?.url).toBe(url);
+    expect(availableUpdate(parseManifest({ versionCode: 12, url })!, 11)?.url).toBe(url);
   });
 
   test('defaults the version name to the build number when it is missing', () => {

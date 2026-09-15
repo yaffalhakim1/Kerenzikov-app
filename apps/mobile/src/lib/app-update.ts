@@ -1,8 +1,18 @@
-/** Where the release manifest and the APK land. The same R2 bucket the
- *  desktop builds publish into, so there is one origin to trust and one place
- *  to look when a release goes missing. */
+/**
+ * Where the release manifest lives.
+ *
+ * Served from `raw.githubusercontent.com` rather than the R2 bucket the
+ * desktop feed uses: `*.r2.dev` resolves to the Indonesian Internet Positif
+ * block page on this project's home network, for every resolver including
+ * Cloudflare's own, so an app checking it there can only ever see a failure.
+ * GitHub is reachable and is where the APK already lives.
+ *
+ * The manifest is read from the default branch, which means the checked-in
+ * copy is the live one: publishing a release means committing the new
+ * manifest, not uploading to a bucket.
+ */
 export const UPDATE_MANIFEST_URL =
-  'https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/mobile-latest.json';
+  'https://raw.githubusercontent.com/yaffalhakim1/Kerenzikov-app/main/apps/mobile/mobile-latest.json';
 
 export interface UpdateManifest {
   /** Monotonic build number, mirroring `versionCode` in build.gradle. */
@@ -36,13 +46,33 @@ export function parseManifest(value: unknown): UpdateManifest | null {
   const record = value as Record<string, unknown>;
   const { versionCode, versionName, url, notes } = record;
   if (typeof versionCode !== 'number' || !Number.isFinite(versionCode)) return null;
-  if (typeof url !== 'string' || url.length === 0) return null;
+  if (typeof url !== 'string' || !isDownloadUrl(url)) return null;
   return {
     versionCode,
     versionName: typeof versionName === 'string' ? versionName : String(versionCode),
     url,
     ...(typeof notes === 'string' ? { notes } : {}),
   };
+}
+
+/**
+ * Whether a manifest's URL is one the app should send a user to.
+ *
+ * Only `https:` is accepted: a download the OS will offer to install must not
+ * travel in clear, and `http://` would let a downgrade through unnoticed.
+ *
+ * The check exists because a manifest is authored by a build script, and the
+ * failure it catches is real: release assets are versioned by tag, so a URL
+ * assembled without the version segment is well-formed, plausible, and 404s
+ * only once a user taps install. Rejecting it here turns that into "no update
+ * offered" instead of a broken install.
+ */
+export function isDownloadUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 /** A manifest entry is only an update when its build number is strictly

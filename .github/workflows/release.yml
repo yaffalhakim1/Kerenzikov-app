@@ -183,6 +183,8 @@ jobs:
     if: needs.version.outputs.published != 'true'
     runs-on: ubuntu-22.04
     timeout-minutes: 60
+    outputs:
+      version-code: ${{ steps.apk.outputs.version_code }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -240,12 +242,30 @@ jobs:
       # its version and variant the way the Windows artifacts do. The APK is
       # universal — `reactNativeArchitectures` builds every ABI into it — so
       # there is no per-arch suffix to add.
+      #
+      # The build number is read back out of the APK rather than out of
+      # build.gradle: it is the value the installed app reports, so it is the
+      # one the update check compares against, and reading it here means the
+      # published manifest cannot disagree with the binary it points at.
       - name: Name the APK
+        id: apk
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           dir="apps/mobile/android/app/build/outputs/apk/release"
           mv "$dir/app-release.apk" "$dir/Kerenzikov-${VERSION}-universal.apk"
+          # Anchored to the `package:` line rather than matching versionCode
+          # anywhere: a build-tools release has added other versionCode-bearing
+          # fields before, and the first line is the manifest's own.
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          code=$("$tools/aapt2" dump badging "$dir/Kerenzikov-${VERSION}-universal.apk" \
+            | sed -n "s/^package: name='[^']*' versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          if [ -z "$code" ]; then
+            echo "::error::Could not read versionCode from the assembled APK"
+            exit 1
+          fi
+          echo "Read versionCode=$code"
+          echo "version_code=$code" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -287,6 +307,20 @@ jobs:
         run: |
           # What the website's Windows download resolves "latest" to.
           echo "$VERSION" > artifacts/latest-windows.txt
+
+      # The Android app reads this over raw.githubusercontent, so an update
+      # offer is a checked-in file rather than a bucket object. Written from
+      # the assembled APK — which download-artifact placed in `artifacts/` —
+      # so the URL and byte count describe the binary being uploaded. The
+      # commit waits until the release exists, at the end of this job: a
+      # manifest that landed first would point every installed app at a URL
+      # that 404s.
+      - name: Generate the mobile update manifest
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          VERSION_CODE: ${{ needs.android-apk.outputs.version-code }}
+          WAKU_MOBILE_RELEASE_BASE: https://github.com/${{ github.repository }}/releases/download
+        run: bun scripts/mobile-manifest.ts artifacts "$VERSION_CODE" "$VERSION"
 
       - name: Generate Windows appcasts
         env:
@@ -383,3 +417,27 @@ jobs:
             artifacts/*.apk
             artifacts/*.xml
             artifacts/latest-windows.txt
+
+      # Last, so the URL the manifest names is live by the time the app can
+      # read it. The file must land on main because that is the ref
+      # raw.githubusercontent serves; this run is detached on the tag, so this
+      # moves to main and touches exactly one path rather than carrying the
+      # tag's tree across. Idempotent: a re-run writes the same bytes and the
+      # staged diff is empty.
+      - name: Publish the mobile update manifest
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+        run: |
+          cp artifacts/mobile-latest.json /tmp/mobile-latest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout main
+          git pull --ff-only origin main
+          cp /tmp/mobile-latest.json apps/mobile/mobile-latest.json
+          git add -- apps/mobile/mobile-latest.json
+          if git diff --cached --quiet; then
+            echo "Manifest already current for $TAG"
+            exit 0
+          fi
+          git commit -m "chore(mobile): publish update manifest for $TAG"
+          git push origin main
