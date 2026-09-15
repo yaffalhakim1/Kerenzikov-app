@@ -106,11 +106,25 @@ export const Fonts = Platform.select({
   },
 });
 
-export const MonoFont = Platform.select({
-  ios: 'Menlo',
-  android: 'monospace',
-  default: 'monospace',
-});
+/**
+ * Code text. Every mono surface — markdown code spans and blocks, diffs, file
+ * paths, activity details — reads from here, so one edit retypes them all.
+ *
+ * JetBrains Mono, the same face the desktop renders code with
+ * (`src/md/render.rs`'s `MONO_FAMILY`), so a snippet looks identical on both
+ * surfaces. It is bundled rather than resolved from the system: neither
+ * platform ships it, and Android's generic `monospace` is whichever face the
+ * OEM chose, which is not a thing to build a code style on.
+ *
+ * The three weights are registered by the `expo-font` plugin in `app.json`,
+ * which embeds them in the binary — so the family is available on the first
+ * frame and there is no `useFonts` gate to wait behind. Weights match the
+ * desktop: Regular for code, Medium for the code-block header label.
+ *
+ * Color is deliberately not set here: it comes from the theme tokens on each
+ * surface (`codeText`, `text`), so the code palette is untouched by this.
+ */
+export const MonoFont = 'JetBrains Mono';
 
 /**
  * Material 3 state layers. A ripple is an overlay of the *content* colour at a

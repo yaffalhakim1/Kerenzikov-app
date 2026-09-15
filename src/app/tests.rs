@@ -2,7 +2,10 @@ use super::composer::{
     ComposerSubmitAction, composer_submit_action, dropped_file_mention, merged_submission,
     next_picker_highlight, visible_branch_entries,
 };
-use super::runtime::{merge_remote_session_catalog, session_has_active_provider_turn};
+use super::runtime::{
+    merge_remote_session_catalog, project_memory_prompt, session_has_active_provider_turn,
+    strip_project_memory,
+};
 use super::settings::visible_settings_pages;
 use super::{
     ESCAPE_STOP_CONFIRMATION_TIMEOUT, EscapeStopConfirmation, EscapeStopPress, EscapeStopTarget,
@@ -2157,4 +2160,44 @@ fn the_rail_draws_only_installed_providers_the_settings_left_on() {
         Some(ProviderKind::Claude),
         ProviderKind::Claude
     ));
+}
+
+#[test]
+fn a_provider_echo_of_an_injected_prompt_hides_the_memory_block() {
+    // The provider hands its own input back as the user turn. Whatever the
+    // wrapper added must not survive into the transcript, or every client
+    // renders recalled context where the user's message belongs.
+    let memory = "## Updater flow: app polls appcast.xml";
+    let typed = "how to run the debug?";
+    let echoed = project_memory_prompt(memory, typed);
+
+    assert!(echoed.contains(memory), "transport must carry the context");
+    assert_eq!(strip_project_memory(&echoed), typed);
+}
+
+#[test]
+fn stripping_leaves_ordinary_messages_alone() {
+    // The common case: nothing was injected, so nothing may be removed.
+    assert_eq!(strip_project_memory("fix the sidebar"), "fix the sidebar");
+    assert_eq!(strip_project_memory(""), "");
+
+    // A prompt may quote the tags; only a leading, well-formed block is ours.
+    let quoted = "why does <project-memory> appear in my transcript?";
+    assert_eq!(strip_project_memory(quoted), quoted);
+
+    // An unclosed block is not interpretable, so the message is kept whole
+    // rather than truncated at the point the close tag should have been.
+    let unclosed = "<project-memory>\ncontext with no close tag";
+    assert_eq!(strip_project_memory(unclosed), unclosed);
+}
+
+#[test]
+fn stripping_accepts_a_trimmed_echo() {
+    // A provider that trims the echo drops the blank line the wrapper wrote.
+    let trimmed = "<project-memory>\nfact\n</project-memory>\nquestion";
+    assert_eq!(strip_project_memory(trimmed), "question");
+
+    // A provider that strips newlines entirely still loses the wrapper.
+    let flattened = "<project-memory>fact</project-memory>question";
+    assert_eq!(strip_project_memory(flattened), "question");
 }

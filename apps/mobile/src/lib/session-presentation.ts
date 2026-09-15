@@ -93,6 +93,10 @@ export type TranscriptRow =
        * minted settled rows fade in on mount while this holds. */
       streaming: boolean;
       footerTimestamp: number | null;
+      /** The whole message, set only on the last block so one copy control
+       *  copies the answer rather than the paragraph it was rendered from.
+       *  Null on every preceding block. */
+      copyText: string | null;
       topGap: number;
     }
   | {
@@ -206,8 +210,31 @@ export function groupSessions(
   });
 }
 
-export function sessionDateGroup(timestamp: number, now = new Date()): SessionGroupId {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+/** Sessions this phone has removed from its list. Removal is a local view
+ *  filter, never a daemon delete: the task and its transcript stay intact for
+ *  every other device, and clearing the stored list brings them back. */
+export function withoutHiddenSessions(
+  sessions: AgentSession[],
+  hidden: ReadonlySet<string>,
+): AgentSession[] {
+  if (hidden.size === 0) return sessions;
+  return sessions.filter((session) => !hidden.has(session.id));
+}
+
+/** Collapse folded groups to their header. SectionList renders a header for a
+ *  section with no data, so a folded group keeps its title and chevron without
+ *  introducing a second row kind. */
+export function foldGroups(
+  sections: SessionGroup[],
+  folded: ReadonlySet<string>,
+): SessionGroup[] {
+  if (folded.size === 0) return sections;
+  return sections.map((section) =>
+    folded.has(section.id) ? { ...section, data: [] } : section,
+  );
+}
+
+export function sessionDateGroup(timestamp: number, now = new Date()): SessionGroupId {  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const day = new Date(timestamp * 1_000);
   const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
   if (dayStart >= start) return 'today';
@@ -520,6 +547,7 @@ function expandPipelineRow(
       live: streaming && last,
       streaming,
       footerTimestamp: last ? row.footerTimestamp : null,
+      copyText: last ? message.content : null,
       topGap: 0,
     });
   }

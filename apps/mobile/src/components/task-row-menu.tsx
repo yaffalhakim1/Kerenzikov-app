@@ -7,16 +7,16 @@ import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
 const Actions: MenuAction[] = [
   { id: 'rename', title: 'Rename task', image: 'pencil' },
   {
-    id: 'delete',
-    title: 'Delete task',
-    image: 'trash',
+    id: 'remove',
+    title: 'Remove from list',
+    image: 'eye.slash',
     attributes: { destructive: true },
   },
 ];
 
 export function TaskRowMenu({
   accessibilityLabel,
-  onDelete,
+  onRemove,
   onRename,
   onSelect,
   renderTrigger,
@@ -28,7 +28,7 @@ export function TaskRowMenu({
       actions={Actions}
       onPressAction={({ nativeEvent }) => {
         if (nativeEvent.event === 'rename') onRename();
-        else if (nativeEvent.event === 'delete') onDelete();
+        else if (nativeEvent.event === 'remove') onRemove();
       }}
       shouldOpenOnLongPress
       style={style}>

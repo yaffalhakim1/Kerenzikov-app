@@ -13,4 +13,7 @@ temp/
 .codebase-memory/
 .opencode/
 
+# Per-session agent memory, not project source.
+MEMORY.md
+
 .DS_Store

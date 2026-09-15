@@ -11,6 +11,7 @@ import {
 
 import { Colors, StateLayer } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { splitPressableStyle } from '@/lib/pressable-host';
 
 /**
  * Every pressable in the app. Android gets a real Material ripple instead of
@@ -27,9 +28,8 @@ import { useTheme } from '@/hooks/use-theme';
  * draws a square ripple unless a rounded `overflow: 'hidden'` PARENT clips it
  * (ReactViewGroup rounds dispatchDraw). When a style carries a borderRadius
  * and the ripple isn't `borderless`, this component inserts that clipping
- * host itself, splitting the style so layout stays where the parent expects
- * it: placement keys (margins, absolute offsets) move to the host, sizing
- * keys are mirrored so the inner pressable still fills it.
+ * host itself, splitting the style between the two views — see
+ * `splitPressableStyle` for which key goes where and why.
  */
 type AppPressableStyle =
   | StyleProp<ViewStyle>
@@ -42,47 +42,11 @@ export interface AppPressableProps extends Omit<PressableProps, 'style'> {
   style?: AppPressableStyle;
 }
 
-/** Placement keys consumed by the clip host; duplicated there they would
- * apply twice (margins don't collapse) or position the pressable inside a
- * collapsed wrapper (absolute offsets). */
-const HostOnlyKeys = [
-  'position',
-  'top',
-  'left',
-  'right',
-  'bottom',
-  'zIndex',
-  'margin',
-  'marginHorizontal',
-  'marginVertical',
-  'marginTop',
-  'marginBottom',
-  'marginLeft',
-  'marginRight',
-  'marginStart',
-  'marginEnd',
-  'aspectRatio',
-] as const;
-
-/** Sizing keys mirrored onto the clip host so it occupies the same slot the
- * pressable would have; the pressable keeps them and fills the host. */
-const HostMirrorKeys = [
-  'flex',
-  'flexGrow',
-  'flexShrink',
-  'flexBasis',
-  'alignSelf',
-  'width',
-  'height',
-  'minWidth',
-  'maxWidth',
-  'minHeight',
-  'maxHeight',
-  'borderTopLeftRadius',
-  'borderTopRightRadius',
-  'borderBottomLeftRadius',
-  'borderBottomRightRadius',
-] as const;
+/** Placement keys that must sit on the clip host, never on the pressable:
+ * duplicated they would apply twice (margins don't collapse) or position the
+ * pressable inside a collapsed wrapper (absolute offsets). They are moved,
+ * not dropped — the host occupies the slot the pressable would have, so a
+ * caller's spacing survives the extra view. */
 
 /** The clip host around a rounded pressable, or undefined when the ripple
  * needs no rounding (no radius, borderless ripple, or off Android). */
@@ -93,13 +57,7 @@ function rippleHost(
   const flat = StyleSheet.flatten(pressedStyle);
   const radius = flat?.borderRadius;
   if (radius == null || radius === 0) return undefined;
-  const host: Record<string, unknown> = { borderRadius: radius, overflow: 'hidden' };
-  for (const key of HostMirrorKeys) {
-    if (flat[key as keyof ViewStyle] != null) host[key] = flat[key as keyof ViewStyle];
-  }
-  const inner: Record<string, unknown> = { ...flat };
-  for (const key of HostOnlyKeys) delete inner[key];
-  return { host: host as ViewStyle, inner: inner as ViewStyle };
+  return splitPressableStyle(flat, radius);
 }
 
 export function AppPressable({

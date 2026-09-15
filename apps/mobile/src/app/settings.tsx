@@ -1,8 +1,11 @@
 import type { ProviderKind } from '@waku/client';
+import Constants from 'expo-constants';
 import { router, Stack } from 'expo-router';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -22,11 +25,96 @@ import {
 } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import {
+  checkForUpdate,
+  currentVersionCode,
+  type AvailableUpdate,
+} from '@/lib/app-update';
+import {
   orderedProviderToggles,
   withComputerUse,
   withProviderDisabled,
 } from '@/lib/daemon-settings';
 import { providerLabel } from '@/lib/session-presentation';
+
+function UpdateRow() {
+  const theme = useTheme();
+  const [update, setUpdate] = useState<AvailableUpdate | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const version = Constants.expoConfig?.version ?? '';
+
+  const check = useCallback(async () => {
+    setChecking(true);
+    setStatus(null);
+    try {
+      const found = await checkForUpdate(
+        fetch,
+        currentVersionCode(Constants.expoConfig),
+      );
+      setUpdate(found);
+      if (!found) setStatus('Kerenzikov is up to date.');
+    } catch (cause) {
+      setStatus(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void check();
+  }, [check]);
+
+  return (
+    <>
+      <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Updates</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={styles.row}>
+          <Text style={[styles.rowLabel, { color: theme.text }]}>Version</Text>
+          <Text style={[styles.rowValue, { color: theme.textTertiary }]}>
+            {version || '—'}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.row,
+            { borderTopColor: theme.separator, borderTopWidth: StyleSheet.hairlineWidth },
+          ]}>
+          <Text style={[styles.rowLabel, { color: theme.text }]}>
+            {update ? `Update to ${update.versionName}` : 'Check for updates'}
+          </Text>
+          {checking ? (
+            <ActivityIndicator color={theme.textTertiary} />
+          ) : update ? (
+            <AppPressable
+              accessibilityRole="button"
+              onPress={() => Linking.openURL(update.url).catch(() => {})}
+              style={({ pressed }) => [
+                styles.action,
+                { backgroundColor: NativeTint, opacity: pressed ? 0.7 : 1 },
+              ]}>
+              <Text style={styles.actionLabel}>Download</Text>
+            </AppPressable>
+          ) : (
+            <AppPressable
+              accessibilityRole="button"
+              onPress={() => void check()}
+              style={({ pressed }) => [
+                styles.action,
+                { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 },
+              ]}>
+              <Text style={[styles.actionLabel, { color: theme.text }]}>Check</Text>
+            </AppPressable>
+          )}
+        </View>
+      </View>
+      <Text style={[styles.footer, { color: theme.textTertiary }]}>
+        {update
+          ? update.notes ?? 'Downloads the new APK; Android asks you to confirm the install.'
+          : status ?? 'Updates are installed by Android after you confirm.'}
+      </Text>
+    </>
+  );
+}
 
 export default function SettingsScreen() {
   const theme = useTheme();
@@ -141,6 +229,8 @@ export default function SettingsScreen() {
           <Text style={[styles.error, { color: theme.danger }]}>{localError}</Text>
         ) : null}
 
+        {Platform.OS === 'android' ? <UpdateRow /> : null}
+
         <Text style={[styles.footer, { color: theme.textGhost }]}>
           Settings are stored on the daemon and shared by every connected device.
         </Text>
@@ -173,6 +263,9 @@ const styles = StyleSheet.create({
     minHeight: 48,
   },
   rowLabel: { flex: 1, fontSize: 15.5 },
+  rowValue: { fontSize: 15.5 },
+  action: { borderRadius: Radius.small, paddingHorizontal: 12, paddingVertical: 6 },
+  actionLabel: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
   footer: { fontSize: 12, lineHeight: 17, marginLeft: 12, marginTop: 8 },
   error: { fontSize: 12.5, lineHeight: 17, marginLeft: 12, marginTop: 12 },
 });

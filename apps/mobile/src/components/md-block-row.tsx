@@ -69,7 +69,7 @@ export function useMarkdownStyles(): MarkdownStyles {
         paddingHorizontal: 12,
         paddingVertical: 5,
       },
-      codeHeaderText: { color: theme.textTertiary, fontSize: 11 },
+      codeHeaderText: { color: theme.textTertiary, fontFamily: MonoFont, fontSize: 11, fontWeight: '500' },
       codeContent: { paddingHorizontal: 12, paddingVertical: 10 },
       codeLine: {
         color: theme.text,

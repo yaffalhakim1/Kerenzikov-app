@@ -417,6 +417,12 @@ export function MobileComposer({
   }
 
   const disconnected = daemon.phase !== 'connected';
+  // While the agent works, Stop owns the primary slot and Send only returns
+  // once it can actually act — a draft to queue, or a live agent to steer.
+  // Same rule as the desktop's `composer_submit_action` + `can_send` pair, so
+  // an idle working session never shows a dead Send button beside Stop.
+  const canSubmit = Boolean(draft.trim() || attachments.length);
+  const showSend = !busy || canSubmit;
   const placeholder = disconnected
     ? daemon.phase === 'reconnecting'
       ? 'Reconnecting…'
@@ -616,19 +622,21 @@ export function MobileComposer({
                 />
               </AppPressable>
             )}
-            <SendButton
-              busy={submitting}
-              disabled={
-                (!draft.trim() && attachments.length === 0)
-                || submitting
-                || importingAttachments
-                || disconnected
-              }
-              label={canSteer ? 'Send to working agent' : busy ? 'Queue message' : 'Send message'}
-              onPress={() => void submit()}
-              queueing={busy && !canSteer}
-              steering={canSteer}
-            />
+            {showSend && (
+              <SendButton
+                busy={submitting}
+                disabled={
+                  !canSubmit
+                  || submitting
+                  || importingAttachments
+                  || disconnected
+                }
+                label={canSteer ? 'Send to working agent' : busy ? 'Queue message' : 'Send message'}
+                onPress={() => void submit()}
+                queueing={busy && !canSteer}
+                steering={canSteer}
+              />
+            )}
           </>
         )}
         value={draft}
@@ -819,8 +827,8 @@ function UserInputPanel({
               style={({ pressed }) => [
                 styles.questionOption,
                 {
-                  backgroundColor: checked ? theme.overlayStrong : theme.surfaceMuted,
-                  borderColor: checked ? NativeTint : 'transparent',
+                  backgroundColor: checked ? theme.accentSoft : theme.surfaceMuted,
+                  borderColor: checked ? theme.accent : 'transparent',
                   opacity: pressed ? 0.65 : 1,
                 },
               ]}>
@@ -836,7 +844,7 @@ function UserInputPanel({
                 <AppSymbol
                   name={{ ios: 'checkmark', android: 'check', web: 'check' }}
                   size={14}
-                  tintColor={NativeTint}
+                  tintColor={theme.accent}
                 />
               )}
             </AppPressable>
@@ -1025,7 +1033,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 6,
+    marginBottom: 10,
     minHeight: 44,
     paddingHorizontal: 11,
     paddingVertical: 8,

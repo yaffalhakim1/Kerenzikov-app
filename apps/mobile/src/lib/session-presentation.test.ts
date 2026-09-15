@@ -10,12 +10,14 @@ import {
   displaySessionTitle,
   expandTranscriptRows,
   findActivityBlock,
+  foldGroups,
   groupSessions,
   messageSearchRows,
   relativeSessionTime,
   sessionDateGroup,
   stabilizeTranscriptRows,
   turnOptionsForSession,
+  withoutHiddenSessions,
 } from './session-presentation';
 
 describe('mobile session presentation', () => {
@@ -92,8 +94,28 @@ describe('mobile session presentation', () => {
     ]);
   });
 
-  test('formats compact recency labels', () => {
-    expect(relativeSessionTime(1_000, 1_030_000)).toBe('Now');
+  test('drops removed sessions and returns the same array when none are marked', () => {
+    const sessions = [session({ id: 'a' }), session({ id: 'b' })];
+    // Identity matters: the drawer re-renders on every stream tick, so an
+    // unmarked list must not produce a new array.
+    expect(withoutHiddenSessions(sessions, new Set())).toBe(sessions);
+    expect(withoutHiddenSessions(sessions, new Set(['a'])).map((item) => item.id)).toEqual(['b']);
+    expect(withoutHiddenSessions(sessions, new Set(['a', 'b']))).toEqual([]);
+  });
+
+  test('folds a group to an empty section that keeps its header', () => {
+    const sections = [
+      { id: 'today', title: 'Today', data: [session({ id: 'a' })] as never[] },
+      { id: 'yesterday', title: 'Yesterday', data: [session({ id: 'b' })] as never[] },
+    ];
+    expect(foldGroups(sections, new Set())).toBe(sections);
+
+    const folded = foldGroups(sections, new Set(['today']));
+    expect(folded[0]).toMatchObject({ id: 'today', title: 'Today', data: [] });
+    expect(folded[1]!.data).toHaveLength(1);
+  });
+
+  test('formats compact recency labels', () => {    expect(relativeSessionTime(1_000, 1_030_000)).toBe('Now');
     expect(relativeSessionTime(1_000, 1_300_000)).toBe('5m');
     const now = new Date(2026, 7, 12, 12);
     expect(sessionDateGroup(epoch(2026, 7, 12, 12), now)).toBe('today');
@@ -201,6 +223,33 @@ describe('mobile session presentation', () => {
     expect(expanded.map((row) => (
       row.kind === 'md' ? `md:${row.messageId}` : row.kind
     ))).toEqual(['user', 'fold', 'md:part1', 'activities', 'md:part2']);
+  });
+
+  test('offers copy text only on the last block of an assistant message', () => {
+    const current = session({
+      turns: [turn({ id: 'turn', status: 'completed', started_at: 10, completed_at: 40 })],
+      messages: [
+        { id: 'user', turn_id: 'turn', role: 'user', content: 'go', created_at: 1, streaming: false },
+        {
+          id: 'agent',
+          turn_id: 'turn',
+          role: 'assistant',
+          content: 'First paragraph.\n\nSecond paragraph.',
+          created_at: 2,
+          streaming: false,
+        },
+      ],
+      transcript_blocks: [],
+    });
+    const blocks = buildTranscriptRows(current).filter((row) => row.kind === 'md');
+    // One row per markdown block, but a single copy target: the whole answer,
+    // carried by the last block so the control copies the message, not the
+    // paragraph it happens to be rendered from.
+    expect(blocks.length).toBeGreaterThan(1);
+    expect(blocks.slice(0, -1).every((row) => row.kind === 'md' && row.copyText === null)).toBe(true);
+    expect(blocks.at(-1)).toMatchObject({
+      copyText: 'First paragraph.\n\nSecond paragraph.',
+    });
   });
 
   test('keeps a running turn’s work expanded and live', () => {
