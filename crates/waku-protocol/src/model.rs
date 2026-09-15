@@ -178,8 +178,18 @@ impl ProviderKind {
     /// Providers a session can be composed of: their CLI publishes an agent
     /// catalogue (`GET /agent` on OpenCode's server, `GET /api/agent` on
     /// OpenCode 2) and accepts one of its ids for a session.
+    ///
+    /// Codex qualifies by a different route: it reads `~/.codex/agents/*.toml`
+    /// itself (a documented, user-owned directory), so the catalogue exists and
+    /// the choice belongs to the spawn. It has no id to send on the wire — the
+    /// selected role is guidance for how the session should decompose its own
+    /// work, not a session-level switch — which is why it is *not* added to
+    /// [`Self::supports_live_agent_switch`].
     pub fn supports_agent_presets(self) -> bool {
-        matches!(self, Self::DeepSeek | Self::OpenCode | Self::OpenCode2)
+        matches!(
+            self,
+            Self::Codex | Self::DeepSeek | Self::OpenCode | Self::OpenCode2
+        )
     }
 
     /// Whether an already-started session can be given a different agent.
@@ -4336,7 +4346,9 @@ mod tests {
 
     #[test]
     fn only_composed_providers_publish_agent_presets() {
-        assert!(!ProviderKind::Codex.supports_agent_presets());
+        // Codex joins them through its own `~/.codex/agents/*.toml` directory
+        // rather than a wire catalogue, so it composes a session too.
+        assert!(ProviderKind::Codex.supports_agent_presets());
         assert!(!ProviderKind::Claude.supports_agent_presets());
         assert!(ProviderKind::DeepSeek.supports_agent_presets());
         assert!(ProviderKind::OpenCode.supports_agent_presets());
@@ -4380,7 +4392,16 @@ mod tests {
         assert!(!deepseek.can_choose_agent_preset());
 
         let codex = AgentSession::new(project.id, ProviderKind::Codex);
-        assert!(!codex.can_choose_agent_preset());
+        assert!(codex.can_choose_agent_preset());
+
+        // Codex has no wire-level agent id, so a started session keeps whatever
+        // role it began with until a new session is created.
+        let mut started_codex = AgentSession::new(project.id, ProviderKind::Codex);
+        started_codex.provider_cursor = Some(ProviderResumeCursor::from_session_id(
+            ProviderKind::Codex,
+            "thr_1".into(),
+        ));
+        assert!(!started_codex.can_choose_agent_preset());
     }
 
     #[test]
