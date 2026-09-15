@@ -74,10 +74,17 @@ export const TranscriptRowView = memo(function TranscriptRowView({
               <MdBlockSettled node={row.node} source={row.source} styles={markdownStyles} />
             </MdRevealOnMount>
           )}
-          {row.footerTimestamp != null && (
-            <Text style={[styles.messageFooter, { color: theme.textGhost }]}>
-              {formatMessageTime(row.footerTimestamp)}
-            </Text>
+          {(row.copyText != null || row.footerTimestamp != null) && (
+            <View style={styles.messageFooterRow}>
+              {row.copyText != null && row.copyText.trim() ? (
+                <CopyButton label="Copy response" text={row.copyText} />
+              ) : null}
+              {row.footerTimestamp != null && (
+                <Text style={[styles.messageFooter, { color: theme.textGhost }]}>
+                  {formatMessageTime(row.footerTimestamp)}
+                </Text>
+              )}
+            </View>
           )}
         </>
       );
@@ -136,6 +143,43 @@ function FoldRow({
   );
 }
 
+/** A visible copy control. Long-press-to-copy is undiscoverable, so the action
+ *  gets a button; the confirmation is the icon swapping to a checkmark for a
+ *  beat, because a toast would cover the transcript the user is reading. */
+function CopyButton({ label, text }: { label: string; text: string }) {
+  const theme = useTheme();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <AppPressable
+      accessibilityLabel={copied ? 'Copied' : label}
+      accessibilityRole="button"
+      hitSlop={10}
+      onPress={() => {
+        void Clipboard.setStringAsync(text)
+          .then(async () => {
+            setCopied(true);
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          })
+          .catch(() => {});
+      }}
+      style={({ pressed }) => [styles.copyButton, { opacity: pressed ? 0.5 : 1 }]}>
+      <AppSymbol
+        name={copied
+          ? { ios: 'checkmark', android: 'check', web: 'check' }
+          : { ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' }}
+        size={13}
+        tintColor={copied ? theme.success : theme.textGhost}
+      />
+    </AppPressable>
+  );
+}
+
 const UserBubble = memo(
   UserBubbleInner,
   (previous, next) =>
@@ -149,17 +193,16 @@ function UserBubbleInner({ message }: { message: Message }) {
   const theme = useTheme();
   const content = message.display_content ?? message.content;
 
-  async function copy() {
-    await Clipboard.setStringAsync(message.content);
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }
-
   return (
     <View style={styles.userFrame}>
       <AppPressable
         accessibilityHint="Long press to copy"
         delayLongPress={350}
-        onLongPress={() => void copy()}
+        onLongPress={() => {
+          void Clipboard.setStringAsync(message.content)
+            .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
+            .catch(() => {});
+        }}
         style={[styles.userBubble, { backgroundColor: theme.raised }]}>
         {content ? (
           <Text selectable style={[styles.userText, { color: theme.text }]}>{content}</Text>
@@ -175,6 +218,11 @@ function UserBubbleInner({ message }: { message: Message }) {
           </View>
         ) : null}
       </AppPressable>
+      {content.trim() ? (
+        <View style={styles.userFooterRow}>
+          <CopyButton label="Copy message" text={message.content} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -327,7 +375,29 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   userText: { fontSize: 14, lineHeight: 21 },
-  messageFooter: { fontSize: 10.5, marginTop: 10 },
+  messageFooterRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 2,
+    minHeight: 20,
+  },
+  messageFooter: { fontSize: 10.5 },
+  /** Sits under the bubble on the user's side, mirroring the assistant row. */
+  userFooterRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 2,
+    minHeight: 20,
+  },
+  copyButton: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    height: 20,
+    justifyContent: 'center',
+    width: 24,
+  },
   systemFrame: { alignItems: 'center' },
   systemMessage: {
     borderRadius: Radius.pill,

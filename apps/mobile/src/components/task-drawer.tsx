@@ -9,13 +9,11 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -50,9 +48,11 @@ import { sessionIsRunning } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import {
   displaySessionTitle,
+  foldGroups,
   groupSessions,
   messageSearchRows,
   providerLabel,
+  withoutHiddenSessions,
   type MessageSearchRow,
   type SessionGrouping,
   type SessionListItem,
@@ -66,9 +66,22 @@ const SIDEBAR_PREFS_KEY = 'waku.mobile.sidebar-prefs.v1';
 interface SidebarPrefs {
   grouping: SessionGrouping;
   ordering: SessionOrdering;
+  /** Session ids removed from this phone's list. The daemon still has them. */
+  hidden: string[];
+  /** Section ids whose rows are folded away. */
+  folded: string[];
 }
 
-const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = { grouping: 'updated', ordering: 'newest' };
+const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
+  grouping: 'updated',
+  ordering: 'newest',
+  hidden: [],
+  folded: [],
+};
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
 
 function parseSidebarPrefs(raw: string | null): SidebarPrefs | null {
   if (!raw) return null;
@@ -77,6 +90,8 @@ function parseSidebarPrefs(raw: string | null): SidebarPrefs | null {
     return {
       grouping: value.grouping === 'project' ? 'project' : 'updated',
       ordering: value.ordering === 'oldest' ? 'oldest' : 'newest',
+      hidden: stringArray(value.hidden),
+      folded: stringArray(value.folded),
     };
   } catch {
     return null;
@@ -223,12 +238,14 @@ function TaskDrawerContent({
       return next;
     });
   }, []);
+  const hiddenSessions = useMemo(() => new Set(prefs.hidden), [prefs.hidden]);
+  const foldedGroups = useMemo(() => new Set(prefs.folded), [prefs.folded]);
   const visibleSessions = useMemo(() => {
-    if (!taskState.data) return [];
+    const sessions = withoutHiddenSessions(taskState.data?.sessions ?? [], hiddenSessions);
+    if (!search.trim()) return sessions;
     const query = search.trim().toLocaleLowerCase();
-    if (!query) return taskState.data.sessions;
-    const projects = new Map(taskState.data.projects.map((project) => [project.id, project]));
-    return taskState.data.sessions.filter((session) => {
+    const projects = new Map(taskState.data?.projects.map((project) => [project.id, project]));
+    return sessions.filter((session) => {
       const project = projects.get(session.project_id);
       return [
         displaySessionTitle(session),
@@ -238,13 +255,13 @@ function TaskDrawerContent({
         session.model,
       ].some((value) => value?.toLocaleLowerCase().includes(query));
     });
-  }, [search, taskState.data]);
-  const sections = useMemo(
-    () => taskState.data
+  }, [hiddenSessions, search, taskState.data]);
+  const sections = useMemo(() => {
+    const built = taskState.data
       ? groupSessions(taskState.data.projects, visibleSessions, new Date(), prefs)
-      : [],
-    [taskState.data, visibleSessions, prefs],
-  );
+      : [];
+    return foldGroups(built, foldedGroups);
+  }, [taskState.data, visibleSessions, prefs, foldedGroups]);
   const messageRows = useMemo(
     () => (messageQuery.trim() && messageSearch.data)
       ? messageSearchRows(messageSearch.data, taskState.data?.sessions ?? [])
@@ -265,36 +282,22 @@ function TaskDrawerContent({
     }
   }, [onClose, selectedSessionId]);
 
-  // Streaming mutates `runtime` every tick, so capture it in a ref to keep the
-  // row callbacks stable. Without this, every visible row re-renders on each
-  // stream commit — the drawer list is the heaviest thing on screen.
-  const runtimeRef = useRef(runtime);
-  runtimeRef.current = runtime;
   const handleSelect = useCallback((sessionId: string) => showSession(sessionId), [showSession]);
   const handleRename = useCallback((session: AgentSession) => setRenameTarget(session), []);
-  const handleDelete = useCallback((session: AgentSession) => {
-    Alert.alert(
-      `Delete “${displaySessionTitle(session)}”?`,
-      'This removes the task and its transcript from the daemon for every device.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            void runtimeRef.current.deleteSession(session.id)
-              .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
-              .catch((cause) => {
-                Alert.alert(
-                  'Couldn’t delete task',
-                  cause instanceof Error ? cause.message : String(cause),
-                );
-              });
-          },
-        },
-      ],
-    );
-  }, []);
+  /** Removing is a local list filter, not a daemon delete: the task and its
+   *  transcript stay on the daemon for every other device. Undo lives in the
+   *  task list sheet, which clears the whole hidden set. */
+  const handleRemove = useCallback((session: AgentSession) => {
+    updatePrefs({ hidden: [...prefs.hidden, session.id] });
+  }, [prefs.hidden, updatePrefs]);
+  const toggleGroup = useCallback((groupId: string) => {
+    void Haptics.selectionAsync();
+    updatePrefs({
+      folded: prefs.folded.includes(groupId)
+        ? prefs.folded.filter((id) => id !== groupId)
+        : [...prefs.folded, groupId],
+    });
+  }, [prefs.folded, updatePrefs]);
 
   async function refreshTasks() {
     setRefreshing(true);
@@ -333,37 +336,76 @@ function TaskDrawerContent({
             onRefresh={() => void refreshTasks()}
           />
         )}
-        renderSectionHeader={({ section }) => (
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
-              {section.title}
-            </Text>
-            {/* One control for the whole list, riding the first section
-              header so it stays top-right whether the title reads "Today"
-              or a project name. */}
-            {section === sections[0] && (
-              <AppPressable
-                accessibilityLabel="Group and order tasks"
-                accessibilityRole="button"
-                hitSlop={8}
-                onPress={() => setFilterOpen(true)}
-                style={({ pressed }) => [styles.filterInner, { opacity: pressed ? 0.5 : 1 }]}>
-                <AppSymbol
-                  name={{ ios: 'arrow.up.arrow.down', android: 'sort', web: 'sort' }}
-                  size={14}
-                  tintColor={theme.text}
-                />
-              </AppPressable>
-            )}
-          </View>
-        )}
+        renderSectionHeader={({ section }) => {
+          const isFolded = foldedGroups.has(section.id);
+          // Mirrors the desktop sidebar: a project group reads as a folder,
+          // a date group as a chevron. The folder still carries the fold
+          // state via open/closed, so both kinds stay one tap to collapse.
+          const isProject = prefs.grouping === 'project';
+          // `as const` keeps each entry a literal: AppSymbol's name prop is a
+          // union of the platform symbol sets, and a plain ternary widens
+          // these to `string`, which the union rejects.
+          const icon = isProject
+            ? ({
+                ios: isFolded ? 'folder' : 'folder.fill',
+                android: isFolded ? 'folder' : 'folder_open',
+                web: isFolded ? 'folder' : 'folder_open',
+              } as const)
+            : ({
+                ios: isFolded ? 'chevron.right' : 'chevron.down',
+                android: isFolded ? 'chevron_right' : 'keyboard_arrow_down',
+                web: isFolded ? 'chevron_right' : 'keyboard_arrow_down',
+              } as const);
+          return (
+            <AppPressable
+              accessibilityLabel={`${section.title}, ${isFolded ? 'collapsed' : 'expanded'}`}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: !isFolded }}
+              onPress={() => toggleGroup(section.id)}
+              style={({ pressed }) => [
+                styles.sectionHeader,
+                { opacity: pressed ? 0.55 : 1 },
+              ]}>
+              <AppSymbol
+                name={icon}
+                size={isProject ? 14 : 13}
+                tintColor={theme.textTertiary}
+              />
+              <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
+                {section.title}
+              </Text>
+              {/* One control for the whole list, riding the first section
+                header so it stays top-right whether the title reads "Today"
+                or a project name. */}
+              {section === sections[0] && (
+                <AppPressable
+                  accessibilityLabel="Group and order tasks"
+                  accessibilityRole="button"
+                  hitSlop={8}
+                  // Rides the header's press target; a tap here opens the list
+                  // options and must not also fold the group.
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    setFilterOpen(true);
+                  }}
+                  style={({ pressed }) => [styles.filterInner, { opacity: pressed ? 0.5 : 1 }]}>
+                  <AppSymbol
+                    name={{ ios: 'arrow.up.arrow.down', android: 'sort', web: 'sort' }}
+                    size={14}
+                    tintColor={theme.text}
+                  />
+                </AppPressable>
+              )}
+            </AppPressable>
+          );
+        }}
         renderItem={({ item }) => (
           <SessionRow
             drawerWidth={drawerWidth}
             item={item}
             running={Boolean(runtime.runtimes[item.session.id]?.running ?? sessionIsRunning(item.session))}
             selected={item.session.id === selectedSessionId}
-            onDelete={handleDelete}
+            onRemove={handleRemove}
             onRename={handleRename}
             onSelect={handleSelect}
           />
@@ -494,6 +536,17 @@ function TaskDrawerContent({
           selected={prefs.ordering === 'oldest'}
           onPress={() => updatePrefs({ ordering: 'oldest' })}
         />
+        {prefs.hidden.length > 0 && (
+          <>
+            <Text style={[styles.filterHeading, { color: theme.textTertiary }]}>Hidden tasks</Text>
+            <SheetRow
+              description="Removed tasks stay on the daemon; this only unhides them here."
+              label={`Show ${prefs.hidden.length} removed`}
+              selected={false}
+              onPress={() => updatePrefs({ hidden: [] })}
+            />
+          </>
+        )}
       </Sheet>
     </KeyboardAvoidingView>
   );
@@ -648,7 +701,7 @@ const SessionRow = memo(function SessionRow({
   item,
   running,
   selected,
-  onDelete,
+  onRemove,
   onRename,
   onSelect,
 }: {
@@ -656,7 +709,7 @@ const SessionRow = memo(function SessionRow({
   item: SessionListItem;
   running: boolean;
   selected: boolean;
-  onDelete: (session: AgentSession) => void;
+  onRemove: (session: AgentSession) => void;
   onRename: (session: AgentSession) => void;
   onSelect: (sessionId: string) => void;
 }) {
@@ -666,7 +719,7 @@ const SessionRow = memo(function SessionRow({
   return (
     <TaskRowMenu
       accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${item.projectName}${running ? ', Running' : ''}`}
-      onDelete={() => onDelete(session)}
+      onRemove={() => onRemove(session)}
       onRename={() => onRename(session)}
       onSelect={() => onSelect(session.id)}
       renderTrigger={(pressed) => (
@@ -694,22 +747,7 @@ const SessionRow = memo(function SessionRow({
                 />
               )}
             </View>
-            <View style={styles.sessionMetadata}>
-              <ProviderIcon color={theme.textTertiary} provider={session.provider} size={12} />
-              <Text
-                numberOfLines={1}
-                style={[styles.sessionProject, { color: theme.textTertiary }]}>
-                {item.projectName}
-              </Text>
-            </View>
           </View>
-          {selected && (
-            <AppSymbol
-              name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-              size={16}
-              tintColor={NativeTint}
-            />
-          )}
         </View>
       )}
       selected={selected}
@@ -738,6 +776,13 @@ const styles = StyleSheet.create({
   sectionHeader: {
     alignItems: 'center',
     flexDirection: 'row',
+    gap: 6,
+    // The block's vertical rhythm lives here, not on the label. With it on
+    // `sectionTitle` the row centered the title's own margin against an
+    // unmargined icon, so the icon rode above the baseline it labels.
+    marginBottom: 4,
+    marginTop: 14,
+    paddingLeft: 14,
     paddingRight: 12,
   },
   filterInner: { alignItems: 'center', justifyContent: 'center' },
@@ -785,9 +830,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     letterSpacing: 0,
-    marginBottom: 4,
-    marginLeft: 24,
-    marginTop: 14,
   },
   emptyState: {
     alignItems: 'center',
@@ -834,20 +876,18 @@ const styles = StyleSheet.create({
     // Android ripple both take the row's rounded shape.
     borderRadius: Radius.large,
     overflow: 'hidden',
-    height: 62,
+    height: 48,
     marginHorizontal: 12,
   },
   sessionRow: {
     alignItems: 'center',
     borderRadius: Radius.large,
     flexDirection: 'row',
-    height: 62,
+    height: 48,
     paddingHorizontal: 12,
   },
-  sessionContent: { flex: 1, gap: 3 },
+  sessionContent: { flex: 1 },
   sessionHeading: { alignItems: 'center', flexDirection: 'row', gap: 8 },
-  sessionMetadata: { alignItems: 'center', flexDirection: 'row', gap: 5 },
-  sessionProject: { flex: 1, fontSize: 12.5, lineHeight: 17 },
   sessionSpinner: { height: 14, transform: [{ scale: 0.72 }], width: 14 },
   sessionTitle: {
     flex: 1,

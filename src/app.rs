@@ -341,6 +341,17 @@ impl ComposerSubmission {
         }
     }
 
+    /// A submission whose transport text and shown text differ. Used when the
+    /// only record of a message is the provider's echo of it, which carries
+    /// injected context the transcript must not show.
+    fn with_display(prompt: String, display_content: Option<String>) -> Self {
+        Self {
+            prompt,
+            display_content,
+            attachments: Vec::new(),
+        }
+    }
+
     fn into_queued_message(self) -> QueuedMessage {
         QueuedMessage::with_presentation(self.prompt, self.display_content, self.attachments)
     }

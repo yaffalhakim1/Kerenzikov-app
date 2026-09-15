@@ -16,10 +16,13 @@ import type {
   PhrasingContent,
   RootContent,
 } from 'mdast';
-import type { ReactNode } from 'react';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
   Image,
   Linking,
+  StyleSheet,
   Text,
   View,
   type ImageStyle,
@@ -28,6 +31,7 @@ import {
 } from 'react-native';
 import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import { AppPressable } from '@/components/app-pressable';
+import { AppSymbol } from '@/components/app-symbol';
 
 import { applyAlpha } from './color';
 import { PENDING_LINK_URL } from './mend';
@@ -86,6 +90,29 @@ interface InlineContext {
 export function openLinkExternally(url: string) {
   Linking.openURL(url).catch(() => {});
 }
+
+/** Header layout and the copy target are renderer-owned chrome rather than
+ *  theme tokens — the palette stays in `MarkdownStyles`, these are structure.
+ *  Named `chrome`, not `styles`: `MarkdownStyles` arrives on the render
+ *  context as `styles` and would shadow a same-named module binding. */
+const chrome = StyleSheet.create({
+  /** Mirrors `MarkdownStyles.codeHeader`'s padding; the theme keeps the
+   *  colors and the caller owns both, so this only adds the row layout. */
+  codeHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+  codeHeaderLabel: { flexShrink: 1 },
+  copyButton: {
+    alignItems: 'center',
+    borderRadius: 6,
+    height: 20,
+    justifyContent: 'center',
+    width: 24,
+  },
+});
 
 /** Visible text of an inline tree. Must mirror `renderInline`'s traversal
  * exactly — the veil's span offsets are positions in this string. */
@@ -325,11 +352,61 @@ function MarkdownImage({
 }
 
 /** Horizontal scroller host for wide blocks (code, tables) inside the
- * inverted transcript. gesture-handler's ScrollView routes touches through
- * the app's gesture orchestrator, which keeps horizontal pans working inside
- * the transformed (scaleY -1) scroll tree on Android; nestedScrollEnabled
- * lets the vertical list take over when the content ends. */
+ *  inverted transcript. gesture-handler's ScrollView routes touches through
+ *  the app's gesture orchestrator, which keeps horizontal pans working inside
+ *  the transformed (scaleY -1) scroll tree on Android; nestedScrollEnabled
+ *  lets the vertical list take over when the content ends. */
 const scrollContentStyle = { minWidth: '100%' } as const;
+
+/**
+ * Copy control for a fenced block, mounted in the block's header.
+ *
+ * `renderCode` is a plain function, so this component is the only stateful
+ * node in a rendered block: `memo` gives it a stable identity across the
+ * parent's re-renders, which is what lets the confirmation survive a repaint.
+ * A still-streaming block re-renders with new `value` each commit, so its
+ * checkmark can reset — correct, because the text being copied is still
+ * changing. The copied string is the block's own source, which is exactly
+ * what was fenced, not the flattened render.
+ */
+const CodeCopyButton = memo(function CodeCopyButton({
+  tint,
+  value,
+}: {
+  tint: string;
+  value: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <AppPressable
+      accessibilityLabel={copied ? 'Copied' : 'Copy code'}
+      accessibilityRole="button"
+      hitSlop={10}
+      onPress={() => {
+        void Clipboard.setStringAsync(value)
+          .then(async () => {
+            setCopied(true);
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          })
+          .catch(() => {});
+      }}
+      style={({ pressed }) => [chrome.copyButton, { opacity: pressed ? 0.5 : 1 }]}>
+      <AppSymbol
+        name={copied
+          ? { ios: 'checkmark', android: 'check', web: 'check' }
+          : { ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' }}
+        size={12}
+        tintColor={tint}
+      />
+    </AppPressable>
+  );
+});
 
 function renderCode(
   value: string,
@@ -348,11 +425,13 @@ function renderCode(
   };
   return (
     <View key={key} style={styles.codeBlock}>
-      {language ? (
-        <View style={styles.codeHeader}>
-          <Text style={styles.codeHeaderText}>{language}</Text>
-        </View>
-      ) : null}
+      {/* The header carries the copy control, so it renders even for an
+          unlabeled fence rather than leaving those blocks uncopyable. The
+          themed style supplies the border and padding; the local one the row. */}
+      <View style={[styles.codeHeader, chrome.codeHeaderRow]}>
+        <Text style={[chrome.codeHeaderLabel, styles.codeHeaderText]}>{language ?? ''}</Text>
+        <CodeCopyButton tint={styles.codeHeaderText.color} value={value} />
+      </View>
       <GestureScrollView
         horizontal
         nestedScrollEnabled

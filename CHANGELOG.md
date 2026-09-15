@@ -12,6 +12,32 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.31]
+
+- Tasks read as their title in the sidebar list. The project name and agent
+  logo that sat under every row are gone, so a long task list scans as rows
+  of titles instead of repeating the same project fifty times.
+- Sidebar groups fold. Tap a group header to collapse it, and project groups
+  show a folder instead of a chevron, matching the desktop.
+- Tasks can be removed from the list. Long-press a task and choose "Remove
+  from list": it disappears from this device only, and the task and its
+  transcript stay on the daemon. The task list menu offers them back.
+- Messages copy from where you are reading them. Every reply and every
+  message you sent gets a copy button, and a fenced code block copies its
+  own source from its header.
+- Android updates itself. The app checks a published release manifest on
+  launch and offers a newer build in Settings, which downloads the APK and
+  hands it to Android's installer.
+- Code renders in JetBrains Mono, the same face the desktop uses, instead of
+  whichever monospace the device happened to ship.
+- Fixed: project memory injected for the provider no longer appeared as part
+  of your message in the transcript on other connected devices.
+- Fixed: spacing on rounded buttons and list rows was silently dropped on
+  Android, which ran options and rows together at their edges.
+- Fixed: the composer showed a disabled send button beside stop while an
+  agent was working. Stop owns the primary slot, and send returns once there
+  is something to send.
+
 ## [0.1.30]
 
 - Project memory is editable in Settings. The new Memory page lists the

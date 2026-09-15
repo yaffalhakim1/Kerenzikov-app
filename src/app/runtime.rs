@@ -106,6 +106,44 @@ pub(super) fn submitted_prompt_identity(session: &AgentSession) -> (Option<Uuid>
     (Some(turn_id), message_id)
 }
 
+/// Wrap a prompt in the recalled-memory block the provider sees.
+///
+/// Paired with [`strip_project_memory`]: whatever this writes into the
+/// transport, that removes again, so a provider that echoes its input cannot
+/// leak context into a transcript.
+pub(super) fn project_memory_prompt(context: &str, prompt: &str) -> String {
+    format!("{PROJECT_MEMORY_OPEN}\n{context}\n{PROJECT_MEMORY_CLOSE}\n\n{prompt}")
+}
+
+const PROJECT_MEMORY_OPEN: &str = "<project-memory>";
+const PROJECT_MEMORY_CLOSE: &str = "</project-memory>";
+
+/// Remove a leading memory block from text a provider echoed back.
+///
+/// Providers return the exact transport text as the user turn, so an echoed
+/// submission arrives carrying the context block. Only a block at the very
+/// start is removed — the prompt may legitimately quote the tags later, and
+/// anything not shaped like our own prefix is returned untouched. Text that
+/// was never wrapped comes back unchanged, which is the common case.
+pub(super) fn strip_project_memory(message: &str) -> String {
+    let Some(rest) = message.strip_prefix(PROJECT_MEMORY_OPEN) else {
+        return message.to_owned();
+    };
+    let Some((_, after)) = rest.split_once(PROJECT_MEMORY_CLOSE) else {
+        // An unclosed block is not ours to interpret; leave it alone rather
+        // than truncating a user's message.
+        return message.to_owned();
+    };
+    // The wrapper writes a blank line between the block and the prompt. A
+    // provider that reflowed the echo may have trimmed it to one newline, or
+    // dropped the separators entirely, so accept every form.
+    after
+        .strip_prefix("\n\n")
+        .or_else(|| after.strip_prefix('\n'))
+        .unwrap_or(after)
+        .to_owned()
+}
+
 pub(super) fn session_has_active_provider_turn(session: &AgentSession) -> bool {
     session.is_busy()
         && session
@@ -3215,7 +3253,7 @@ impl Waku {
         if context.trim().is_empty() {
             return prompt;
         }
-        format!("<project-memory>\n{context}\n</project-memory>\n\n{prompt}")
+        project_memory_prompt(&context, &prompt)
     }
 
     pub(super) fn enqueue_follow_up_submission(

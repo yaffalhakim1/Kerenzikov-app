@@ -3,7 +3,7 @@ import type { StyleProp, ViewStyle } from 'react-native';
 
 export interface TaskRowMenuProps {
   accessibilityLabel: string;
-  onDelete: () => void;
+  onRemove: () => void;
   onRename: () => void;
   onSelect: () => void;
   renderTrigger: (pressed: boolean) => ReactElement;

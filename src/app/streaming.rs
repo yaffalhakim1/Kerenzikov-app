@@ -554,7 +554,17 @@ impl Waku {
                     // normalized echo still acknowledges the oldest pending
                     // steer. Preserve its attachment presentation metadata.
                     .or_else(|| runtime.pending_steers.pop_front())
-                    .unwrap_or_else(|| ComposerSubmission::plain(message.clone()));
+                    // No recorded submission — the echo is all we have. It
+                    // carries the memory block this client prepended, so the
+                    // block becomes presentation metadata rather than the
+                    // user's text, keeping the transcript showing what was
+                    // typed. A message that never carried one is unchanged.
+                    .unwrap_or_else(|| {
+                        ComposerSubmission::with_display(
+                            message.clone(),
+                            Some(super::runtime::strip_project_memory(&message)),
+                        )
+                    });
                 // The provider folded the message into the live turn. Append
                 // it to the same turn so the transcript mirrors the provider
                 // conversation (no new turn boundary).
