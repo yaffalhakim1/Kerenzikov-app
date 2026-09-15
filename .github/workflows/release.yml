@@ -234,14 +234,22 @@ jobs:
         # gradle resolves them by walking up from apps/mobile.
         run: test -d node_modules/expo && test -d node_modules/react-native
 
+      # `reactNativeArchitectures` in gradle.properties lists all four ABIs so a
+      # developer's emulator (x86/x86_64) works out of the box. A release must
+      # not carry them: each ABI duplicates every native library (~59 MB per
+      # ABI, dominated by libreactnative.so), and the emulator ABIs are dead
+      # weight on every real device. Narrowing to the two device ABIs here
+      # keeps the local default untouched and drops the APK to roughly a third
+      # of its universal size.
       - name: Assemble release APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleRelease --no-daemon
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
 
       # Gradle emits the generic `app-release.apk`; rename it so the asset names
-      # its version and variant the way the Windows artifacts do. The APK is
-      # universal — `reactNativeArchitectures` builds every ABI into it — so
-      # there is no per-arch suffix to add.
+      # its version and variant the way the Windows artifacts do. The APK still
+      # contains both device ABIs in one file — `assembleRelease` produces a
+      # single APK even with several ABI filters — so there is no per-arch
+      # suffix to add.
       #
       # The build number is read back out of the APK rather than out of
       # build.gradle: it is the value the installed app reports, so it is the
