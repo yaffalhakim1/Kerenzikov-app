@@ -108,6 +108,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // model the user configured. An invented fallback would offer a model
         // the CLI rejects, so discovery is authoritative.
         ProviderKind::Grok => Vec::new(),
+        // Jcode routes whatever the user's own provider config exposes, so a
+        // fabricated fallback would offer a model the daemon cannot serve.
+        ProviderKind::Jcode => Vec::new(),
         // Pi, Oh My Pi, and Kimi Code all take their catalog from the user's
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
@@ -201,6 +204,7 @@ pub fn discover_catalog(
             (CatalogProbe::legacy(models), presets)
         }
         ProviderKind::Grok => (CatalogProbe::legacy(discover_grok_models(binary)), None),
+        ProviderKind::Jcode => (CatalogProbe::legacy(discover_jcode_models(binary)), None),
         ProviderKind::Kimi => (CatalogProbe::legacy(discover_kimi_models(binary)), None),
         ProviderKind::Pi => (CatalogProbe::legacy(discover_pi_models(binary, PiDialect::Pi)), None),
         ProviderKind::OhMyPi => {
@@ -354,8 +358,39 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
         .collect()
 }
 
-fn discover_cursor_models(binary: &Path) -> Vec<ProviderModel> {
+/// Jcode publishes every model it can route, one id per line, with no markers
+/// or headers. The list is the daemon's, so it already reflects the user's
+/// configured providers and any model they added by hand.
+fn discover_jcode_models(binary: &Path) -> Vec<ProviderModel> {
     let mut command = crate::command_env::command(binary);
+    let command = command.args(["model", "list"]);
+    let Ok(output) = crate::command_env::output(command) else {
+        return Vec::new();
+    };
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    parse_jcode_models(&combined)
+}
+
+fn parse_jcode_models(output: &str) -> Vec<ProviderModel> {
+    let mut models: Vec<ProviderModel> = strip_ansi(output)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        // A failure prints prose rather than a model id; an id never contains
+        // a space, so anything that does is a message we must not show as a
+        // selectable model.
+        .filter(|line| !line.contains(' '))
+        .map(|line| ProviderModel::new(line, line))
+        .collect();
+    models.dedup_by(|a, b| a.id == b.id);
+    models
+}
+
+fn discover_cursor_models(binary: &Path) -> Vec<ProviderModel> {    let mut command = crate::command_env::command(binary);
     let command = command.arg("models");
     let Ok(output) = crate::command_env::output(command) else {
         return Vec::new();
@@ -2356,6 +2391,45 @@ description = "House explorer with our own rules."
         assert!(presets.iter().all(|preset| !preset.is_custom));
 
         std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// Jcode prints one model id per line with no markers or headers, so the
+    /// parser's whole job is to reject anything that is not an id.
+    #[test]
+    fn parses_jcode_models_one_id_per_line() {
+        let models = parse_jcode_models(
+            "\u{1b}[32mglm-5-3-flash\u{1b}[0m\n\
+             claude-opus-5\n\
+             \n\
+             gpt-5.6-pro[web]\n\
+             Error: could not read provider config\n\
+             deepseek-v4-flash\n",
+        );
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "glm-5-3-flash",
+                "claude-opus-5",
+                "gpt-5.6-pro[web]",
+                "deepseek-v4-flash"
+            ]
+        );
+    }
+
+    /// The same id twice must not produce two picker entries.
+    #[test]
+    fn jcode_models_are_deduplicated() {
+        let models = parse_jcode_models("glm-5-3-flash\nglm-5-3-flash\nkimi-k2-7-code\n");
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["glm-5-3-flash", "kimi-k2-7-code"]
+        );
     }
 
     #[test]

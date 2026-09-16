@@ -18,16 +18,17 @@ pub enum ProviderKind {
     Cursor,
     DeepSeek,
     Fx,
-    OpenCode,
-    OpenCode2,
     Grok,
+    Jcode,
     Kimi,
     OhMyPi,
+    OpenCode,
+    OpenCode2,
     Pi,
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Amp,
         Self::Claude,
         Self::Codex,
@@ -38,6 +39,7 @@ impl ProviderKind {
         Self::OpenCode,
         Self::OpenCode2,
         Self::Grok,
+        Self::Jcode,
         Self::Kimi,
         Self::OhMyPi,
         Self::Pi,
@@ -55,6 +57,7 @@ impl ProviderKind {
             Self::OpenCode => "opencode",
             Self::OpenCode2 => "opencode2",
             Self::Grok => "grok",
+            Self::Jcode => "jcode",
             Self::Kimi => "kimi",
             Self::OhMyPi => "ohmypi",
             Self::Pi => "pi",
@@ -73,6 +76,7 @@ impl ProviderKind {
             Self::OpenCode => "OpenCode",
             Self::OpenCode2 => "OpenCode 2",
             Self::Grok => "Grok Build",
+            Self::Jcode => "Jcode",
             Self::Kimi => "Kimi Code",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
@@ -91,6 +95,7 @@ impl ProviderKind {
             Self::OpenCode => "OpenCode",
             Self::OpenCode2 => "OpenCode 2",
             Self::Grok => "Grok",
+            Self::Jcode => "Jcode",
             Self::Kimi => "Kimi",
             Self::OhMyPi => "Oh My Pi",
             Self::Pi => "Pi",
@@ -113,6 +118,7 @@ impl ProviderKind {
             Self::OpenCode => "opencode",
             Self::OpenCode2 => "opencode2",
             Self::Grok => "grok",
+            Self::Jcode => "jcode",
             Self::Kimi => "kimi",
             Self::OhMyPi => "omp",
             Self::Pi => "pi",
@@ -166,6 +172,7 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::Fx
+                | Self::Jcode
                 | Self::OpenCode
                 | Self::OpenCode2
                 | Self::Grok
@@ -249,6 +256,9 @@ pub enum ProviderResumeCursor {
     Grok {
         session_id: String,
     },
+    Jcode {
+        session_id: String,
+    },
     Kimi {
         session_id: String,
     },
@@ -289,6 +299,7 @@ impl ProviderResumeCursor {
                 directory: None,
             },
             ProviderKind::Grok => Self::Grok { session_id: id },
+            ProviderKind::Jcode => Self::Jcode { session_id: id },
             ProviderKind::Kimi => Self::Kimi { session_id: id },
             ProviderKind::OhMyPi => Self::OhMyPi {
                 session_id: id,
@@ -313,6 +324,7 @@ impl ProviderResumeCursor {
             Self::OpenCode { .. } => ProviderKind::OpenCode,
             Self::OpenCode2 { .. } => ProviderKind::OpenCode2,
             Self::Grok { .. } => ProviderKind::Grok,
+            Self::Jcode { .. } => ProviderKind::Jcode,
             Self::Kimi { .. } => ProviderKind::Kimi,
             Self::OhMyPi { .. } => ProviderKind::OhMyPi,
             Self::Pi { .. } => ProviderKind::Pi,
@@ -330,6 +342,7 @@ impl ProviderResumeCursor {
             | Self::OpenCode { session_id }
             | Self::OpenCode2 { session_id, .. }
             | Self::Grok { session_id }
+            | Self::Jcode { session_id }
             | Self::Kimi { session_id }
             | Self::OhMyPi { session_id, .. }
             | Self::Pi { session_id, .. } => session_id,
@@ -4435,7 +4448,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 13);
+        assert_eq!(ProviderKind::ALL.len(), 14);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(
