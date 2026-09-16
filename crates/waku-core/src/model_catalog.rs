@@ -1847,6 +1847,13 @@ fn normalize_codex_name(name: &str) -> String {
 }
 
 pub(crate) fn display_name_from_slug(slug: &str) -> String {
+    // A `:free`-style suffix is a billing marker, not part of the name, so it
+    // reads better parenthesized than glued on: "Muse Spark 1.3 (Free)".
+    let (slug, tier) = match slug.split_once(':') {
+        Some((name, tier)) if !tier.is_empty() => (name, Some(tier)),
+        _ => (slug, None),
+    };
+
     let words = slug
         .split(['-', '_'])
         .filter(|part| !part.is_empty())
@@ -1854,6 +1861,8 @@ pub(crate) fn display_name_from_slug(slug: &str) -> String {
             "gpt" => "GPT".to_owned(),
             "ai" => "AI".to_owned(),
             "xai" => "xAI".to_owned(),
+            // Vendor-agnostic initialisms that title-casing would mangle.
+            "oss" => "OSS".to_owned(),
             _ if part
                 .chars()
                 .all(|char| char.is_ascii_digit() || char == '.') =>
@@ -1868,11 +1877,89 @@ pub(crate) fn display_name_from_slug(slug: &str) -> String {
             }
         })
         .collect::<Vec<_>>();
-    if words.first().is_some_and(|word| word == "GPT") {
-        words.join("-")
+
+    // GPT keeps its hyphens, but its version still runs together.
+    let parts = join_version_digits(words);
+    let mut name = if parts.first().is_some_and(|word| word == "GPT") {
+        parts.join("-")
     } else {
-        words.join(" ")
+        parts.join(" ")
+    };
+
+    // A `:free`-style billing marker reads as a label beside the name rather
+    // than glued onto it.
+    if let Some(tier) = tier {
+        let mut chars = tier.chars();
+        let tier = chars.next().map_or_else(String::new, |first| {
+            first.to_uppercase().collect::<String>() + chars.as_str()
+        });
+        name = format!("{name} ({tier})");
     }
+    name
+}
+
+/// Rejoin a version's digits with dots, so a slug that writes a version as
+/// separate hyphenated parts reads as a version rather than a list of numbers:
+/// `muse-spark-1-3` is "Muse Spark 1.3", not "Muse Spark 1 3".
+///
+/// Only the first two digits of a run join. Everything after that is kept
+/// separate, because a longer run is a date or a build number that reads worse
+/// joined: `claude-opus-4-6-20250101` is "Claude Opus 4.6 20250101". A lone
+/// number is a marker rather than a version (`nano-banana-2`), and a word that
+/// already carries its own dot is left as it is (`veo-3.1-lite`).
+///
+/// The words are returned rather than a joined string, because the caller
+/// joins them differently for one prefix.
+fn join_version_digits(words: Vec<String>) -> Vec<String> {
+    // A version head is a short alphabetic prefix followed by digits, which is
+    // how these slugs spell a two-part version: `v4`, `k2`, `m2`, `m2.7`.
+    // A longer word is a name that merely ends in a digit (`qwen3`), so the
+    // prefix has to stay short.
+    let is_version_head = |word: &String| {
+        let letters = word.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+        if letters == 0 || letters > 2 {
+            return false;
+        }
+        let body = &word[letters..];
+        !body.is_empty() && body.chars().all(|c| c.is_ascii_digit() || c == '.')
+    };
+    let is_all_digits = |word: &String| !word.is_empty() && word.chars().all(|c| c.is_ascii_digit());
+
+    let mut joined: Vec<String> = Vec::with_capacity(words.len());
+    let mut index = 0;
+    while index < words.len() {
+        // `k2` + `6` is the version `K2.6`; a head with nothing after it, or
+        // with a non-number after it, is just a name and falls through.
+        if is_version_head(&words[index])
+            && !is_all_digits(&words[index])
+            && index + 1 < words.len()
+            && is_all_digits(&words[index + 1])
+        {
+            joined.push(format!("{}.{}", words[index], words[index + 1]));
+            index += 2;
+            continue;
+        }
+
+        // A run of plain digits: the first two join into a version.
+        if is_all_digits(&words[index]) {
+            let start = index;
+            while index < words.len() && is_all_digits(&words[index]) {
+                index += 1;
+            }
+            let run = &words[start..index];
+            if run.len() >= 2 {
+                joined.push(format!("{}.{}", run[0], run[1]));
+                joined.extend(run[2..].iter().cloned());
+            } else {
+                joined.push(run[0].clone());
+            }
+            continue;
+        }
+
+        joined.push(words[index].clone());
+        index += 1;
+    }
+    joined
 }
 
 fn strip_ansi(value: &str) -> String {
@@ -1901,8 +1988,34 @@ fn deduplicate(models: Vec<ProviderModel>) -> Vec<ProviderModel> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Tests that set `CODEX_HOME` mutate a process-global, so they must not
+    /// run beside each other: the whole suite runs them in parallel and they
+    /// clobber one another's value. Every such test takes this lock.
+    ///
+    /// Exposed crate-wide because `driver::codex` has one too, and both run in
+    /// the same test binary.
+    pub(crate) static CODEX_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets `CODEX_HOME` for the duration of a test, restoring it afterwards.
+    ///
+    /// The caller must hold [`CODEX_HOME_LOCK`]; a poisoned lock is recovered
+    /// rather than propagated, because a panic in one env-var test says nothing
+    /// about the next one's ability to set its own value.
+    pub(crate) fn with_codex_home<T>(home: &Path, run: impl FnOnce() -> T) -> T {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let previous = std::env::var_os("CODEX_HOME");
+        // SAFETY: `CODEX_HOME_LOCK` serializes every writer in this crate.
+        unsafe { std::env::set_var("CODEX_HOME", home) };
+        let result = run();
+        match previous {
+            Some(value) => unsafe { std::env::set_var("CODEX_HOME", value) },
+            None => unsafe { std::env::remove_var("CODEX_HOME") },
+        }
+        result
+    }
 
     #[cfg(unix)]
     fn write_fake_model_cli(name: &str, contents: &str) -> PathBuf {
@@ -2395,14 +2508,7 @@ description = "House explorer with our own rules."
         // Skipped: not a .toml file.
         std::fs::write(agents.join("notes.md"), "name = \"should_not_load\"\n").unwrap();
 
-        let previous = std::env::var_os("CODEX_HOME");
-        // SAFETY: test-only, and the name is unique to this test's temp dir.
-        unsafe { std::env::set_var("CODEX_HOME", &home) };
-        let presets = discover_codex_agent_presets().unwrap();
-        match previous {
-            Some(value) => unsafe { std::env::set_var("CODEX_HOME", value) },
-            None => unsafe { std::env::remove_var("CODEX_HOME") },
-        }
+        let presets = with_codex_home(&home, || discover_codex_agent_presets().unwrap());
 
         let ids = presets
             .iter()
@@ -2458,15 +2564,12 @@ description = "House explorer with our own rules."
         )
         .unwrap();
 
-        let previous = std::env::var_os("CODEX_HOME");
-        // SAFETY: test-only, and the name is unique to this test's temp dir.
-        unsafe { std::env::set_var("CODEX_HOME", &home) };
-        let first = discover_codex_agent_presets().unwrap();
-        let second = discover_codex_agent_presets().unwrap();
-        match previous {
-            Some(value) => unsafe { std::env::set_var("CODEX_HOME", value) },
-            None => unsafe { std::env::remove_var("CODEX_HOME") },
-        }
+        let (first, second) = with_codex_home(&home, || {
+            (
+                discover_codex_agent_presets().unwrap(),
+                discover_codex_agent_presets().unwrap(),
+            )
+        });
 
         let twins = |presets: &[ProviderAgentPreset]| {
             presets
@@ -2491,14 +2594,7 @@ description = "House explorer with our own rules."
         ));
         std::fs::create_dir_all(&home).unwrap();
 
-        let previous = std::env::var_os("CODEX_HOME");
-        // SAFETY: test-only, and the name is unique to this test's temp dir.
-        unsafe { std::env::set_var("CODEX_HOME", &home) };
-        let presets = discover_codex_agent_presets().unwrap();
-        match previous {
-            Some(value) => unsafe { std::env::set_var("CODEX_HOME", value) },
-            None => unsafe { std::env::remove_var("CODEX_HOME") },
-        }
+        let presets = with_codex_home(&home, || discover_codex_agent_presets().unwrap());
 
         assert_eq!(
             presets
@@ -2555,17 +2651,49 @@ description = "House explorer with our own rules."
     /// the UI for the shapes the two gateways actually produce.
     #[test]
     fn model_names_read_as_names_not_ids() {
-        // Version digits separated by hyphens stay separate words; that is the
-        // existing convention every other provider's names already follow.
-        assert_eq!(display_name_from_slug("glm-5-3-flash"), "Glm 5 3 Flash");
+        // A version written as separate hyphenated parts reads as a version.
+        assert_eq!(
+            display_name_from_slug("muse-spark-1-3-contributor"),
+            "Muse Spark 1.3 Contributor"
+        );
+        assert_eq!(display_name_from_slug("glm-5-3-flash"), "Glm 5.3 Flash");
         assert_eq!(
             display_name_from_slug("deepseek-v4-1-flash"),
-            "Deepseek V4 1 Flash"
+            "Deepseek V4.1 Flash"
         );
-        assert_eq!(display_name_from_slug("hy4-preview"), "Hy4 Preview");
-        assert_eq!(display_name_from_slug("gpt-5.6-sol"), "GPT-5.6-Sol");
+        // A letter+digit head joins its next number too.
+        assert_eq!(display_name_from_slug("kimi-k2-6"), "Kimi K2.6");
+        assert_eq!(display_name_from_slug("minimax-m2-7"), "Minimax M2.7");
+        assert_eq!(display_name_from_slug("mimo-v2-5"), "Mimo V2.5");
+        // GPT keeps its hyphens but its version still runs together.
+        assert_eq!(display_name_from_slug("gpt-5-6-sol"), "GPT-5.6-Sol");
+        assert_eq!(display_name_from_slug("gpt-oss-120b"), "GPT-OSS-120b");
+        // A billing suffix is parenthesized rather than glued to the name.
+        assert_eq!(
+            display_name_from_slug("muse-spark-1-3-contributor:free"),
+            "Muse Spark 1.3 Contributor (Free)"
+        );
         assert_eq!(display_name_from_slug("kenari"), "Kenari");
-        assert_eq!(display_name_from_slug("muse-spark-1-3"), "Muse Spark 1 3");
+    }
+
+    /// A version's digits join, but a lone number, a date, and a long name
+    /// ending in digits each have to keep reading correctly.
+    #[test]
+    fn version_digits_join_only_when_that_reads_better() {
+        assert_eq!(display_name_from_slug("muse-spark-1-2"), "Muse Spark 1.2");
+        // A single number is a marker, not a version.
+        assert_eq!(display_name_from_slug("nano-banana-2"), "Nano Banana 2");
+        // The date keeps its own part, joined only to the version before it.
+        assert_eq!(
+            display_name_from_slug("claude-opus-4-6-20250101"),
+            "Claude Opus 4.6 20250101"
+        );
+        // A long word ending in digits is a name, not a version head.
+        assert_eq!(display_name_from_slug("qwen3-8-flash"), "Qwen3 8 Flash");
+        // A number carrying its own dot is already a version.
+        assert_eq!(display_name_from_slug("veo-3.1-lite"), "Veo 3.1 Lite");
+        // A digit run that is the whole name is not split at all.
+        assert_eq!(display_name_from_slug("302ai"), "302ai");
     }
 
     /// A route list is provider-scoped and availability-filtered: it must drop
@@ -2597,7 +2725,7 @@ description = "House explorer with our own rules."
         );
         // The BYOK provider is what the subtitle shows beside the CLI name.
         assert_eq!(models[0].sub_provider.as_deref(), Some("Kenari"));
-        assert_eq!(models[0].name, "Glm 5 3 Flash");
+        assert_eq!(models[0].name, "Glm 5.3 Flash");
     }
 
     /// Without a named provider there is nothing to scope to, so the routes

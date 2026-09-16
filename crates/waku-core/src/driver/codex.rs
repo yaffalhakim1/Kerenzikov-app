@@ -2555,20 +2555,21 @@ Stay in exploration mode.
         )
         .unwrap();
 
-        let previous = std::env::var_os("CODEX_HOME");
-        // SAFETY: this name is unique to this test's temp home.
-        unsafe { std::env::set_var("CODEX_HOME", &home) };
-
-        let user = agent_preset_instructions(Some("pr_explorer"));
-        let built_in = agent_preset_instructions(Some("explorer"));
-        let missing = agent_preset_instructions(Some("never_written"));
-        let absent = agent_preset_instructions(None);
-        let blank = agent_preset_instructions(Some("   "));
-
-        match previous {
-            Some(value) => unsafe { std::env::set_var("CODEX_HOME", value) },
-            None => unsafe { std::env::remove_var("CODEX_HOME") },
-        }
+        // Shares `waku-core`'s test binary with `model_catalog`'s CODEX_HOME
+        // tests, so it has to take the same lock rather than set the variable
+        // beside them.
+        let (user, built_in, missing, absent, blank) = crate::model_catalog::tests::with_codex_home(
+            &home,
+            || {
+                (
+                    agent_preset_instructions(Some("pr_explorer")),
+                    agent_preset_instructions(Some("explorer")),
+                    agent_preset_instructions(Some("never_written")),
+                    agent_preset_instructions(None),
+                    agent_preset_instructions(Some("   ")),
+                )
+            },
+        );
 
         assert_eq!(user.as_deref(), Some("Stay in exploration mode."));
         assert!(built_in.unwrap().contains("exploration"));
