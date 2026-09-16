@@ -108,6 +108,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // model the user configured. An invented fallback would offer a model
         // the CLI rejects, so discovery is authoritative.
         ProviderKind::Grok => Vec::new(),
+        // Jcode routes whatever the user's own provider config exposes, so a
+        // fabricated fallback would offer a model the daemon cannot serve.
+        ProviderKind::Jcode => Vec::new(),
         // Pi, Oh My Pi, and Kimi Code all take their catalog from the user's
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
@@ -183,7 +186,10 @@ pub fn discover_catalog(
         // Amp exposes stable agent modes rather than a model inventory. Keep
         // the picker aligned with the modes advertised by the current CLI.
         ProviderKind::Amp => (CatalogProbe::legacy(Vec::new()), None),
-        ProviderKind::Codex => (CatalogProbe::legacy(discover_codex_models(binary)), None),
+        ProviderKind::Codex => (
+            CatalogProbe::legacy(discover_codex_models(binary)),
+            discover_codex_agent_presets(),
+        ),
         ProviderKind::Claude => (CatalogProbe::legacy(discover_claude_models(binary)), None),
         ProviderKind::Cursor => (CatalogProbe::legacy(discover_cursor_models(binary)), None),
         ProviderKind::Copilot => (CatalogProbe::legacy(discover_copilot_models(binary)), None),
@@ -198,6 +204,7 @@ pub fn discover_catalog(
             (CatalogProbe::legacy(models), presets)
         }
         ProviderKind::Grok => (CatalogProbe::legacy(discover_grok_models(binary)), None),
+        ProviderKind::Jcode => (CatalogProbe::legacy(discover_jcode_models(binary)), None),
         ProviderKind::Kimi => (CatalogProbe::legacy(discover_kimi_models(binary)), None),
         ProviderKind::Pi => (CatalogProbe::legacy(discover_pi_models(binary, PiDialect::Pi)), None),
         ProviderKind::OhMyPi => {
@@ -351,8 +358,131 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
         .collect()
 }
 
-fn discover_cursor_models(binary: &Path) -> Vec<ProviderModel> {
+/// Jcode publishes every model it can route, one id per line, with no markers
+/// or headers. The list is the daemon's, so it already reflects the user's
+/// configured providers and any model they added by hand.
+fn discover_jcode_models(binary: &Path) -> Vec<ProviderModel> {
     let mut command = crate::command_env::command(binary);
+    let command = command.args(["model", "list", "--json"]);
+    let Ok(output) = crate::command_env::output(command) else {
+        return Vec::new();
+    };
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let Ok(payload) = serde_json::from_str::<Value>(strip_ansi(&combined).trim()) else {
+        // An older jcode without `--json` prints the plain list; fall back to
+        // it rather than showing nothing, and accept that the BYOK provider
+        // name is unavailable in that shape.
+        return parse_jcode_models(&combined);
+    };
+    let selected_provider = payload
+        .get("provider")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    let models = parse_jcode_routes_json(&payload, selected_provider);
+    if models.is_empty() {
+        // A build that reports no routes still has a flat list worth showing.
+        return parse_jcode_models_json(&payload);
+    }
+    models
+}
+
+/// The flat `models` list, used only when `routes` is absent or empty. Each id
+/// is carried as its own name and tagged with the routed provider, since the
+/// list itself says nothing about which of them this session can serve.
+fn parse_jcode_models_json(payload: &Value) -> Vec<ProviderModel> {
+    let sub_provider = payload
+        .get("provider")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(display_name_from_slug);
+    let mut models: Vec<ProviderModel> = payload
+        .get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && !id.contains(' '))
+        .map(|id| {
+            let model = ProviderModel::new(id, id);
+            match sub_provider.clone() {
+                Some(name) => model.sub_provider(name),
+                None => model,
+            }
+        })
+        .collect();
+    models.dedup_by(|a, b| a.id == b.id);
+    models
+}
+
+/// The `--json` shape carries a `routes` table — every model paired with the
+/// provider that actually serves it, whether it is available, and how it
+/// authenticates. That is the picker's real source: the flat `models` list is
+/// a union across every configured provider, so it offers ids this session's
+/// provider cannot serve. Picking one of those fails at request time with
+/// "no price for model" (a dot-variant of a real id, say), which is a trap a
+/// user cannot see coming.
+///
+/// `selected_provider` is the one this session routes to; only its routes are
+/// offered, and only while they report as available.
+fn parse_jcode_routes_json(payload: &Value, selected_provider: Option<&str>) -> Vec<ProviderModel> {
+    let Some(routes) = payload.get("routes").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut models: Vec<ProviderModel> = routes
+        .iter()
+        .filter(|route| {
+            route
+                .get("available")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .filter(|route| match (route.get("provider").and_then(Value::as_str), selected_provider) {
+            // With a named provider, keep only its own routes. Without one,
+            // there is nothing to scope to, so every available route stands.
+            (Some(provider), Some(selected)) => provider.eq_ignore_ascii_case(selected),
+            _ => true,
+        })
+        .filter_map(|route| {
+            let id = route.get("model").and_then(Value::as_str)?.trim();
+            if id.is_empty() || id.contains(' ') {
+                return None;
+            }
+            let model = ProviderModel::new(id, display_name_from_slug(id));
+            match route.get("provider").and_then(Value::as_str) {
+                // Prettified the same way every other provider's name is, so
+                // the picker does not show a bare config slug beside them.
+                Some(provider) => Some(model.sub_provider(display_name_from_slug(provider.trim()))),
+                None => Some(model),
+            }
+        })
+        .collect();
+    models.dedup_by(|a, b| a.id == b.id);
+    models
+}
+
+fn parse_jcode_models(output: &str) -> Vec<ProviderModel> {
+    let mut models: Vec<ProviderModel> = strip_ansi(output)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        // A failure prints prose rather than a model id; an id never contains
+        // a space, so anything that does is a message we must not show as a
+        // selectable model.
+        .filter(|line| !line.contains(' '))
+        .map(|line| ProviderModel::new(line, line))
+        .collect();
+    models.dedup_by(|a, b| a.id == b.id);
+    models
+}
+
+fn discover_cursor_models(binary: &Path) -> Vec<ProviderModel> {    let mut command = crate::command_env::command(binary);
     let command = command.arg("models");
     let Ok(output) = crate::command_env::output(command) else {
         return Vec::new();
@@ -512,6 +642,89 @@ fn failure_reason_from_parts(code: Option<i32>, stderr: &[u8], stdout: &[u8]) ->
 /// prompt body's `agent` id dispatches against. Prefer an already-resident
 /// server; otherwise start a short-lived one in a neutral directory, because
 /// no project session exists yet at probe time and the agents listing is
+/// The roles Codex spawns its own subagents as, read from the user's own
+/// `~/.codex/agents/*.toml` directory plus Codex's built-ins.
+///
+/// Codex owns this catalogue, not Waku: the files are documented, user-authored
+/// (`name`, `description`, `developer_instructions` are required), and Codex
+/// reloads them per run. So this is a pure filesystem read on the daemon host —
+/// no probe process, no wire call, and nothing to cache, because the catalog is
+/// cheap to rebuild and a stale cache would hide an agent the user just wrote.
+///
+/// `default`, `worker`, and `explorer` ship with Codex. They are always offered,
+/// and a user file that reuses one of those names intentionally overrides it, so
+/// the merge is by name with the user's file winning.
+fn discover_codex_agent_presets() -> Option<Vec<ProviderAgentPreset>> {
+    let mut presets: Vec<ProviderAgentPreset> = Vec::new();
+
+    for (id, description) in CODEX_BUILT_IN_AGENTS {
+        presets.push(ProviderAgentPreset::new(*id, *id).description(*description));
+    }
+
+    // `CODEX_HOME` overrides the location, exactly as it does for Codex itself.
+    let home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")));
+    let Some(directory) = home.map(|home| home.join("agents")) else {
+        return Some(presets);
+    };
+    let Ok(entries) = std::fs::read_dir(&directory) else {
+        // A missing directory is the normal case for a user who has written no
+        // roles of their own; the built-ins still stand.
+        return Some(presets);
+    };
+
+    // `read_dir` yields in arbitrary order, so two files claiming one `name`
+    // would otherwise make the picker depend on the filesystem's mood. Sorting
+    // by path makes the first-wins rule deterministic across runs.
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("toml"))
+        .collect();
+    paths.sort();
+
+    let mut claimed: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for path in paths {
+        let Ok(contents) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(parsed) = contents.parse::<toml::Value>() else {
+            continue;
+        };
+        // `name` is the source of truth; a file without one is not a custom
+        // agent Codex would load either, so it is skipped rather than guessed
+        // at from the filename.
+        let Some(name) = parsed.get("name").and_then(toml::Value::as_str) else {
+            continue;
+        };
+        let name = name.trim();
+        if name.is_empty() || !claimed.insert(name.to_owned()) {
+            continue;
+        }
+
+        let mut preset = ProviderAgentPreset::new(name, name);
+        preset.is_custom = true;
+        if let Some(description) = parsed.get("description").and_then(toml::Value::as_str) {
+            preset = preset.description(description.trim());
+        }
+        match presets.iter_mut().find(|present| present.id == name) {
+            // The user's file wins over the built-in of the same name.
+            Some(present) => *present = preset,
+            None => presets.push(preset),
+        }
+    }
+
+    Some(presets)
+}
+
+/// The roles every Codex installation exposes without any user configuration.
+const CODEX_BUILT_IN_AGENTS: &[(&str, &str)] = &[
+    ("default", "General-purpose fallback agent."),
+    ("worker", "Execution-focused agent for implementation and fixes."),
+    ("explorer", "Read-heavy codebase exploration agent."),
+];
+
 /// global.
 fn discover_opencode_catalog(
     binary: &Path,
@@ -1271,6 +1484,22 @@ fn pi_reasoning_options(dialect: PiDialect, model: &Value) -> Vec<ProviderModelO
         .collect()
 }
 
+/// The gateway a Codex model routes through, read off the model description
+/// Codex generates for a custom provider ("stepfun via kenari").
+///
+/// Deliberately narrow: only the documented "X via Y" shape is accepted, and
+/// only when the tail is a single word, so ordinary prose descriptions do not
+/// become a bogus provider label. Anything else yields `None`, which leaves
+/// the picker showing the CLI name alone.
+fn codex_gateway_from_description(description: &str) -> Option<String> {
+    let (_, gateway) = description.trim().rsplit_once(" via ")?;
+    let gateway = gateway.trim();
+    if gateway.is_empty() || gateway.contains(' ') {
+        return None;
+    }
+    Some(display_name_from_slug(gateway))
+}
+
 fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
     let mut command = crate::command_env::command(binary);
     let command = command
@@ -1366,6 +1595,17 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
                 .map(str::to_owned)
                 .unwrap_or_else(|| display_name_from_slug(id));
             let mut model = ProviderModel::new(id, normalize_codex_name(&name));
+            // Codex words its routing as "stepfun via kenari" in the model's
+            // description — the BYOK gateway is the tail after " via ". The
+            // picker shows it beside the CLI name the way OpenCode's does, so
+            // a user can tell which gateway a model is about to spend against.
+            if let Some(gateway) = value
+                .get("description")
+                .and_then(Value::as_str)
+                .and_then(codex_gateway_from_description)
+            {
+                model.sub_provider = Some(gateway);
+            }
             model.is_default = value
                 .get("isDefault")
                 .and_then(Value::as_bool)
@@ -1607,6 +1847,13 @@ fn normalize_codex_name(name: &str) -> String {
 }
 
 pub(crate) fn display_name_from_slug(slug: &str) -> String {
+    // A `:free`-style suffix is a billing marker, not part of the name, so it
+    // reads better parenthesized than glued on: "Muse Spark 1.3 (Free)".
+    let (slug, tier) = match slug.split_once(':') {
+        Some((name, tier)) if !tier.is_empty() => (name, Some(tier)),
+        _ => (slug, None),
+    };
+
     let words = slug
         .split(['-', '_'])
         .filter(|part| !part.is_empty())
@@ -1614,6 +1861,8 @@ pub(crate) fn display_name_from_slug(slug: &str) -> String {
             "gpt" => "GPT".to_owned(),
             "ai" => "AI".to_owned(),
             "xai" => "xAI".to_owned(),
+            // Vendor-agnostic initialisms that title-casing would mangle.
+            "oss" => "OSS".to_owned(),
             _ if part
                 .chars()
                 .all(|char| char.is_ascii_digit() || char == '.') =>
@@ -1628,11 +1877,89 @@ pub(crate) fn display_name_from_slug(slug: &str) -> String {
             }
         })
         .collect::<Vec<_>>();
-    if words.first().is_some_and(|word| word == "GPT") {
-        words.join("-")
+
+    // GPT keeps its hyphens, but its version still runs together.
+    let parts = join_version_digits(words);
+    let mut name = if parts.first().is_some_and(|word| word == "GPT") {
+        parts.join("-")
     } else {
-        words.join(" ")
+        parts.join(" ")
+    };
+
+    // A `:free`-style billing marker reads as a label beside the name rather
+    // than glued onto it.
+    if let Some(tier) = tier {
+        let mut chars = tier.chars();
+        let tier = chars.next().map_or_else(String::new, |first| {
+            first.to_uppercase().collect::<String>() + chars.as_str()
+        });
+        name = format!("{name} ({tier})");
     }
+    name
+}
+
+/// Rejoin a version's digits with dots, so a slug that writes a version as
+/// separate hyphenated parts reads as a version rather than a list of numbers:
+/// `muse-spark-1-3` is "Muse Spark 1.3", not "Muse Spark 1 3".
+///
+/// Only the first two digits of a run join. Everything after that is kept
+/// separate, because a longer run is a date or a build number that reads worse
+/// joined: `claude-opus-4-6-20250101` is "Claude Opus 4.6 20250101". A lone
+/// number is a marker rather than a version (`nano-banana-2`), and a word that
+/// already carries its own dot is left as it is (`veo-3.1-lite`).
+///
+/// The words are returned rather than a joined string, because the caller
+/// joins them differently for one prefix.
+fn join_version_digits(words: Vec<String>) -> Vec<String> {
+    // A version head is a short alphabetic prefix followed by digits, which is
+    // how these slugs spell a two-part version: `v4`, `k2`, `m2`, `m2.7`.
+    // A longer word is a name that merely ends in a digit (`qwen3`), so the
+    // prefix has to stay short.
+    let is_version_head = |word: &String| {
+        let letters = word.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+        if letters == 0 || letters > 2 {
+            return false;
+        }
+        let body = &word[letters..];
+        !body.is_empty() && body.chars().all(|c| c.is_ascii_digit() || c == '.')
+    };
+    let is_all_digits = |word: &String| !word.is_empty() && word.chars().all(|c| c.is_ascii_digit());
+
+    let mut joined: Vec<String> = Vec::with_capacity(words.len());
+    let mut index = 0;
+    while index < words.len() {
+        // `k2` + `6` is the version `K2.6`; a head with nothing after it, or
+        // with a non-number after it, is just a name and falls through.
+        if is_version_head(&words[index])
+            && !is_all_digits(&words[index])
+            && index + 1 < words.len()
+            && is_all_digits(&words[index + 1])
+        {
+            joined.push(format!("{}.{}", words[index], words[index + 1]));
+            index += 2;
+            continue;
+        }
+
+        // A run of plain digits: the first two join into a version.
+        if is_all_digits(&words[index]) {
+            let start = index;
+            while index < words.len() && is_all_digits(&words[index]) {
+                index += 1;
+            }
+            let run = &words[start..index];
+            if run.len() >= 2 {
+                joined.push(format!("{}.{}", run[0], run[1]));
+                joined.extend(run[2..].iter().cloned());
+            } else {
+                joined.push(run[0].clone());
+            }
+            continue;
+        }
+
+        joined.push(words[index].clone());
+        index += 1;
+    }
+    joined
 }
 
 fn strip_ansi(value: &str) -> String {
@@ -1661,8 +1988,34 @@ fn deduplicate(models: Vec<ProviderModel>) -> Vec<ProviderModel> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Tests that set `CODEX_HOME` mutate a process-global, so they must not
+    /// run beside each other: the whole suite runs them in parallel and they
+    /// clobber one another's value. Every such test takes this lock.
+    ///
+    /// Exposed crate-wide because `driver::codex` has one too, and both run in
+    /// the same test binary.
+    pub(crate) static CODEX_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Sets `CODEX_HOME` for the duration of a test, restoring it afterwards.
+    ///
+    /// The caller must hold [`CODEX_HOME_LOCK`]; a poisoned lock is recovered
+    /// rather than propagated, because a panic in one env-var test says nothing
+    /// about the next one's ability to set its own value.
+    pub(crate) fn with_codex_home<T>(home: &Path, run: impl FnOnce() -> T) -> T {
+        let _guard = CODEX_HOME_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let previous = std::env::var_os("CODEX_HOME");
+        // SAFETY: `CODEX_HOME_LOCK` serializes every writer in this crate.
+        unsafe { std::env::set_var("CODEX_HOME", home) };
+        let result = run();
+        match previous {
+            Some(value) => unsafe { std::env::set_var("CODEX_HOME", value) },
+            None => unsafe { std::env::remove_var("CODEX_HOME") },
+        }
+        result
+    }
 
     #[cfg(unix)]
     fn write_fake_model_cli(name: &str, contents: &str) -> PathBuf {
@@ -2118,10 +2471,318 @@ opencode/big-pickle
         assert_eq!(presets[3].description, None);
     }
 
+    /// Writes a `~/.codex/agents` directory under a temp `CODEX_HOME` and
+    /// asserts what the preset discovery makes of it. The env var is process
+    /// global, so this test owns the name it sets and restores it after.
+    #[test]
+    fn codex_agent_presets_come_from_the_users_agent_files() {
+        let home = std::env::temp_dir().join(format!(
+            "waku-codex-agent-test-{}",
+            std::process::id()
+        ));
+        let agents = home.join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+
+        std::fs::write(
+            agents.join("pr-explorer.toml"),
+            r#"
+name = "pr_explorer"
+description = "Read-only codebase explorer."
+model = "glm-5-3-flash"
+"#,
+        )
+        .unwrap();
+        // A user file reusing a built-in name replaces that built-in.
+        std::fs::write(
+            agents.join("explorer.toml"),
+            r#"
+name = "explorer"
+description = "House explorer with our own rules."
+"#,
+        )
+        .unwrap();
+        // Skipped: no `name` (the field is the source of truth, not the file).
+        std::fs::write(agents.join("nameless.toml"), "description = \"orphan\"\n").unwrap();
+        // Skipped: not TOML at all.
+        std::fs::write(agents.join("broken.toml"), "this is not = = toml\n").unwrap();
+        // Skipped: not a .toml file.
+        std::fs::write(agents.join("notes.md"), "name = \"should_not_load\"\n").unwrap();
+
+        let presets = with_codex_home(&home, || discover_codex_agent_presets().unwrap());
+
+        let ids = presets
+            .iter()
+            .map(|preset| preset.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["default", "worker", "explorer", "pr_explorer"]);
+
+        // The built-in survives, carrying the user's description.
+        let explorer = presets.iter().find(|preset| preset.id == "explorer").unwrap();
+        assert_eq!(
+            explorer.description.as_deref(),
+            Some("House explorer with our own rules.")
+        );
+        assert!(explorer.is_custom);
+
+        // The built-ins keep their own text and are not marked custom.
+        let worker = presets.iter().find(|preset| preset.id == "worker").unwrap();
+        assert!(!worker.is_custom);
+
+        let added = presets
+            .iter()
+            .find(|preset| preset.id == "pr_explorer")
+            .unwrap();
+        assert_eq!(
+            added.description.as_deref(),
+            Some("Read-only codebase explorer.")
+        );
+        assert!(added.is_custom);
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// Two files claiming one `name` must yield exactly one role, and the same
+    /// one on every run: `read_dir` order is arbitrary, so the tie-break has to
+    /// come from the sorted paths rather than from the filesystem.
+    #[test]
+    fn codex_agent_presets_pick_one_winner_per_name() {
+        let home = std::env::temp_dir().join(format!(
+            "waku-codex-dup-home-{}",
+            std::process::id()
+        ));
+        let agents = home.join("agents");
+        std::fs::create_dir_all(&agents).unwrap();
+        // "a.toml" sorts before "b.toml", so it is the deterministic winner.
+        std::fs::write(
+            agents.join("b.toml"),
+            "name = \"twin\"\ndescription = \"from b\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            agents.join("a.toml"),
+            "name = \"twin\"\ndescription = \"from a\"\n",
+        )
+        .unwrap();
+
+        let (first, second) = with_codex_home(&home, || {
+            (
+                discover_codex_agent_presets().unwrap(),
+                discover_codex_agent_presets().unwrap(),
+            )
+        });
+
+        let twins = |presets: &[ProviderAgentPreset]| {
+            presets
+                .iter()
+                .filter(|preset| preset.id == "twin")
+                .map(|preset| preset.description.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(twins(&first).len(), 1);
+        assert_eq!(twins(&first), twins(&second));
+        assert_eq!(twins(&first)[0].as_deref(), Some("from a"));
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// A Codex home with no `agents/` directory still offers the built-ins,
+    /// which is the state every fresh installation starts in.
+    #[test]
+    fn codex_agent_presets_fall_back_to_built_ins() {        let home = std::env::temp_dir().join(format!(
+            "waku-codex-empty-home-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+
+        let presets = with_codex_home(&home, || discover_codex_agent_presets().unwrap());
+
+        assert_eq!(
+            presets
+                .iter()
+                .map(|preset| preset.id.as_str())
+                .collect::<Vec<_>>(),
+            ["default", "worker", "explorer"]
+        );
+        assert!(presets.iter().all(|preset| !preset.is_custom));
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    /// Jcode prints one model id per line with no markers or headers, so the
+    /// parser's whole job is to reject anything that is not an id.
+    #[test]
+    fn parses_jcode_models_one_id_per_line() {
+        let models = parse_jcode_models(
+            "\u{1b}[32mglm-5-3-flash\u{1b}[0m\n\
+             claude-opus-5\n\
+             \n\
+             gpt-5.6-pro[web]\n\
+             Error: could not read provider config\n\
+             deepseek-v4-flash\n",
+        );
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "glm-5-3-flash",
+                "claude-opus-5",
+                "gpt-5.6-pro[web]",
+                "deepseek-v4-flash"
+            ]
+        );
+    }
+
+    /// The same id twice must not produce two picker entries.
+    #[test]
+    fn jcode_models_are_deduplicated() {
+        let models = parse_jcode_models("glm-5-3-flash\nglm-5-3-flash\nkimi-k2-7-code\n");
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["glm-5-3-flash", "kimi-k2-7-code"]
+        );
+    }
+
+    /// The picker's model name comes from this, so a raw id must never reach
+    /// the UI for the shapes the two gateways actually produce.
+    #[test]
+    fn model_names_read_as_names_not_ids() {
+        // A version written as separate hyphenated parts reads as a version.
+        assert_eq!(
+            display_name_from_slug("muse-spark-1-3-contributor"),
+            "Muse Spark 1.3 Contributor"
+        );
+        assert_eq!(display_name_from_slug("glm-5-3-flash"), "Glm 5.3 Flash");
+        assert_eq!(
+            display_name_from_slug("deepseek-v4-1-flash"),
+            "Deepseek V4.1 Flash"
+        );
+        // A letter+digit head joins its next number too.
+        assert_eq!(display_name_from_slug("kimi-k2-6"), "Kimi K2.6");
+        assert_eq!(display_name_from_slug("minimax-m2-7"), "Minimax M2.7");
+        assert_eq!(display_name_from_slug("mimo-v2-5"), "Mimo V2.5");
+        // GPT keeps its hyphens but its version still runs together.
+        assert_eq!(display_name_from_slug("gpt-5-6-sol"), "GPT-5.6-Sol");
+        assert_eq!(display_name_from_slug("gpt-oss-120b"), "GPT-OSS-120b");
+        // A billing suffix is parenthesized rather than glued to the name.
+        assert_eq!(
+            display_name_from_slug("muse-spark-1-3-contributor:free"),
+            "Muse Spark 1.3 Contributor (Free)"
+        );
+        assert_eq!(display_name_from_slug("kenari"), "Kenari");
+    }
+
+    /// A version's digits join, but a lone number, a date, and a long name
+    /// ending in digits each have to keep reading correctly.
+    #[test]
+    fn version_digits_join_only_when_that_reads_better() {
+        assert_eq!(display_name_from_slug("muse-spark-1-2"), "Muse Spark 1.2");
+        // A single number is a marker, not a version.
+        assert_eq!(display_name_from_slug("nano-banana-2"), "Nano Banana 2");
+        // The date keeps its own part, joined only to the version before it.
+        assert_eq!(
+            display_name_from_slug("claude-opus-4-6-20250101"),
+            "Claude Opus 4.6 20250101"
+        );
+        // A long word ending in digits is a name, not a version head.
+        assert_eq!(display_name_from_slug("qwen3-8-flash"), "Qwen3 8 Flash");
+        // A number carrying its own dot is already a version.
+        assert_eq!(display_name_from_slug("veo-3.1-lite"), "Veo 3.1 Lite");
+        // A digit run that is the whole name is not split at all.
+        assert_eq!(display_name_from_slug("302ai"), "302ai");
+    }
+
+    /// A route list is provider-scoped and availability-filtered: it must drop
+    /// other providers' models, drop unavailable ones, and carry the provider
+    /// name the picker renders beside the CLI name.
+    #[test]
+    fn jcode_routes_scope_to_the_session_provider_and_availability() {
+        let payload = json!({
+            "provider": "kenari",
+            "selected_model": "glm-5-3-flash",
+            "models": ["glm-5-3-flash", "glm-5.3-flash"],
+            "routes": [
+                {"provider": "kenari", "model": "glm-5-3-flash", "method": "api key", "available": true},
+                // The dot variant is another provider's id and must not leak in
+                // even though the flat list carries it.
+                {"provider": "Z.AI", "model": "glm-5.3-flash", "method": "api key", "available": true},
+                // A Kenari route that is not currently usable is not offered.
+                {"provider": "kenari", "model": "spent-quota", "method": "api key", "available": false},
+                {"provider": "kenari", "model": "deepseek-v4-1-flash", "method": "api key", "available": true}
+            ]
+        });
+        let models = parse_jcode_routes_json(&payload, Some("kenari"));
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["glm-5-3-flash", "deepseek-v4-1-flash"]
+        );
+        // The BYOK provider is what the subtitle shows beside the CLI name.
+        assert_eq!(models[0].sub_provider.as_deref(), Some("Kenari"));
+        assert_eq!(models[0].name, "Glm 5.3 Flash");
+    }
+
+    /// Without a named provider there is nothing to scope to, so the routes
+    /// that are available still stand rather than the picker going empty.
+    #[test]
+    fn jcode_routes_without_a_named_provider_keep_every_available_route() {
+        let payload = json!({
+            "routes": [
+                {"provider": "kenari", "model": "glm-5-3-flash", "available": true},
+                {"provider": "Z.AI", "model": "glm-5.3-flash", "available": true},
+                {"provider": "kenari", "model": "spent", "available": false}
+            ]
+        });
+        let models = parse_jcode_routes_json(&payload, None);
+        assert_eq!(models.len(), 2);
+    }
+
+    /// Codex words its routing as "stepfun via kenari"; only that shape may
+    /// become a provider label, so ordinary prose stays out of the picker.
+    #[test]
+    fn codex_gateway_comes_only_from_the_via_description() {
+        assert_eq!(
+            codex_gateway_from_description("stepfun via kenari").as_deref(),
+            Some("Kenari")
+        );
+        // Prose, a missing gateway, a bare "via X", or a multi-word tail is
+        // not a provider name.
+        assert_eq!(codex_gateway_from_description("A fast coding model"), None);
+        assert_eq!(
+            codex_gateway_from_description("served via our internal proxy"),
+            None
+        );
+        assert_eq!(codex_gateway_from_description("via kenari"), None);
+        assert_eq!(codex_gateway_from_description("via "), None);
+    }
+
+    #[test]
+    #[ignore = "requires an installed jcode"]
+    fn installed_jcode_reports_its_routed_provider() {
+        let binary =
+            crate::command_env::find_executable("jcode").expect("jcode is not installed");
+        let models = discover_jcode_models(&binary);
+        assert!(!models.is_empty(), "jcode reported no models");
+        // Every offered model carries the provider it routes through, which is
+        // what the picker renders beside the CLI name.
+        assert!(
+            models.iter().all(|model| model.sub_provider.is_some()),
+            "a model arrived without its provider: {:?}",
+            models.iter().find(|model| model.sub_provider.is_none())
+        );
+        // The name must be a name, never the raw id.
+        assert!(models.iter().all(|model| model.name != model.id));
+    }
+
     #[test]
     #[ignore = "requires an installed DeepSeek Harness"]
-    fn installed_deepseek_harness_reports_models() {
-        let binary =
+    fn installed_deepseek_harness_reports_models() {        let binary =
             crate::command_env::find_executable("dsh").expect("DeepSeek Harness is not installed");
         let models = discover_catalog(ProviderKind::DeepSeek, &binary).0;
         assert!(
