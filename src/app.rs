@@ -117,6 +117,16 @@ const ESCAPE_STOP_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(3);
 /// regardless of the provider's chunk rate, and the veil dissolve spans the
 /// gap so streamed text still reads as continuous.
 const STREAM_FRAME_INTERVAL: Duration = Duration::from_millis(120);
+/// Provider events one pump drain may resolve before yielding to the next
+/// metered frame.
+///
+/// A visible window drains a handful of events per pass, so this never binds in
+/// steady state. It binds after the window was hidden long enough for the
+/// provider queues to pile up: draining the whole backlog in one pass made the
+/// first frame back the heaviest one, which is what the restore stutter was.
+/// Bounded to roughly one frame's worth of rows, the remainder folds into the
+/// next `StreamFrame` tick and the backlog unwinds over a few frames.
+const PUMP_EVENTS_PER_DRAIN: usize = 256;
 /// How long a session may sit untouched before its provider process is released.
 /// Codex and Pi stay resident between turns, so without this an afternoon of
 /// abandoned tasks is an afternoon of idle agent processes.
@@ -2371,7 +2381,17 @@ impl Waku {
             .detach();
 
             cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+                // Animation only runs for a window that is presenting frames.
+                // Reported before anything else so the first frame back is not
+                // spent repainting hidden-window ticks.
+                crate::ui::motion::set_window_visible(window.is_window_active(), cx);
                 if window.is_window_active() {
+                    // A window hidden long enough for its leases to lapse left
+                    // the shared epoch running against the wall clock, so
+                    // returning would drop every spinner mid-rotation. Anchor
+                    // the epoch here and the loaders resume from the start of
+                    // their cycle on the first frame back.
+                    crate::ui::motion::reset_pulse_epoch(cx);
                     this.reload_clean_right_panel_file_editors(cx);
                     // The working tree and branch may have moved while another
                     // app had focus — a checkout in a terminal, an edit in an

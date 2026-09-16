@@ -3831,6 +3831,11 @@ impl Waku {
         let mut persisted_state_changed = false;
         let mut force_save = false;
         let mut selected_changed = false;
+        // A drained-out backlog is not "done": `changed` keeps the pump on the
+        // `StreamFrame` cadence so the remainder lands on the next tick instead
+        // of one frame resolving everything the hidden window accumulated.
+        let mut backlog_remains = false;
+        let mut budget = PUMP_EVENTS_PER_DRAIN;
         for session_id in session_ids {
             let Some(mut runtime) = self.runtimes.remove(&session_id) else {
                 continue;
@@ -3842,6 +3847,11 @@ impl Waku {
             let mut markdown_changed = false;
             let mut keep_runtime = true;
             while let Some(event) = runtime.pending_events.front() {
+                if budget == 0 {
+                    backlog_remains = true;
+                    break;
+                }
+                budget -= 1;
                 let kind = stream_delta_kind(event);
                 let event = if let Some(kind) = kind {
                     pop_stream_batch(&mut runtime.pending_events, kind)
@@ -3929,6 +3939,9 @@ impl Waku {
         {
             self.save();
         }
+        // Backlog left on a queue is work already admitted, so it must keep the
+        // pump on the metered `StreamFrame` cadence rather than reading as idle.
+        changed |= backlog_remains;
         changed || selected_changed
     }
 }
