@@ -79,6 +79,12 @@ const TRAFFIC_LIGHT_CLEARANCE: f32 = 86.0;
 #[cfg(not(target_os = "macos"))]
 const TRAFFIC_LIGHT_CLEARANCE: f32 = 8.0;
 const CONTENT_MAX_WIDTH: f32 = 720.0;
+/// How far either side of the reader's anchor row a width-change reflow
+/// reaches. Counting in rows rather than pixels is deliberate: the reflow runs
+/// while every row is invalidated, so their heights are unknown. The rest of
+/// the transcript re-measures lazily through gpui's own width invalidation, so
+/// this only needs to cover what is on screen plus a screen of scrollback.
+const WIDTH_REMEASURE_ROWS: usize = 24;
 /// Menu-registry id of the composer's model picker, shared by its render site
 /// and the primary-modifier `/` toggle action.
 const MODEL_PICKER_MENU_ID: &str = "provider-model-picker";
