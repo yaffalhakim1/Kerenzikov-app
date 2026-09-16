@@ -363,7 +363,7 @@ fn parse_claude_models(value: &Value) -> Vec<ProviderModel> {
 /// configured providers and any model they added by hand.
 fn discover_jcode_models(binary: &Path) -> Vec<ProviderModel> {
     let mut command = crate::command_env::command(binary);
-    let command = command.args(["model", "list"]);
+    let command = command.args(["model", "list", "--json"]);
     let Ok(output) = crate::command_env::output(command) else {
         return Vec::new();
     };
@@ -372,7 +372,99 @@ fn discover_jcode_models(binary: &Path) -> Vec<ProviderModel> {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    parse_jcode_models(&combined)
+    let Ok(payload) = serde_json::from_str::<Value>(strip_ansi(&combined).trim()) else {
+        // An older jcode without `--json` prints the plain list; fall back to
+        // it rather than showing nothing, and accept that the BYOK provider
+        // name is unavailable in that shape.
+        return parse_jcode_models(&combined);
+    };
+    let selected_provider = payload
+        .get("provider")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty());
+    let models = parse_jcode_routes_json(&payload, selected_provider);
+    if models.is_empty() {
+        // A build that reports no routes still has a flat list worth showing.
+        return parse_jcode_models_json(&payload);
+    }
+    models
+}
+
+/// The flat `models` list, used only when `routes` is absent or empty. Each id
+/// is carried as its own name and tagged with the routed provider, since the
+/// list itself says nothing about which of them this session can serve.
+fn parse_jcode_models_json(payload: &Value) -> Vec<ProviderModel> {
+    let sub_provider = payload
+        .get("provider")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(display_name_from_slug);
+    let mut models: Vec<ProviderModel> = payload
+        .get("models")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && !id.contains(' '))
+        .map(|id| {
+            let model = ProviderModel::new(id, id);
+            match sub_provider.clone() {
+                Some(name) => model.sub_provider(name),
+                None => model,
+            }
+        })
+        .collect();
+    models.dedup_by(|a, b| a.id == b.id);
+    models
+}
+
+/// The `--json` shape carries a `routes` table — every model paired with the
+/// provider that actually serves it, whether it is available, and how it
+/// authenticates. That is the picker's real source: the flat `models` list is
+/// a union across every configured provider, so it offers ids this session's
+/// provider cannot serve. Picking one of those fails at request time with
+/// "no price for model" (a dot-variant of a real id, say), which is a trap a
+/// user cannot see coming.
+///
+/// `selected_provider` is the one this session routes to; only its routes are
+/// offered, and only while they report as available.
+fn parse_jcode_routes_json(payload: &Value, selected_provider: Option<&str>) -> Vec<ProviderModel> {
+    let Some(routes) = payload.get("routes").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut models: Vec<ProviderModel> = routes
+        .iter()
+        .filter(|route| {
+            route
+                .get("available")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        })
+        .filter(|route| match (route.get("provider").and_then(Value::as_str), selected_provider) {
+            // With a named provider, keep only its own routes. Without one,
+            // there is nothing to scope to, so every available route stands.
+            (Some(provider), Some(selected)) => provider.eq_ignore_ascii_case(selected),
+            _ => true,
+        })
+        .filter_map(|route| {
+            let id = route.get("model").and_then(Value::as_str)?.trim();
+            if id.is_empty() || id.contains(' ') {
+                return None;
+            }
+            let model = ProviderModel::new(id, display_name_from_slug(id));
+            match route.get("provider").and_then(Value::as_str) {
+                // Prettified the same way every other provider's name is, so
+                // the picker does not show a bare config slug beside them.
+                Some(provider) => Some(model.sub_provider(display_name_from_slug(provider.trim()))),
+                None => Some(model),
+            }
+        })
+        .collect();
+    models.dedup_by(|a, b| a.id == b.id);
+    models
 }
 
 fn parse_jcode_models(output: &str) -> Vec<ProviderModel> {
@@ -1392,6 +1484,22 @@ fn pi_reasoning_options(dialect: PiDialect, model: &Value) -> Vec<ProviderModelO
         .collect()
 }
 
+/// The gateway a Codex model routes through, read off the model description
+/// Codex generates for a custom provider ("stepfun via kenari").
+///
+/// Deliberately narrow: only the documented "X via Y" shape is accepted, and
+/// only when the tail is a single word, so ordinary prose descriptions do not
+/// become a bogus provider label. Anything else yields `None`, which leaves
+/// the picker showing the CLI name alone.
+fn codex_gateway_from_description(description: &str) -> Option<String> {
+    let (_, gateway) = description.trim().rsplit_once(" via ")?;
+    let gateway = gateway.trim();
+    if gateway.is_empty() || gateway.contains(' ') {
+        return None;
+    }
+    Some(display_name_from_slug(gateway))
+}
+
 fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
     let mut command = crate::command_env::command(binary);
     let command = command
@@ -1487,6 +1595,17 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
                 .map(str::to_owned)
                 .unwrap_or_else(|| display_name_from_slug(id));
             let mut model = ProviderModel::new(id, normalize_codex_name(&name));
+            // Codex words its routing as "stepfun via kenari" in the model's
+            // description — the BYOK gateway is the tail after " via ". The
+            // picker shows it beside the CLI name the way OpenCode's does, so
+            // a user can tell which gateway a model is about to spend against.
+            if let Some(gateway) = value
+                .get("description")
+                .and_then(Value::as_str)
+                .and_then(codex_gateway_from_description)
+            {
+                model.sub_provider = Some(gateway);
+            }
             model.is_default = value
                 .get("isDefault")
                 .and_then(Value::as_bool)
@@ -2430,6 +2549,107 @@ description = "House explorer with our own rules."
                 .collect::<Vec<_>>(),
             ["glm-5-3-flash", "kimi-k2-7-code"]
         );
+    }
+
+    /// The picker's model name comes from this, so a raw id must never reach
+    /// the UI for the shapes the two gateways actually produce.
+    #[test]
+    fn model_names_read_as_names_not_ids() {
+        // Version digits separated by hyphens stay separate words; that is the
+        // existing convention every other provider's names already follow.
+        assert_eq!(display_name_from_slug("glm-5-3-flash"), "Glm 5 3 Flash");
+        assert_eq!(
+            display_name_from_slug("deepseek-v4-1-flash"),
+            "Deepseek V4 1 Flash"
+        );
+        assert_eq!(display_name_from_slug("hy4-preview"), "Hy4 Preview");
+        assert_eq!(display_name_from_slug("gpt-5.6-sol"), "GPT-5.6-Sol");
+        assert_eq!(display_name_from_slug("kenari"), "Kenari");
+        assert_eq!(display_name_from_slug("muse-spark-1-3"), "Muse Spark 1 3");
+    }
+
+    /// A route list is provider-scoped and availability-filtered: it must drop
+    /// other providers' models, drop unavailable ones, and carry the provider
+    /// name the picker renders beside the CLI name.
+    #[test]
+    fn jcode_routes_scope_to_the_session_provider_and_availability() {
+        let payload = json!({
+            "provider": "kenari",
+            "selected_model": "glm-5-3-flash",
+            "models": ["glm-5-3-flash", "glm-5.3-flash"],
+            "routes": [
+                {"provider": "kenari", "model": "glm-5-3-flash", "method": "api key", "available": true},
+                // The dot variant is another provider's id and must not leak in
+                // even though the flat list carries it.
+                {"provider": "Z.AI", "model": "glm-5.3-flash", "method": "api key", "available": true},
+                // A Kenari route that is not currently usable is not offered.
+                {"provider": "kenari", "model": "spent-quota", "method": "api key", "available": false},
+                {"provider": "kenari", "model": "deepseek-v4-1-flash", "method": "api key", "available": true}
+            ]
+        });
+        let models = parse_jcode_routes_json(&payload, Some("kenari"));
+        assert_eq!(
+            models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            ["glm-5-3-flash", "deepseek-v4-1-flash"]
+        );
+        // The BYOK provider is what the subtitle shows beside the CLI name.
+        assert_eq!(models[0].sub_provider.as_deref(), Some("Kenari"));
+        assert_eq!(models[0].name, "Glm 5 3 Flash");
+    }
+
+    /// Without a named provider there is nothing to scope to, so the routes
+    /// that are available still stand rather than the picker going empty.
+    #[test]
+    fn jcode_routes_without_a_named_provider_keep_every_available_route() {
+        let payload = json!({
+            "routes": [
+                {"provider": "kenari", "model": "glm-5-3-flash", "available": true},
+                {"provider": "Z.AI", "model": "glm-5.3-flash", "available": true},
+                {"provider": "kenari", "model": "spent", "available": false}
+            ]
+        });
+        let models = parse_jcode_routes_json(&payload, None);
+        assert_eq!(models.len(), 2);
+    }
+
+    /// Codex words its routing as "stepfun via kenari"; only that shape may
+    /// become a provider label, so ordinary prose stays out of the picker.
+    #[test]
+    fn codex_gateway_comes_only_from_the_via_description() {
+        assert_eq!(
+            codex_gateway_from_description("stepfun via kenari").as_deref(),
+            Some("Kenari")
+        );
+        // Prose, a missing gateway, a bare "via X", or a multi-word tail is
+        // not a provider name.
+        assert_eq!(codex_gateway_from_description("A fast coding model"), None);
+        assert_eq!(
+            codex_gateway_from_description("served via our internal proxy"),
+            None
+        );
+        assert_eq!(codex_gateway_from_description("via kenari"), None);
+        assert_eq!(codex_gateway_from_description("via "), None);
+    }
+
+    #[test]
+    #[ignore = "requires an installed jcode"]
+    fn installed_jcode_reports_its_routed_provider() {
+        let binary =
+            crate::command_env::find_executable("jcode").expect("jcode is not installed");
+        let models = discover_jcode_models(&binary);
+        assert!(!models.is_empty(), "jcode reported no models");
+        // Every offered model carries the provider it routes through, which is
+        // what the picker renders beside the CLI name.
+        assert!(
+            models.iter().all(|model| model.sub_provider.is_some()),
+            "a model arrived without its provider: {:?}",
+            models.iter().find(|model| model.sub_provider.is_none())
+        );
+        // The name must be a name, never the raw id.
+        assert!(models.iter().all(|model| model.name != model.id));
     }
 
     #[test]
