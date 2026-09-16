@@ -337,10 +337,30 @@ impl Waku {
             return false;
         }
 
-        // Reflow every row at the new wrap width. The row set is unchanged, so
-        // this is a re-measure, not a splice.
-        let count = self.active_transcript_rows().item_count();
-        self.remeasure_transcript_rows(0..count);
+        // A width change invalidates every row's measurement, but gpui already
+        // does that itself: `list()` turns the affected items into `Unmeasured`
+        // copies that keep their old size as a hint, and re-measures each one
+        // when it next enters the viewport. Doing the whole sweep here as well
+        // was pure duplication, and it landed on exactly the frame the OS
+        // resize produced it for — a taskbar restore re-measured the entire
+        // transcript in one go, which is the stutter.
+        //
+        // What actually needs the explicit re-measure is what the reader can
+        // see, plus a margin of scrollback, so the visible text reflows in this
+        // frame instead of one frame late. The window is counted in rows rather
+        // than measured height on purpose: a row's bounds are unavailable while
+        // it is `Unmeasured`, which is the very state this runs in, so a
+        // height-driven walk would stop at the first invalidated row.
+        let rows = self.active_transcript_rows();
+        let count = rows.item_count();
+        if count == 0 {
+            return true;
+        }
+        let anchor = self
+            .selected_transcript_anchor_row()
+            .unwrap_or_else(|| rows.logical_scroll_top().item_ix)
+            .min(count - 1);
+        self.remeasure_transcript_rows(remeasure_window(anchor, count));
         true
     }
 
@@ -813,6 +833,21 @@ pub(super) fn transcript_row_kinds(
         );
     }
     rows
+}
+
+/// The row range around `anchor` a width-change reflow should re-measure.
+///
+/// Split out from the caller so the clamping is testable without a laid-out
+/// list: the interesting cases are the two ends, where the window has to
+/// truncate instead of running off the row set.
+pub(super) fn remeasure_window(anchor: usize, count: usize) -> std::ops::Range<usize> {
+    if count == 0 {
+        return 0..0;
+    }
+    let anchor = anchor.min(count - 1);
+    let start = anchor.saturating_sub(WIDTH_REMEASURE_ROWS);
+    let end = (anchor + WIDTH_REMEASURE_ROWS + 1).min(count);
+    start..end
 }
 
 /// Fingerprint of every field [`folded_transcript_row_kinds`] reads, so a frame

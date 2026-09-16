@@ -17,7 +17,8 @@ use super::{
     format_worked_duration, format_working_elapsed, maintain_transcript_anchor, message_opens_turn,
     message_starts_followup_turn, navigation_preview_snippet, navigation_rail_fade_visibility,
     navigation_rail_height, navigation_rail_scale, paused_toast_duration, pop_stream_batch,
-    push_transcript_activity, response_footer_message_index, response_row_turn_id,
+    push_transcript_activity, remeasure_window, response_footer_message_index,
+    response_row_turn_id,
     session_accepts_turn_output, session_is_reapable, should_refresh_branch_after_activity,
     should_show_navigation_rail, should_show_scroll_to_bottom, task_id_from_notification_tag,
     task_notification_tag, transcript_anchor_end_space, transcript_navigation_turns,
@@ -1360,6 +1361,45 @@ fn the_row_fingerprint_moves_whenever_the_fold_does() {
         baseline_fingerprint,
         "appending to a message leaves the rows exactly where they were"
     );
+}
+
+#[test]
+fn a_width_change_reflows_a_window_around_the_reader_not_the_whole_transcript() {
+    // Mid-transcript: the window is symmetric and does not reach either end, so
+    // a long session pays for a screen of rows instead of all of them.
+    let window = remeasure_window(500, 1_000);
+    assert_eq!(window, 476..525);
+
+    // At the top the window truncates rather than underflowing.
+    assert_eq!(remeasure_window(0, 1_000), 0..25);
+
+    // At the bottom it truncates rather than running past the row set, which
+    // `remeasure_items` would silently accept.
+    assert_eq!(remeasure_window(999, 1_000), 975..1_000);
+
+    // A transcript shorter than the window re-measures whole.
+    assert_eq!(remeasure_window(3, 10), 0..10);
+
+    // An empty list re-measures nothing.
+    assert_eq!(remeasure_window(0, 0), 0..0);
+
+    // An anchor past the end clamps instead of panicking.
+    assert_eq!(remeasure_window(5_000, 10), 0..10);
+
+    // The window never exceeds the row count in either direction.
+    for count in [1, 25, 48, 49, 50, 100] {
+        for anchor in [0, 1, count / 2, count - 1] {
+            let window = remeasure_window(anchor, count);
+            assert!(
+                window.start <= window.end && window.end <= count,
+                "window {window:?} escaped a list of {count} rows at anchor {anchor}"
+            );
+            assert!(
+                window.contains(&anchor.min(count - 1)),
+                "the reader's own row must always be re-measured"
+            );
+        }
+    }
 }
 
 #[test]

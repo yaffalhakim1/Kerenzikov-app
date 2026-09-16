@@ -8,7 +8,9 @@
 //! with no loader mounted schedules nothing at all. Every loader shares one
 //! epoch, keeping multi-instance loaders phase-locked.
 
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -46,6 +48,55 @@ struct PulseClock {
 }
 
 impl Global for PulseClock {}
+
+/// Whether the window is currently presenting frames.
+///
+/// Loaders only ever animate for a visible window. A hidden window keeps
+/// leasing (its loaders are still mounted), so without this the clock would
+/// keep waking views at 60 Hz to repaint frames nobody can see, and the first
+/// frame back would carry whatever pile-up that produced. The app flips this
+/// from its window-activation observer; render paths never touch it.
+#[derive(Clone)]
+pub struct WindowVisibility(Rc<Cell<bool>>);
+
+impl Global for WindowVisibility {}
+
+impl Default for WindowVisibility {
+    fn default() -> Self {
+        // Optimistic until the first activation edge: a window that never
+        // reports has to animate, and a spurious tick is cheaper than a loader
+        // frozen at phase zero.
+        Self(Rc::new(Cell::new(true)))
+    }
+}
+
+impl WindowVisibility {
+    fn is_visible(&self) -> bool {
+        self.0.get()
+    }
+
+    fn set(&self, visible: bool) {
+        self.0.set(visible);
+    }
+}
+
+/// Re-anchor the shared animation epoch to `now`.
+///
+/// Phases are derived from `epoch.elapsed()`, so a clock whose leases all
+/// lapsed — the window spent long enough hidden that nothing re-leased — would
+/// otherwise resume whatever phase the wall clock had reached. Every loader
+/// shares this epoch, so re-anchoring lands them all on the start of their
+/// cycle together instead of snapping mid-rotation on the first frame back.
+pub fn reset_pulse_epoch(cx: &mut App) {
+    let clock = cx.default_global::<PulseClock>();
+    clock.epoch = Instant::now();
+}
+
+/// Record whether the window is presenting frames. Called from the app's
+/// window-activation observer.
+pub fn set_window_visible(visible: bool, cx: &mut App) {
+    cx.default_global::<WindowVisibility>().set(visible);
+}
 
 impl Default for PulseClock {
     fn default() -> Self {
@@ -93,8 +144,20 @@ fn pulse_lease_with_stride(view: EntityId, stride: u32, cx: &mut App) {
         loop {
             cx.background_executor().timer(PULSE_TICK).await;
             let parked = cx.update(|cx| {
+                let visibility = cx.default_global::<WindowVisibility>().clone();
                 let clock = cx.default_global::<PulseClock>();
                 let now = Instant::now();
+                if !visibility.is_visible() {
+                    // Nobody can see the animation, so stop ticking entirely.
+                    // The leases are cleared rather than re-armed: the loaders
+                    // are still mounted and re-lease on the frame that follows
+                    // activation, which is also what restarts this loop. Left
+                    // running, this timer would wake at 60 Hz to repaint frames
+                    // the hidden window never presents.
+                    clock.leases.clear();
+                    clock.running = false;
+                    return true;
+                }
                 clock.ticks += 1;
                 let ticks = clock.ticks;
                 clock.leases.retain(|_, lease| lease.until > now);
@@ -246,6 +309,42 @@ fn width_at(from: f32, target: f32, elapsed: Duration) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn visibility_starts_optimistic_and_tracks_the_window() {
+        // A window that never reports an activation edge has to animate, so the
+        // default may not park the clock.
+        let visibility = WindowVisibility::default();
+        assert!(
+            visibility.is_visible(),
+            "a fresh clock must not read as hidden"
+        );
+
+        visibility.set(false);
+        assert!(
+            !visibility.is_visible(),
+            "a minimized window parks the clock"
+        );
+
+        visibility.set(true);
+        assert!(
+            visibility.is_visible(),
+            "restoring the window resumes the clock"
+        );
+    }
+
+    #[test]
+    fn clones_share_one_flag() {
+        // The app writes through a clone while the tick loop reads the global,
+        // so the two must observe the same cell.
+        let visibility = WindowVisibility::default();
+        let writer = visibility.clone();
+        writer.set(false);
+        assert!(
+            !visibility.is_visible(),
+            "the app's handle and the clock's global must be the same flag"
+        );
+    }
 
     #[test]
     fn a_slide_eases_out_and_then_retires() {
