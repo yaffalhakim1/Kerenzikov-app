@@ -12,6 +12,18 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.33]
+
+- Returning to the window no longer stutters. Bringing Kerenzikov back from the
+  taskbar or the Dock used to play the entrance unevenly: the app kept animating
+  and accumulating work while it was hidden, then presented all of it at once.
+  It now rests while hidden and settles in smoothly, and the spinners pick up
+  from the start of their cycle instead of snapping mid-rotation.
+- The window no longer costs anything while it is minimized or in the
+  background, instead of quietly re-rendering frames nobody could see.
+- A long transcript reflows at its new width without a visible hitch when the
+  window is restored or resized.
+
 ## [0.1.32]
 
 - Jcode is a supported agent. It speaks the same protocol Waku already uses for
