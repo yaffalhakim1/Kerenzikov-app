@@ -12,6 +12,25 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.32]
+
+- Jcode is a supported agent. It speaks the same protocol Waku already uses for
+  Copilot, Cursor, Fx, Grok, and Kimi, so a session, its model picker, its
+  approvals, and resuming all work the way they do for the others.
+- Codex tasks can choose a role for the session. Waku lists the roles in your
+  own `~/.codex/agents` directory alongside Codex's built-ins, and a role you
+  wrote yourself takes precedence over the built-in of the same name.
+- Model names read as names. Versions render as versions, so `deepseek-v4-1` is
+  "DeepSeek V4.1" rather than "V4 1", and a `:free` model is labelled
+  "(Free)" instead of having it glued onto the end of its name.
+- The model picker says which gateway a model spends against. A model offered
+  by a bring-your-own-key provider now shows that provider beside the CLI name,
+  so two providers listing the same model are no longer indistinguishable.
+- Jcode's model list is scoped to the provider the session actually routes to,
+  and to models that are currently usable. The previous list was a union across
+  every configured provider, which offered models the session could not use;
+  picking one failed with a provider error rather than a clear one.
+
 ## [0.1.31]
 
 - Tasks read as their title in the sidebar list. The project name and agent
