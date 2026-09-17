@@ -20,8 +20,16 @@ macOS and iOS are not built. The desktop app was native on macOS and the
 project still carries that code, but nobody maintains or ships those builds
 here, so treat them as unavailable rather than broken.
 
-Updates are manual: Kerenzikov ships no auto-updater and no update feed, so install
-a new release from the releases page when you want one.
+Windows updates itself. The app checks this fork's own signed update feed on
+launch and offers a new version in place, with **Kerenzikov → Check for Updates…**
+and an **Automatic updates** toggle in Settings. The installer it downloads is
+verified against this fork's Ed25519 key before it runs, so only builds signed
+by this fork are ever installed. The first install is still manual: download
+`Kerenzikov-<version>-x86_64-Setup.exe` from the
+[latest release](https://github.com/yaffalhakim1/Kerenzikov-app/releases/latest)
+once, and every release after it arrives in the app.
+
+Android does not self-update; install a newer APK from the releases page.
 
 ## Supported agents
 
@@ -139,8 +147,10 @@ sibling `kerenzikov` checkout; point it elsewhere with
 
 Releases are cut from GitHub Actions on a `v*` tag, or manually from the
 **Actions** tab. One workflow builds the Windows installers and portable zips,
-assembles the Android APK, and opens a draft GitHub release with all of them;
-there is no update feed or artifact upload to any bucket. See
+assembles the Android APK, signs the Windows update feed, and opens a draft
+GitHub release with all of them. It also mirrors the installers and the signed
+appcasts to this fork's own Cloudflare R2 bucket, which is what installed
+Windows builds poll. See
 [RELEASING.md](RELEASING.md) for what is still upstream's and what this fork
 replaced.
 
@@ -180,14 +190,15 @@ Modifications to the original work (GPLv3 §5a):
   transcript, so a session continued in the OpenCode CLI or another client
   shows those turns; OpenCode's history is read from its own server instead of
   an ACP replay that fails on real sessions.
-- **2026-09-11** — `6c744e5` Ship no update feed. The updater pointed at
-  upstream's `releases.waku.sh` and could replace an install with an upstream
-  binary. `FEED_URL` is now `None` on every platform, so `Updater::init`
-  returns `None` and the app shows no update UI.
+- **2026-09-11** — `6c744e5` Stop pointing the updater at upstream's feed.
+  The updater read `releases.waku.sh` and could replace an install with an
+  upstream binary. Linux stays `FEED_URL = None` (that platform is not built
+  here); Windows was repointed at this fork's own signed feed instead, with
+  this fork's own Ed25519 key.
 - **2026-09-11** — Release automation reduced to what this fork ships:
   `.github/workflows/release.yml` builds the Windows installers and the Android
-  APK into one draft release, and `sync-release.yml` (the R2 upload) is
-  disabled.
+  APK into one draft release and uploads the installers and signed appcasts to
+  the fork's R2 bucket, and `sync-release.yml` is disabled.
 - **2026-09-13** — Rebrand to Kerenzikov in every user-visible string (window
   title, menus, locales, installers, release artifact names) while leaving the
   data layer, the `waku_*`/`WAKU_*` identifiers, and the `sh.waku` bundle ids

@@ -115,8 +115,6 @@ does not run in CI; the Windows halves (`bundle-windows.ts`,
 
 | Secret | Purpose |
 | --- | --- |
-| `WAKU_ANALYTICS_ENDPOINT` | embedded in every desktop CI build |
-| `WAKU_ANALYTICS_WEBSITE_ID` | embedded in every desktop CI build |
 | `SPARKLE_PRIVATE_KEY` | **required for updates**; base64 EdDSA private key mating `SUPublicEDKey` |
 | `R2_ACCOUNT_ID` | Cloudflare account ID for the R2 upload |
 | `R2_ACCESS_KEY_ID` | R2 API token access key (Object Read & Write, this bucket) |
