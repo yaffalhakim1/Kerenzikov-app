@@ -103,18 +103,35 @@ export function useMarkdownStyles(): MarkdownStyles {
         textAlign: 'right',
       },
       listContent: { flex: 1, gap: 4 },
-      // Frameless tables: hairline row rules only — no outer border, no
-      // header fill, no cell borders (desktop parity).
+      // A bordered grid, matching the desktop's `render_table`: rounded frame,
+      // hairline border, overlay-filled header. The frame owns the outer border
+      // and clips the rows to it, so the table reads as one object instead of
+      // loose cells. Column widths come from the renderer's shared weights, not
+      // from each cell's own text.
       table: {},
+      tableGrid: {
+        borderColor: theme.border,
+        borderRadius: 10,
+        borderWidth: StyleSheet.hairlineWidth,
+        overflow: 'hidden',
+      },
       tableRow: {
-        borderBottomColor: theme.separator,
+        borderBottomColor: theme.border,
         borderBottomWidth: StyleSheet.hairlineWidth,
         flexDirection: 'row',
       },
-      tableHeadRow: {},
-      tableCell: { minWidth: 48, padding: 12 },
-      tableCellText: { color: theme.text, fontSize: 16, lineHeight: 24 },
-      tableHeadText: { color: theme.text, fontSize: 16, fontWeight: '600', lineHeight: 24 },
+      tableRowLast: { borderBottomWidth: 0 },
+      tableHeadRow: { backgroundColor: theme.overlay },
+      tableCell: {
+        borderRightColor: theme.border,
+        borderRightWidth: StyleSheet.hairlineWidth,
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+      },
+      tableCellLast: { borderRightWidth: 0 },
+      tableNumerals: { fontVariant: ['tabular-nums'] },
+      tableCellText: { color: theme.text, fontSize: 15, lineHeight: 22 },
+      tableHeadText: { color: theme.text, fontSize: 15, fontWeight: '600', lineHeight: 22 },
       hr: { backgroundColor: theme.border, height: 1 },
       image: {
         backgroundColor: theme.inset,

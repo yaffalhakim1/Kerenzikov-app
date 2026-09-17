@@ -35,6 +35,7 @@ import { AppSymbol } from '@/components/app-symbol';
 
 import { applyAlpha } from './color';
 import { PENDING_LINK_URL } from './mend';
+import { columnWeights } from './table';
 import { splitRunAtSpans, type RowVeil, type VeilSpan } from './veil';
 
 export interface MarkdownStyles {
@@ -58,9 +59,17 @@ export interface MarkdownStyles {
   listMarker: TextStyle & { color: string };
   listContent: ViewStyle;
   table: ViewStyle;
+  /** The bordered grid wrapping every row; owns the outer border and radius. */
+  tableGrid: ViewStyle;
   tableRow: ViewStyle;
+  /** Drops the final rule, which the grid's outer border already draws. */
+  tableRowLast: ViewStyle;
   tableHeadRow: ViewStyle;
   tableCell: ViewStyle;
+  /** Drops the final cell's right rule against the grid border. */
+  tableCellLast: ViewStyle;
+  /** Tabular figures, so numeric columns do not jitter between rows. */
+  tableNumerals: TextStyle;
   tableCellText: TextStyle & { color: string };
   tableHeadText: TextStyle & { color: string };
   hr: ViewStyle;
@@ -358,6 +367,10 @@ function MarkdownImage({
  *  lets the vertical list take over when the content ends. */
 const scrollContentStyle = { minWidth: '100%' } as const;
 
+/** Floor width for a table grid. Roughly three readable columns; past it the
+ *  table scrolls horizontally rather than compressing columns further. */
+const TABLE_MIN_WIDTH = 260;
+
 /**
  * Copy control for a fenced block, mounted in the block's header.
  *
@@ -486,22 +499,61 @@ function renderTable(
 ): ReactNode {
   const { styles } = ctx;
   const [head, ...rows] = node.children;
+  // Column count from the widest row, so a short row or a header is padded
+  // rather than shifting the grid.
+  const columns = Math.max(
+    head?.children.length ?? 0,
+    ...rows.map((row) => row.children.length),
+    0,
+  );
+  if (columns === 0) return null;
+  // One width budget for every row: cells sized independently per row are what
+  // made columns ragged. The same weights drive each row, so they line up.
+  const weights = columnWeights(
+    [...(head ? [head] : []), ...rows].map((row) =>
+      Array.from({ length: columns }, (_, index) => flattenInline(row.children[index]?.children ?? [])),
+    ),
+    columns,
+  );
   const renderRow = (
     row: (typeof node.children)[number],
     rowKey: string | number,
     isHead: boolean,
+    isLast: boolean,
   ) => (
-    <View key={rowKey} style={[styles.tableRow, isHead && styles.tableHeadRow]}>
-      {row.children.map((cell, cellIndex) => {
+    <View
+      key={rowKey}
+      style={[
+        styles.tableRow,
+        isHead && styles.tableHeadRow,
+        // The outer frame already draws the final rule, so the last row must
+        // not double it.
+        isLast && styles.tableRowLast,
+      ]}>
+      {Array.from({ length: columns }, (_, cellIndex) => {
+        const cell = row.children[cellIndex];
         const textStyle = isHead ? styles.tableHeadText : styles.tableCellText;
         const align = node.align?.[cellIndex];
-        const ictx = inlineContext(ctx, flattenInline(cell.children), textStyle.color);
+        // A cell the row does not reach stays blank but keeps its track, so a
+        // ragged markdown row cannot knock the grid out of alignment.
+        const flat = cell ? flattenInline(cell.children) : '';
+        const ictx = inlineContext(ctx, flat, textStyle.color);
         return (
-          <View key={cellIndex} style={styles.tableCell}>
+          <View
+            key={cellIndex}
+            style={[
+              styles.tableCell,
+              // `flexBasis: 0` plus the content weight splits the grid's width
+              // by ratio. Every row splits that same budget, so column edges
+              // line up down the table. No shrink: a zero basis has nothing to
+              // shrink, and content wraps inside the track instead.
+              { flexBasis: 0, flexGrow: weights[cellIndex] ?? 0 },
+              cellIndex === columns - 1 && styles.tableCellLast,
+            ]}>
             <Text
               selectable
-              style={[textStyle, align ? { textAlign: align } : null]}>
-              {renderInline(cell.children, ictx)}
+              style={[textStyle, styles.tableNumerals, align ? { textAlign: align } : null]}>
+              {cell ? renderInline(cell.children, ictx) : ''}
             </Text>
           </View>
         );
@@ -510,14 +562,17 @@ function renderTable(
   );
   return (
     <View key={key} style={styles.table}>
+      {/* A table keeps a floor width so a 4-column table compresses to
+          something readable and then scrolls, instead of squashing columns
+          into unreadable slivers. */}
       <GestureScrollView
         horizontal
         nestedScrollEnabled
         persistentScrollbar
         showsHorizontalScrollIndicator>
-        <View style={scrollContentStyle}>
-          {head && renderRow(head, 'head', true)}
-          {rows.map((row, index) => renderRow(row, index, false))}
+        <View style={[styles.tableGrid, { minWidth: TABLE_MIN_WIDTH }]}>
+          {head && renderRow(head, 'head', true, rows.length === 0)}
+          {rows.map((row, index) => renderRow(row, index, false, index === rows.length - 1))}
         </View>
       </GestureScrollView>
     </View>
