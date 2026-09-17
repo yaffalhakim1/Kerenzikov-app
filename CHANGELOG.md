@@ -12,6 +12,34 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.36]
+
+- Code on the phone finally looks like code. Every mono surface rendered in the
+  system font — code spans kept their grey wash but lost the monospace face, and
+  code blocks, diffs, and file paths were all set in the wrong type, because the
+  bundled JetBrains Mono was never registered with Android. The transcript also
+  reads at a comfortable size now, with body text, headings, and code all scaled
+  up for a phone.
+- Markdown tables are legible. Cells used to size themselves, so columns never
+  lined up and a table read as loose text; a wide table now keeps its column
+  widths and pans sideways instead of squashing into unreadable slivers. Tables
+  are drawn as a bordered grid with a tinted header row.
+- Your reply to an agent question no longer gets lost. Answering on the desktop
+  while the phone had the same question open left the phone stuck showing a
+  question that had already been answered, and sending it did nothing.
+- A message typed while the agent was busy is queued instead of rejected. It
+  could be sent as a mid-turn steer before the provider had actually started its
+  turn, which the provider refused — you saw an error and the message landed in
+  the queue rather than simply waiting its turn.
+- The composer keeps its settings together: the model chooser now sits beside
+  the access control instead of across the row, and the agent-profile picker is
+  hidden.
+- The task sidebar slides over the chat instead of shoving it aside, and the
+  native menus are flat, white, and free of separator lines.
+- Starting a new task no longer reopens on the wrong agent. A task started
+  without an explicit model left the remembered agent frozen at whichever one
+  was last used with a model, so a Codex task could come back as OpenCode.
+
 ## [0.1.33]
 
 - Returning to the window no longer stutters. Bringing Kerenzikov back from the
