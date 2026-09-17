@@ -141,7 +141,9 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
         {drawerEnabled ? (
           <Drawer
             drawerStyle={{ backgroundColor: theme.background, width: drawerWidth }}
-            drawerType="back"
+            // `front`, not `back`: the sidebar slides in over the chat page
+            // with a dim overlay, leaving the transcript in place underneath.
+            drawerType="front"
             open={open}
             overlayAccessibilityLabel="Close task history"
             overlayStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.18)' }}
