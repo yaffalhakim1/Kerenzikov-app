@@ -54,7 +54,7 @@ import {
   type LocalAttachmentFile,
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
-import { sessionBusy } from '@/lib/mobile-runtime';
+import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import { isDaemonDisconnectError } from '@/lib/runtime-errors';
 
@@ -243,7 +243,11 @@ export function MobileComposer({
   //   agentPresets.find((preset) => preset.is_default) ??
   //   agentPresets[0];
   const liveRuntime = runtime.runtimes[session.id];
-  const canSteer = busy && Boolean(liveRuntime?.supportsSteer) && session.status !== 'connecting';
+  // Mirrors desktop `session_can_steer`: an active provider turn AND a driver
+  // that takes a mid-turn message. Anything else queues through sendPrompt
+  // rather than being steered at a provider with no turn to fold it into.
+  const canSteer =
+    sessionHasActiveProviderTurn(session) && Boolean(liveRuntime?.supportsSteer);
   const permission = runtime.permissions[session.id];
   const userInput = runtime.userInputs[session.id];
   const runtimeError = runtime.errors[session.id];

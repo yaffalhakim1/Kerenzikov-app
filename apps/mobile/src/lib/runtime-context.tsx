@@ -53,6 +53,7 @@ import {
   queueSubmission,
   sessionBusy,
   sessionCwd,
+  sessionHasActiveProviderTurn,
   sessionIsRunning,
   shouldApplyRuntimeEvent,
   submittedTurnIdentity,
@@ -672,9 +673,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       : providerPromptOverride.trim();
     if (!client || daemon.phase !== 'connected') throw new Error('Kerenzikov daemon is disconnected');
     const runtime = entries.current.get(session.id);
+    // The caller's `canSteer` is a snapshot from an earlier render. Re-check
+    // the live session so a turn that has not opened yet — or one that ended
+    // between render and press — queues through sendPrompt instead of being
+    // steered at a provider with no turn to fold it into.
     if (
-      !runtime || !runtime.supportsSteer ||
-      session.status === 'connecting' || session.status === 'idle' || session.status === 'failed'
+      !runtime || !runtime.supportsSteer || !sessionHasActiveProviderTurn(session)
     ) {
       await sendPrompt(session, prompt, attachments, providerPrompt);
       return;

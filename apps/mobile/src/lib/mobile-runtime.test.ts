@@ -9,6 +9,7 @@ import {
   runtimeEventAlreadyApplied,
   sessionBusy,
   sessionCwd,
+  sessionHasActiveProviderTurn,
   sessionIsRunning,
   shouldApplyRuntimeEvent,
 } from './mobile-runtime';
@@ -171,6 +172,54 @@ describe('mobile runtime projection', () => {
       status: 'working',
       turns: [{
         id: 'completed',
+        turn_count: 1,
+        status: 'completed',
+        provider_turn_started: true,
+        provider_resume_at: null,
+        started_at: 10,
+        completed_at: 20,
+        checkpoint: null,
+      }],
+    }))).toBe(false);
+  });
+
+  test('a steer only counts once the provider opened the turn', () => {
+    const running = (providerTurnStarted: boolean) => [{
+      id: 'turn',
+      turn_count: 1,
+      status: 'running' as const,
+      provider_turn_started: providerTurnStarted,
+      provider_resume_at: null,
+      started_at: 10,
+      completed_at: null,
+      checkpoint: null,
+    }];
+
+    // The daemon reports `working` while it is still starting the provider
+    // process. A steer sent then has no turn to fold into, so it must queue.
+    expect(sessionHasActiveProviderTurn(session({
+      status: 'working',
+      turns: running(false),
+    }))).toBe(false);
+    expect(sessionHasActiveProviderTurn(session({
+      status: 'working',
+      turns: running(true),
+    }))).toBe(true);
+    // Connecting is covered by the busy gate, not by the turn alone.
+    expect(sessionHasActiveProviderTurn(session({
+      status: 'connecting',
+      turns: running(true),
+    }))).toBe(true);
+    // A settled turn is never steerable, whatever the status claims.
+    expect(sessionHasActiveProviderTurn(session({
+      status: 'idle',
+      turns: running(true),
+    }))).toBe(false);
+    expect(sessionHasActiveProviderTurn(session({ status: 'working', turns: [] }))).toBe(false);
+    expect(sessionHasActiveProviderTurn(session({
+      status: 'working',
+      turns: [{
+        id: 'done',
         turn_count: 1,
         status: 'completed',
         provider_turn_started: true,
