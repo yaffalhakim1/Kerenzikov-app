@@ -35,7 +35,7 @@ import { AppSymbol } from '@/components/app-symbol';
 
 import { applyAlpha } from './color';
 import { PENDING_LINK_URL } from './mend';
-import { columnWeights } from './table';
+import { columnWidthsFor } from './table';
 import { splitRunAtSpans, type RowVeil, type VeilSpan } from './veil';
 
 export interface MarkdownStyles {
@@ -367,8 +367,8 @@ function MarkdownImage({
  *  lets the vertical list take over when the content ends. */
 const scrollContentStyle = { minWidth: '100%' } as const;
 
-/** Floor width for a table grid. Roughly three readable columns; past it the
- *  table scrolls horizontally rather than compressing columns further. */
+/** The narrowest a table grid is allowed to be, dp. Below it the columns stop
+ *  reading as a table, so the grid keeps this width and pans. */
 const TABLE_MIN_WIDTH = 260;
 
 /**
@@ -499,13 +499,6 @@ function renderTable(
 ): ReactNode {
   const { styles } = ctx;
   const [head, ...rows] = node.children;
-  // A horizontal ScrollView sizes its content box to the content, so the grid
-  // cannot take its width from `100%` — that resolves to the content's own
-  // width and leaves every cell at its natural size, which is exactly what
-  // made the table read as loose text. It records the width the transcript
-  // offers instead, and lays the grid out against that.
-  const [available, setAvailable] = useState(0);
-  const gridWidth = Math.max(TABLE_MIN_WIDTH, available || TABLE_MIN_WIDTH);
   // Column count from the widest row, so a short row or a header is padded
   // rather than shifting the grid.
   const columns = Math.max(
@@ -514,14 +507,16 @@ function renderTable(
     0,
   );
   if (columns === 0) return null;
-  // One width budget for every row: cells sized independently per row are what
-  // made columns ragged. The same weights drive each row, so they line up.
-  const weights = columnWeights(
-    [...(head ? [head] : []), ...rows].map((row) =>
-      Array.from({ length: columns }, (_, index) => flattenInline(row.children[index]?.children ?? [])),
-    ),
-    columns,
+  const cells = [...(head ? [head] : []), ...rows].map((row) =>
+    Array.from({ length: columns }, (_, index) => flattenInline(row.children[index]?.children ?? '')),
   );
+  // Every column gets the width its own longest line needs, and the grid is
+  // their sum. Sizing the grid this way is what lets it exceed the phone and
+  // scroll: a phone cannot fit a wide table, and wrapping every cell to reach
+  // an arbitrary width reads far worse than panning a table that kept its
+  // shape. The readable floor keeps a narrow table from looking cramped.
+  const columnWidths = columnWidthsFor(cells, columns);
+  const gridWidth = Math.max(TABLE_MIN_WIDTH, columnWidths.reduce((sum, w) => sum + w, 0));
   const renderRow = (
     row: (typeof node.children)[number],
     rowKey: string | number,
@@ -550,14 +545,9 @@ function renderTable(
             key={cellIndex}
             style={[
               styles.tableCell,
-              // `flexBasis: 0` plus the content weight splits the grid's width
-              // by ratio. Every row splits that same budget, so column edges
-              // line up down the table, and text longer than a track wraps
-              // inside it rather than widening the grid — the desktop's
-              // `w_full()` + `min_w_0()` pair. `minWidth: 0` is the second half
-              // of that: without it a cell refuses to shrink below its content
-              // and the row overflows its track.
-              { flexBasis: 0, flexGrow: weights[cellIndex] ?? 0, minWidth: 0 },
+              // A definite width per column, shared by every row, so the
+              // columns line up down the table.
+              { width: columnWidths[cellIndex] ?? TABLE_MIN_WIDTH },
               cellIndex === columns - 1 && styles.tableCellLast,
             ]}>
             <Text
@@ -571,16 +561,9 @@ function renderTable(
     </View>
   );
   return (
-    <View
-      onLayout={(event) => {
-        const measured = event.nativeEvent.layout.width;
-        if (measured > 0 && measured !== available) setAvailable(measured);
-      }}
-      style={styles.table}>
-      {/* The grid fits the transcript and cells wrap, exactly as the desktop
-          lays a table out. Below the readable floor it keeps its own width and
-          the scroller takes over, since wrapping every cell to a sliver reads
-          worse than scrolling. */}
+    <View key={key} style={styles.table}>
+      {/* A table wider than the phone pans horizontally, keeping the column
+          widths it was laid out with. */}
       <GestureScrollView
         horizontal
         nestedScrollEnabled
