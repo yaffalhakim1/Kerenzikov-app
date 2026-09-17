@@ -1409,6 +1409,9 @@ struct CodexStreamState {
     next_citation_number: usize,
     /// Item id and part index of the reasoning chunk currently streaming.
     reasoning_part: Option<(String, u64)>,
+    /// Every agent-message delta forwarded this turn, so `turn/completed` can
+    /// reconcile against the authoritative full text it carries.
+    agent_text: String,
 }
 
 impl CodexStreamState {
@@ -1418,6 +1421,7 @@ impl CodexStreamState {
         self.citation_buffer.clear();
         self.next_citation_number = 1;
         self.reasoning_part = None;
+        self.agent_text.clear();
     }
 
     fn capture_citations(&mut self, item: &Value) {
@@ -1850,6 +1854,7 @@ fn handle_codex_message(
             if let Some(delta) = params.get("delta").and_then(Value::as_str) {
                 let delta = stream_state.rewrite_citation_delta(delta);
                 if !delta.is_empty() {
+                    stream_state.agent_text.push_str(&delta);
                     let _ = events.send(DriverEvent::TextDelta(delta));
                 }
             }
@@ -1939,6 +1944,16 @@ fn handle_codex_message(
         "turn/completed" => {
             stream_state.citation_buffer.clear();
             *turn_id.lock() = None;
+            // The reply is rendered from deltas, so a dropped or never-streamed
+            // delta silently truncates it. `turn/completed` carries the
+            // authoritative final `agentMessage` text in `turn.items[]`; emit
+            // whatever the delta stream is missing before finishing so the
+            // transcript always ends with the provider's own last word.
+            if let Some(missing) = missing_agent_text(&params, &stream_state.agent_text)
+                && !missing.is_empty()
+            {
+                let _ = events.send(DriverEvent::TextDelta(missing));
+            }
             let status = params
                 .pointer("/turn/status")
                 .and_then(Value::as_str)
@@ -2136,6 +2151,28 @@ fn codex_plan_usage(snapshot: Option<&Value>) -> Option<crate::usage::PlanUsage>
         ),
         windows,
     })
+}
+
+/// The reply is streamed through deltas, but `turn/completed` carries the
+/// authoritative final `agentMessage` text. Return the suffix the deltas never
+/// delivered so the caller can append it: `None` means the stream already
+/// matches, and a prefix mismatch falls back to the provider's full text.
+fn missing_agent_text(params: &Value, streamed: &str) -> Option<String> {
+    let final_text = params
+        .pointer("/turn/items")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("agentMessage"))
+        .filter_map(|item| item.get("text").and_then(Value::as_str))
+        .collect::<String>();
+    if final_text.is_empty() || final_text == streamed {
+        return None;
+    }
+    if let Some(remainder) = final_text.strip_prefix(streamed) {
+        return Some(remainder.to_owned());
+    }
+    Some(final_text)
 }
 
 fn codex_activity_kind(item: &Value) -> Option<ActivityKind> {
@@ -3394,6 +3431,144 @@ Stay in exploration mode.
             reasoning,
             "**Evaluating cleanup**\n\n**Analyzing methods** and detection"
         );
+    }
+
+    #[test]
+    fn turn_completion_repairs_a_reply_the_delta_stream_truncated() {
+        // A dropped or never-streamed delta leaves the reply short mid-sentence.
+        // `turn/completed` carries Codex's authoritative final text, so the
+        // missing tail must be emitted before the turn is reported finished.
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-1".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-1".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (goal_commands, _goal_command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+
+        let feed = |value: Value, stream_state: &mut CodexStreamState| {
+            handle_codex_message(
+                value,
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &goal_commands,
+                &event_tx,
+                stream_state,
+            );
+        };
+
+        feed(
+            json!({
+                "method": "item/agentMessage/delta",
+                "params": {"threadId": "thread-1", "turnId": "turn-1", "delta": "The"}
+            }),
+            &mut stream_state,
+        );
+        feed(
+            json!({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [
+                            {"type": "agentMessage", "id": "msg-1", "text": "The fix is ready."}
+                        ]
+                    }
+                }
+            }),
+            &mut stream_state,
+        );
+
+        let mut text = String::new();
+        let mut finished = false;
+        while let Ok(event) = event_rx.try_recv() {
+            match event {
+                DriverEvent::TextDelta(delta) => text.push_str(&delta),
+                DriverEvent::TurnFinished { success, .. } => {
+                    assert!(success);
+                    finished = true;
+                }
+                other => panic!("expected text or a finish, got {other:?}"),
+            }
+        }
+        assert!(finished, "the turn should have been reported finished");
+        assert_eq!(text, "The fix is ready.");
+    }
+
+    #[test]
+    fn a_complete_delta_stream_is_not_duplicated_at_turn_completion() {
+        // Reconciliation is a repair, not an append: matching text must pass
+        // through untouched so a normal turn is not doubled.
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-1".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-1".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (goal_commands, _goal_command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+
+        let feed = |value: Value, stream_state: &mut CodexStreamState| {
+            handle_codex_message(
+                value,
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &goal_commands,
+                &event_tx,
+                stream_state,
+            );
+        };
+
+        for delta in ["The fix", " is ready."] {
+            feed(
+                json!({
+                    "method": "item/agentMessage/delta",
+                    "params": {"threadId": "thread-1", "turnId": "turn-1", "delta": delta}
+                }),
+                &mut stream_state,
+            );
+        }
+        feed(
+            json!({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [
+                            {"type": "agentMessage", "id": "msg-1", "text": "The fix is ready."}
+                        ]
+                    }
+                }
+            }),
+            &mut stream_state,
+        );
+
+        let mut text = String::new();
+        while let Ok(event) = event_rx.try_recv() {
+            if let DriverEvent::TextDelta(delta) = event {
+                text.push_str(&delta);
+            }
+        }
+        assert_eq!(text, "The fix is ready.");
     }
 
     #[test]
