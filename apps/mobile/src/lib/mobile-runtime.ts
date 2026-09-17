@@ -187,6 +187,20 @@ export function sessionIsRunning(
   return !latestTurn || latestTurn.status === 'running';
 }
 
+/** Mirror of the desktop's `session_has_active_provider_turn`
+ * (`src/app/runtime.rs`): a steer only lands once the provider has actually
+ * opened the turn. Status alone is not enough — the daemon reports `working`
+ * while it is still starting the provider process, and a steer sent in that
+ * window is rejected, surfacing as an error banner instead of a queued
+ * message. Submitting a prompt mid-turn is meant to queue. */
+export function sessionHasActiveProviderTurn(
+  session: Pick<AgentSession, 'status' | 'turns'>,
+): boolean {
+  if (!sessionBusy(session)) return false;
+  const latestTurn = session.turns.at(-1);
+  return latestTurn?.status === 'running' && latestTurn.provider_turn_started;
+}
+
 export interface SessionOptionChanges {
   model?: string | null;
   reasoningEffort?: string | null;
