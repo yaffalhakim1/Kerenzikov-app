@@ -18,7 +18,7 @@
     "drizzle-orm": "^0.45.2",
     "typescript": "^7.0.2"
   },
-  "workspaces": ["website", "apps/*", "packages/*"],
+  "workspaces": ["apps/*", "packages/*"],
   "patchedDependencies": {
     "@expo/ui@57.0.14": "patches/@expo%2Fui@57.0.14.patch",
     "@mattermost/react-native-paste-input@2.0.1": "patches/@mattermost%2Freact-native-paste-input@2.0.1.patch",
