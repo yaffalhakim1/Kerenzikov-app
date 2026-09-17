@@ -33,11 +33,13 @@ import {
 import { ComposerTextInput } from './composer-text-input';
 import type { ComposerTextInputProps } from './composer-text-input.types';
 import { GlassSurface, liquidGlass } from './glass-surface';
-import { AgentPresetMenu } from './agent-preset-menu';
+// Agent-profile picker hidden on mobile.
+// import { AgentPresetMenu } from './agent-preset-menu';
 import { ModelSheet } from './session-option-sheets';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
-import { useComposerCommands, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
+// import { useComposerCommands, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
+import { useComposerCommands, useTaskState } from '@/hooks/use-daemon-data';
 import {
   detectComposerTrigger,
   filterComposerCommands,
@@ -203,25 +205,27 @@ export function MobileComposer({
   const [localError, setLocalError] = useState<string | null>(null);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
   const busy = sessionBusy(session);
-  const sessionHasStarted =
-    session.turns.length > 0 || session.messages.length > 0 || !!session.provider_cursor;
+  // Agent-profile picker hidden on mobile. The preset probe drove only that
+  // picker, so it is parked here too rather than probing on every mount.
+  // const sessionHasStarted =
+  //   session.turns.length > 0 || session.messages.length > 0 || !!session.provider_cursor;
   // Mirrors desktop AgentSession::can_choose_agent_preset: presets are offered
   // by Codex | DeepSeek | OpenCode | OpenCode2, and a started session still
   // qualifies when the provider can switch a live agent (OpenCode | OpenCode2).
   // Codex composes through its own ~/.codex/agents/*.toml directory and has no
   // live switch, so a started Codex session keeps the role it began with.
-  const presetProvider =
-    session.provider === 'codex'
-    || session.provider === 'deepSeek'
-    || session.provider === 'openCode'
-    || session.provider === 'openCode2';
-  const liveAgentSwitch =
-    session.provider === 'openCode' || session.provider === 'openCode2';
-  const supportsAgentPreset =
-    !busy
-    && presetProvider
-    && (!sessionHasStarted || liveAgentSwitch);
-  const agentPresetProbe = useProviderModels(supportsAgentPreset ? session.provider : null);
+  // const presetProvider =
+  //   session.provider === 'codex'
+  //   || session.provider === 'deepSeek'
+  //   || session.provider === 'openCode'
+  //   || session.provider === 'openCode2';
+  // const liveAgentSwitch =
+  //   session.provider === 'openCode' || session.provider === 'openCode2';
+  // const supportsAgentPreset =
+  //   !busy
+  //   && presetProvider
+  //   && (!sessionHasStarted || liveAgentSwitch);
+  // const agentPresetProbe = useProviderModels(supportsAgentPreset ? session.provider : null);
   const taskState = useTaskState();
   const projectPath = taskState.data?.projects.find(
     (project) => project.id === session.project_id,
@@ -233,11 +237,11 @@ export function MobileComposer({
     () => mergeComposerCommands(discoveredCommands.data ?? [], session.available_commands ?? []),
     [discoveredCommands.data, session.available_commands],
   );
-  const agentPresets = agentPresetProbe.data?.agent_presets ?? [];
-  const selectedAgentPreset =
-    agentPresets.find((preset) => preset.id === session.agent_preset) ??
-    agentPresets.find((preset) => preset.is_default) ??
-    agentPresets[0];
+  // const agentPresets = agentPresetProbe.data?.agent_presets ?? [];
+  // const selectedAgentPreset =
+  //   agentPresets.find((preset) => preset.id === session.agent_preset) ??
+  //   agentPresets.find((preset) => preset.is_default) ??
+  //   agentPresets[0];
   const liveRuntime = runtime.runtimes[session.id];
   const canSteer = busy && Boolean(liveRuntime?.supportsSteer) && session.status !== 'connecting';
   const permission = runtime.permissions[session.id];
@@ -597,11 +601,17 @@ export function MobileComposer({
               mode={session.runtime_mode}
               onApply={(mode) => applyOptions({ runtimeMode: mode })}
             />
+            <ComposerIconButton
+              icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}
+              label="Model"
+              onPress={() => setModelSheetOpen(true)}
+            />
           </>
         )}
         placeholder={placeholder}
         right={(
           <>
+            {/* Agent-profile picker hidden on mobile.
             {supportsAgentPreset && agentPresets.length > 0 && (
               <AgentPresetMenu
                 agentPreset={session.agent_preset ?? null}
@@ -609,11 +619,7 @@ export function MobileComposer({
                 provider={session.provider}
               />
             )}
-            <ComposerIconButton
-              icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}
-              label="Model"
-              onPress={() => setModelSheetOpen(true)}
-            />
+            */}
             {busy && (
               <AppPressable
                 accessibilityLabel="Stop agent"
