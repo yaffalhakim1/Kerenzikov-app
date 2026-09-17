@@ -94,7 +94,28 @@ export function rememberComposerSession(
     'provider' | 'model' | 'reasoning_effort' | 'service_tier' | 'context_window'
   >,
 ): ComposerPreferences {
-  if (!session.model) return preferences
+  // A session can run without a model — the provider picks its own default —
+  // but the provider itself is always worth remembering. Refusing to record a
+  // model-less session left `lastProvider` frozen at whichever provider was
+  // last used *with* an explicit model, so every later task reopened on that
+  // one.
+  //
+  // `lastModel` belongs to `lastProvider`, so the pair has to stay coherent:
+  // a model-less session for the *same* provider keeps the remembered model
+  // (an empty draft must not erase an explicit pick), while a model-less
+  // session for a *different* provider clears it, since a model id is only
+  // meaningful against the provider's own catalogue.
+  if (!session.model) {
+    if (preferences.lastProvider === session.provider) return preferences
+    return {
+      ...preferences,
+      lastProvider: session.provider,
+      lastModel: null,
+      lastReasoningEffort: session.reasoning_effort ?? null,
+      lastServiceTier: session.service_tier ?? null,
+      lastContextWindow: session.context_window ?? null,
+    }
+  }
   const reasoningEffort = session.reasoning_effort ?? null
   const serviceTier = session.service_tier ?? null
   const contextWindow = session.context_window ?? null
