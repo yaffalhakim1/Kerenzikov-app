@@ -641,6 +641,7 @@ function ReviewSurface({
       >
         <MenuView
           actions={actions}
+          containerColor="#ffffff"
           onPressAction={({ nativeEvent }) => {
             if (nativeEvent.event === "last-turn" && lastTurn) {
               setSource(lastTurn);

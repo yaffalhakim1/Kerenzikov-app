@@ -329,6 +329,8 @@ export function SessionView({
   const transcriptMounted = Boolean(
     session && mountedTranscriptSessionId === session.id,
   );
+  // One flat list, not surface actions + an inline task-actions section: a
+  // section divider is the only thing the grouping ever drew.
   const taskMenuActions = useMemo<MenuAction[]>(
     () => [
       ...SURFACE_MENU_COMMANDS.map((item) => ({
@@ -336,17 +338,12 @@ export function SessionView({
         title: item.title,
         image: item.symbol,
       })),
-      {
-        id: 'task-actions',
-        title: '',
-        displayInline: true,
-        subactions: TASK_MENU_COMMANDS.map((item) => ({
-          id: item.id,
-          title: item.title,
-          image: item.symbol,
-          attributes: item.destructive ? { destructive: true } : undefined,
-        })),
-      },
+      ...TASK_MENU_COMMANDS.map((item) => ({
+        id: item.id,
+        title: item.title,
+        image: item.symbol,
+        attributes: item.destructive ? { destructive: true } : undefined,
+      })),
     ],
     [],
   );
@@ -377,6 +374,8 @@ export function SessionView({
               title,
               // These are commands, not a single-selection picker.
               multiselectable: true,
+              // Flat: an inline submenu would only add the empty section
+              // header and its separators.
               items: [
                 ...SURFACE_MENU_COMMANDS.map((item) => ({
                   type: 'action' as const,
@@ -384,19 +383,13 @@ export function SessionView({
                   icon: { type: 'sfSymbol' as const, name: item.symbol },
                   onPress: () => handleTaskMenuCommand(item.id),
                 })),
-                {
-                  type: 'submenu',
-                  label: '',
-                  inline: true,
-                  multiselectable: true,
-                  items: TASK_MENU_COMMANDS.map((item) => ({
-                    type: 'action' as const,
-                    label: item.title,
-                    icon: { type: 'sfSymbol' as const, name: item.symbol },
-                    destructive: item.destructive,
-                    onPress: () => handleTaskMenuCommand(item.id),
-                  })),
-                },
+                ...TASK_MENU_COMMANDS.map((item) => ({
+                  type: 'action' as const,
+                  label: item.title,
+                  icon: { type: 'sfSymbol' as const, name: item.symbol },
+                  destructive: item.destructive,
+                  onPress: () => handleTaskMenuCommand(item.id),
+                })),
               ],
             },
           },
@@ -413,6 +406,7 @@ export function SessionView({
               <HeaderAction {...newTask} />
               <MenuView
                 actions={taskMenuActions}
+                containerColor="#ffffff"
                 title={title}
                 onPressAction={({ nativeEvent }) =>
                   handleTaskMenuCommand(nativeEvent.event)

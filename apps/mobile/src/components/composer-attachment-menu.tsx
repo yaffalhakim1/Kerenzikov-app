@@ -40,6 +40,7 @@ export function ComposerAttachmentMenu({
   return (
     <MenuView
       actions={AttachmentActions}
+      containerColor="#ffffff"
       onPressAction={({ nativeEvent }) => {
         const source = nativeEvent.event as ComposerAttachmentSource;
         // Let the native menu finish dismissing before presenting a picker.

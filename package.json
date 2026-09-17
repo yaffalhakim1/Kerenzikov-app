@@ -20,6 +20,7 @@
   },
   "workspaces": ["website", "apps/*", "packages/*"],
   "patchedDependencies": {
+    "@expo/ui@57.0.14": "patches/@expo%2Fui@57.0.14.patch",
     "@mattermost/react-native-paste-input@2.0.1": "patches/@mattermost%2Freact-native-paste-input@2.0.1.patch",
     "expo-libghostty@0.8.1": "patches/expo-libghostty@0.8.1.patch"
   }

@@ -26,6 +26,7 @@ export function TaskRowMenu({
   return (
     <MenuView
       actions={Actions}
+      containerColor="#ffffff"
       onPressAction={({ nativeEvent }) => {
         if (nativeEvent.event === 'rename') onRename();
         else if (nativeEvent.event === 'remove') onRemove();
