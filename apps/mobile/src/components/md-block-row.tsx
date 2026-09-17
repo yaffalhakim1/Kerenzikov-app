@@ -15,10 +15,10 @@ import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
 import { RowVeil } from '@/md/veil';
 
 /**
- * Markdown metrics — the desktop's render.rs values: body 14/22, headings
- * 19/27 · 16/24 · 15/22 · 14/22, code 12.5/18. Block-level vertical rhythm
- * lives on the transcript rows (`topGap`), so blocks carry no margins of their
- * own.
+ * Markdown metrics — the desktop's render.rs values scaled up for a phone:
+ * body 16/24, headings 21/30 · 18/27 · 17/25 · 16/24, code 13.5/20.
+ * Block-level vertical rhythm lives on the transcript rows (`topGap`), so
+ * blocks carry no margins of their own.
  */
 export function useMarkdownStyles(): MarkdownStyles {
   const theme = useTheme();
@@ -30,15 +30,15 @@ export function useMarkdownStyles(): MarkdownStyles {
       lineHeight,
     });
     return {
-      body: { color: theme.text, fontSize: 14, lineHeight: 22 },
+      body: { color: theme.text, fontSize: 16, lineHeight: 24 },
       paragraph: {},
       heading: [
-        heading(19, 27),
+        heading(21, 30),
+        heading(18, 27),
+        heading(17, 25),
         heading(16, 24),
-        heading(15, 22),
-        heading(14, 22),
-        heading(14, 22),
-        heading(14, 22),
+        heading(16, 24),
+        heading(16, 24),
       ],
       strong: { fontWeight: '600' },
       em: { fontStyle: 'italic' },
@@ -54,7 +54,10 @@ export function useMarkdownStyles(): MarkdownStyles {
         backgroundColor: theme.codeWash,
         color: theme.codeText,
         fontFamily: MonoFont,
-        fontSize: 12.5,
+        // Explicit weight: Android resolves a registered multi-weight family
+        // through the weight, and a nested run inherits the parent's otherwise.
+        fontWeight: '400',
+        fontSize: 13.5,
       },
       codeBlock: {
         backgroundColor: theme.inset,
@@ -69,13 +72,14 @@ export function useMarkdownStyles(): MarkdownStyles {
         paddingHorizontal: 12,
         paddingVertical: 5,
       },
-      codeHeaderText: { color: theme.textTertiary, fontFamily: MonoFont, fontSize: 11, fontWeight: '500' },
+      codeHeaderText: { color: theme.textTertiary, fontFamily: MonoFont, fontSize: 12, fontWeight: '500' },
       codeContent: { paddingHorizontal: 12, paddingVertical: 10 },
       codeLine: {
         color: theme.text,
         fontFamily: MonoFont,
-        fontSize: 12.5,
-        lineHeight: 18,
+        fontWeight: '400',
+        fontSize: 13.5,
+        lineHeight: 20,
       },
       blockquote: {
         backgroundColor: theme.accentSoft,
@@ -92,10 +96,10 @@ export function useMarkdownStyles(): MarkdownStyles {
       listItem: { flexDirection: 'row', gap: 8 },
       listMarker: {
         color: theme.accent,
-        fontSize: 14,
+        fontSize: 16,
         fontVariant: ['tabular-nums'],
-        lineHeight: 22,
-        minWidth: 18,
+        lineHeight: 24,
+        minWidth: 20,
         textAlign: 'right',
       },
       listContent: { flex: 1, gap: 4 },
@@ -109,8 +113,8 @@ export function useMarkdownStyles(): MarkdownStyles {
       },
       tableHeadRow: {},
       tableCell: { minWidth: 48, padding: 12 },
-      tableCellText: { color: theme.text, fontSize: 14, lineHeight: 22 },
-      tableHeadText: { color: theme.text, fontSize: 14, fontWeight: '600', lineHeight: 22 },
+      tableCellText: { color: theme.text, fontSize: 16, lineHeight: 24 },
+      tableHeadText: { color: theme.text, fontSize: 16, fontWeight: '600', lineHeight: 24 },
       hr: { backgroundColor: theme.border, height: 1 },
       image: {
         backgroundColor: theme.inset,
