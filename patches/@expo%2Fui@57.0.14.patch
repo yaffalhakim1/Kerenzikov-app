@@ -1,0 +1,59 @@
+diff --git a/build/community/menu/types.d.ts b/build/community/menu/types.d.ts
+index 204e210..4cb16c4 100644
+--- a/build/community/menu/types.d.ts
++++ b/build/community/menu/types.d.ts
+@@ -113,6 +113,14 @@ export type NativeActionEvent = {
+  * Drop-in compatible with `@react-native-menu/menu`.
+  */
+ export interface MenuComponentProps {
++    /**
++     * Background color of the menu surface.
++     *
++     * On Android this is the Material `DropdownMenu` container color. SwiftUI
++     * draws the iOS menu's own chrome and ignores it there.
++     * @platform android
++     */
++    containerColor?: ColorValue;
+     /**
+      * The color scheme of the menu on Android. Omit to follow the device setting.
+      * @platform android
+diff --git a/src/community/menu/MenuView.android.tsx b/src/community/menu/MenuView.android.tsx
+index c66abf0..3b8cf53 100644
+--- a/src/community/menu/MenuView.android.tsx
++++ b/src/community/menu/MenuView.android.tsx
+@@ -156,6 +156,7 @@ export function MenuView(props: MenuComponentProps & { ref?: React.Ref<MenuCompo
+     ref,
+     actions,
+     colorScheme,
++    containerColor,
+     onPressAction,
+     onOpenMenu,
+     onCloseMenu,
+@@ -191,7 +192,7 @@ export function MenuView(props: MenuComponentProps & { ref?: React.Ref<MenuCompo
+   return (
+     <View style={style} testID={testID}>
+       <Host colorScheme={colorScheme} matchContents>
+-        <DropdownMenu expanded={expanded} onDismissRequest={dismissAll}>
++        <DropdownMenu color={containerColor} expanded={expanded} onDismissRequest={dismissAll}>
+           <DropdownMenu.Trigger>
+             <RNHostView matchContents>
+               <Pressable
+diff --git a/src/community/menu/types.tsx b/src/community/menu/types.tsx
+index 067ffe5..d269473 100644
+--- a/src/community/menu/types.tsx
++++ b/src/community/menu/types.tsx
+@@ -125,6 +125,14 @@ export type NativeActionEvent = {
+  * Drop-in compatible with `@react-native-menu/menu`.
+  */
+ export interface MenuComponentProps {
++  /**
++   * Background color of the menu surface.
++   *
++   * On Android this is the Material `DropdownMenu` container color. SwiftUI
++   * draws the iOS menu's own chrome and ignores it there.
++   * @platform android
++   */
++  containerColor?: ColorValue;
+   /**
+    * The color scheme of the menu on Android. Omit to follow the device setting.
+    * @platform android
