@@ -406,17 +406,10 @@ export default function NewTaskScreen() {
       if (address) {
         void loadComposerPreferences(address).then((stored) => {
           const prefs = preferencesRef.current ?? stored;
-          let next = rememberComposerSession(prefs, session);
-          if (!session.model) {
-            next = {
-              ...next,
-              lastProvider: session.provider,
-              lastModel: null,
-              lastReasoningEffort: session.reasoning_effort ?? null,
-              lastServiceTier: session.service_tier ?? null,
-              lastContextWindow: session.context_window ?? null,
-            };
-          }
+          // `rememberComposerSession` records the provider even when the
+          // session carries no model, so a model-less task still updates the
+          // next task's default.
+          const next = rememberComposerSession(prefs, session);
           preferencesRef.current = next;
           return saveComposerPreferences(address, next);
         }).catch(() => {});

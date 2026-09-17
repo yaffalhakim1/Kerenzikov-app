@@ -46,12 +46,46 @@ describe('composer preferences', () => {
         service_tier: null,
       },
     )
-    expect(rememberComposerSession(preferences, {
+    // The model is what a model-less session must not clear.
+    const next = rememberComposerSession(preferences, {
+      provider: 'claude',
+      model: null,
+      reasoning_effort: null,
+      service_tier: null,
+    })
+    expect(next.lastModel).toBe('claude-opus-4-1')
+    expect(next).toBe(preferences)
+  })
+
+  test('remembers the provider of a session that carries no model', () => {
+    // Codex and OpenCode can both run without an explicit model, so the
+    // provider has to be recorded anyway — otherwise `lastProvider` freezes at
+    // whichever provider was last used with one, and every later task reopens
+    // on that provider.
+    const started = rememberComposerSession(
+      readComposerPreferences(null, 'ws://first'),
+      {
+        provider: 'openCode',
+        model: 'some-model',
+        reasoning_effort: null,
+        service_tier: null,
+      },
+    )
+    expect(started.lastProvider).toBe('openCode')
+
+    const modelLess = rememberComposerSession(started, {
       provider: 'codex',
       model: null,
       reasoning_effort: null,
       service_tier: null,
-    })).toBe(preferences)
+    })
+    expect(modelLess.lastProvider).toBe('codex')
+    // A model id is only meaningful against its own provider's catalogue, so a
+    // model-less session on a different provider drops it rather than pairing
+    // the new provider with the old provider's model.
+    expect(modelLess.lastModel).toBeNull()
+    // The previous provider's own traits survive for when it is chosen again.
+    expect(rememberedModelTraits(modelLess, 'openCode', 'some-model')).toBeDefined()
   })
 
   test('restores Fx as a valid remembered provider', () => {
