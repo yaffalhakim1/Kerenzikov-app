@@ -203,3 +203,49 @@ function runningSession(): AgentSession {
     ],
   }
 }
+
+describe('pending control requests', () => {
+  const asked = {
+    requestId: 'ask-1',
+    questions: [{ id: 'deploy', header: 'Deploy', question: 'Where?', options: [], multiSelect: false }],
+  }
+
+  test('a request sets the panel and parks the session at waiting', () => {
+    const result = reduceRuntimeEvent(runningSession(), event('userInputRequested', asked), clock)
+    expect(result.userInput).toMatchObject({ requestId: 'ask-1' })
+    expect(result.session.status).toBe('waiting')
+  })
+
+  test('turn progress clears a request answered on another client', () => {
+    // The desktop answered the same question: no resolution event is emitted,
+    // so the resumed stream is what tells this client the panel is stale.
+    const waiting = reduceRuntimeEvent(runningSession(), event('userInputRequested', asked), clock)
+    expect(waiting.session.status).toBe('waiting')
+    const resumed = reduceRuntimeEvent(waiting.session, event('textDelta', 'Deploying.'), clock)
+    expect(resumed.userInput).toBeNull()
+    expect(resumed.permission).toBeNull()
+    expect(resumed.session.status).toBe('waiting')
+  })
+
+  test('a permission cleared by progress is reported the same way', () => {
+    const askedPermission = reduceRuntimeEvent(
+      runningSession(),
+      event('permission', { requestId: 'perm-1', title: 'Run', detail: '', options: [] }),
+      clock,
+    )
+    expect(askedPermission.permission).toMatchObject({ requestId: 'perm-1' })
+    const resumed = reduceRuntimeEvent(askedPermission.session, event('activity', { title: 'Bash' }), clock)
+    expect(resumed.permission).toBeNull()
+    expect(resumed.userInput).toBeNull()
+  })
+
+  test('a request arriving after progress still arms the panel', () => {
+    const result = reduceRuntimeEvent(runningSession(), event('permission', {
+      requestId: 'perm-2',
+      title: 'Run',
+      detail: '',
+      options: [],
+    }), clock)
+    expect(result.permission).toMatchObject({ requestId: 'perm-2' })
+  })
+})

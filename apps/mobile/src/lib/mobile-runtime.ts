@@ -229,14 +229,16 @@ export function runtimeEventAlreadyApplied(session: AgentSession, event: Sequenc
   );
 }
 
+/** A replayed event at or below the cursor was already folded into this
+ * session. Control requests are no exception: re-applying an already-seen
+ * `permission`/`userInputRequested` cannot know whether it was answered here
+ * or on another client, and resurrecting an answered one strands the panel.
+ * A request that is still pending always arrives above the cursor. */
 export function shouldApplyRuntimeEvent(
   session: AgentSession,
   event: SequencedEvent,
 ): boolean {
-  if (!runtimeEventAlreadyApplied(session, event)) return true;
-  return session.status === 'waiting' && (
-    event.event.kind === 'permission' || event.event.kind === 'userInputRequested'
-  );
+  return !runtimeEventAlreadyApplied(session, event);
 }
 
 function promptTitle(prompt: string): string | null {

@@ -75,7 +75,7 @@ describe('mobile runtime projection', () => {
     expect(runtimeEventAlreadyApplied(current, event)).toBe(true);
   });
 
-  test('replays a pending control request after an app restart', () => {
+  test('rejects every replayed event at or below the cursor', () => {
     const current = session({
       status: 'waiting',
       runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 4 },
@@ -91,9 +91,11 @@ describe('mobile runtime projection', () => {
       ...permission,
       event: { kind: 'textDelta', payload: 'duplicate' },
     } satisfies SequencedEvent;
-    expect(shouldApplyRuntimeEvent(current, permission)).toBe(true);
+    // A request still pending arrives above the cursor; anything at or below
+    // it was already folded in and must not resurrect an answered panel.
+    expect(shouldApplyRuntimeEvent(current, permission)).toBe(false);
     expect(shouldApplyRuntimeEvent(current, text)).toBe(false);
-    expect(shouldApplyRuntimeEvent({ ...current, status: 'working' }, permission)).toBe(false);
+    expect(shouldApplyRuntimeEvent(current, { ...permission, sequence: 5 })).toBe(true);
   });
 
   test('creates a provider-neutral isolated draft', () => {

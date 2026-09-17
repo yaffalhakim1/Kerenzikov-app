@@ -298,9 +298,31 @@ export function reduceRuntimeEvent(
       break
   }
 
+  // A pending control request lives only in the client, so its resolution is
+  // never announced. When another client (the desktop) answers, this client
+  // would otherwise keep showing a stale prompt forever while the daemon has
+  // already moved on. Turn progress that is not itself a request proves the
+  // agent continued, so the request it was waiting on is gone.
+  if (RESOLVING_KINDS.has(kind)) {
+    result.permission = null
+    result.userInput = null
+  }
+
   session.updated_at = clock.nowSeconds()
   return result
 }
+
+/** Turn-progress events that can only follow a resolved control request.
+ * Conversation meta (`usageUpdated`, `goalUpdated`, `backgroundWork`) is
+ * deliberately absent: it applies regardless of turn state and can arrive
+ * while a request is genuinely still pending. */
+const RESOLVING_KINDS = new Set([
+  'turnStarted',
+  'textDelta',
+  'reasoningDelta',
+  'activity',
+  'richActivity',
+])
 
 function asUserInputQuestion(value: unknown): PendingUserInput['questions'][number] | null {
   const question = asRecord(value)
