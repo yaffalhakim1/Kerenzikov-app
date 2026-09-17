@@ -111,6 +111,9 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         // Jcode routes whatever the user's own provider config exposes, so a
         // fabricated fallback would offer a model the daemon cannot serve.
         ProviderKind::Jcode => Vec::new(),
+        // CodeWhale resolves its route from the user's own provider config, so
+        // an invented fallback could expose a model the daemon rejects.
+        ProviderKind::CodeWhale => Vec::new(),
         // Pi, Oh My Pi, and Kimi Code all take their catalog from the user's
         // configured LLM providers. A fabricated fallback would make
         // unavailable models look selectable.
@@ -206,6 +209,9 @@ pub fn discover_catalog(
         ProviderKind::Grok => (CatalogProbe::legacy(discover_grok_models(binary)), None),
         ProviderKind::Jcode => (CatalogProbe::legacy(discover_jcode_models(binary)), None),
         ProviderKind::Kimi => (CatalogProbe::legacy(discover_kimi_models(binary)), None),
+        // CodeWhale's ACP adapter exposes no model inventory, so its picker
+        // stays on the provider's own configured default.
+        ProviderKind::CodeWhale => (CatalogProbe::legacy(Vec::new()), None),
         ProviderKind::Pi => (CatalogProbe::legacy(discover_pi_models(binary, PiDialect::Pi)), None),
         ProviderKind::OhMyPi => {
             (CatalogProbe::legacy(discover_pi_models(binary, PiDialect::OhMyPi)), None)

@@ -536,6 +536,9 @@ impl Backend for WakuBackend {
                     }
                     ProviderKind::Grok => crate::grok_session::list_provider_sessions(limit)?,
                     ProviderKind::Kimi => crate::kimi_session::list_provider_sessions(limit)?,
+                    // CodeWhale's ACP adapter exposes no `session/list` or
+                    // `session/load`, so there is no catalog to discover.
+                    ProviderKind::CodeWhale => Vec::new(),
                     ProviderKind::OhMyPi | ProviderKind::Pi => {
                         crate::pi_session::list_provider_sessions(provider, limit)?
                     }
@@ -626,6 +629,12 @@ impl Backend for WakuBackend {
                             session_id,
                             VISIBLE_TURN_LIMIT,
                         )?
+                    }
+                    // CodeWhale's ACP adapter publishes no `session/load`, so a
+                    // task resumed from disk cannot replay its provider
+                    // transcript. The stored Waku transcript is the only copy.
+                    ProviderResumeCursor::CodeWhale { .. } => {
+                        crate::model::ProviderSessionHistory::default()
                     }
                     ProviderResumeCursor::DeepSeek { session_id } => {
                         let binary = self.provider_binary(ProviderKind::DeepSeek)?;
@@ -1312,7 +1321,8 @@ impl WakuBackend {
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Copilot
+            ProviderKind::CodeWhale
+            | ProviderKind::Copilot
             | ProviderKind::Fx
             | ProviderKind::Jcode
             | ProviderKind::Kimi => {
@@ -1542,7 +1552,8 @@ impl WakuBackend {
             )),
             // Unreachable through the UI, which hides rewinding for providers
             // that answer `supports_conversation_rollback` with false.
-            ProviderKind::Copilot
+            ProviderKind::CodeWhale
+            | ProviderKind::Copilot
             | ProviderKind::Fx
             | ProviderKind::Jcode
             | ProviderKind::Kimi => {

@@ -225,6 +225,7 @@ pub(crate) fn start_local(
         | ProviderKind::Grok
         | ProviderKind::Jcode
         | ProviderKind::Kimi
+        | ProviderKind::CodeWhale
         | ProviderKind::Copilot => Arc::new(acp::AcpDriver::start(provider, options, events)?),
         ProviderKind::DeepSeek => Arc::new(deepseek::DeepSeekDriver::start(options, events)?),
         // OpenCode's own server is its real API, and it is what exposes

@@ -42,6 +42,7 @@ pub(crate) fn discover(
         // merely to seed autocomplete would pollute provider history, so their
         // live DriverEvent::AvailableCommands update is the catalog surface.
         ProviderKind::Cursor
+        | ProviderKind::CodeWhale
         | ProviderKind::Copilot
         | ProviderKind::DeepSeek
         | ProviderKind::Fx

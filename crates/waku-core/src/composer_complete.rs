@@ -334,8 +334,9 @@ fn assemble_slash_commands(
         // Harness commands are session-scoped and reported live by the Host,
         // and Kimi Code likewise publishes its whole command set over ACP
         // rather than from files Waku could scan. Jcode does the same through
-        // its ACP adapter.
-        ProviderKind::DeepSeek
+        // its ACP adapter, as does CodeWhale.
+        ProviderKind::CodeWhale
+        | ProviderKind::DeepSeek
         | ProviderKind::Grok
         | ProviderKind::Jcode
         | ProviderKind::Kimi => {}

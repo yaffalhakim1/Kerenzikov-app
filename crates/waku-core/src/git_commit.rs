@@ -458,6 +458,16 @@ fn agent_arguments(
             }
             push(&mut args, prompt);
         }
+        // CodeWhale's one-shot worker prints the answer and exits, so the
+        // commit prompt needs no session, tools, or streaming flags.
+        ProviderKind::CodeWhale => {
+            push(&mut args, "exec");
+            if let Some(model) = model {
+                push(&mut args, "--model");
+                push(&mut args, model);
+            }
+            push(&mut args, prompt);
+        }
         // Oh My Pi rejects unknown flags outright, so it gets its own list
         // rather than Pi's: context files are `--no-rules`, and it has no
         // prompt-template or project-trust switch to turn off.
@@ -910,6 +920,11 @@ mod tests {
                 }
                 ProviderKind::Jcode => {
                     assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("run"));
+                    assert!(has_pair(&args, "--model", "model"));
+                    assert!(has(&args, prompt));
+                }
+                ProviderKind::CodeWhale => {
+                    assert_eq!(args.first().and_then(|arg| arg.to_str()), Some("exec"));
                     assert!(has_pair(&args, "--model", "model"));
                     assert!(has(&args, prompt));
                 }

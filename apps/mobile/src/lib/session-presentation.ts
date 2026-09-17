@@ -267,6 +267,7 @@ export function providerLabel(provider: ProviderKind): string {
   const labels: Record<ProviderKind, string> = {
     amp: 'Amp',
     claude: 'Claude',
+    codeWhale: 'CodeWhale',
     codex: 'Codex',
     copilot: 'Copilot',
     cursor: 'Cursor',

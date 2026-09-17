@@ -72,6 +72,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
             ]
         }
         ProviderKind::DeepSeek
+        | ProviderKind::CodeWhale
         | ProviderKind::Fx
         | ProviderKind::Grok
         | ProviderKind::Jcode
