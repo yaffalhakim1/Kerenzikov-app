@@ -12,28 +12,33 @@
 /** A column never drops below this share of an even split. */
 const MIN_FRACTION_SCALE = 0.55;
 
-/** A cell's widest line, capped so one long paragraph in a single cell cannot
- *  starve every other column. */
-const MAX_COLUMN_CHARS = 32;
+/** The widest line in each column, in characters. Uncapped, mirroring the
+ *  desktop: a cap would flatten two long columns to the same length and erase
+ *  the proportionality the weights exist to express, exactly in the case where
+ *  it matters most. Runaway width needs no bound here — the grid fills the
+ *  transcript and long cells wrap, so no column can stretch the table. */
+function longestLines(
+  rows: readonly (readonly string[])[],
+  columns: number,
+): number[] {
+  const longest = new Array<number>(columns).fill(0);
+  for (const row of rows) {
+    for (let index = 0; index < columns; index += 1) {
+      const cell = row[index];
+      if (cell === undefined) continue;
+      const widest = Math.max(0, ...cell.split('\n').map((line) => [...line].length));
+      if (widest > longest[index]!) longest[index] = widest;
+    }
+  }
+  return longest;
+}
 
 export function columnWeights(
   rows: readonly (readonly string[])[],
   columns: number,
 ): number[] {
   if (columns <= 0) return [];
-  const content = new Array<number>(columns).fill(0);
-  for (const row of rows) {
-    for (let index = 0; index < columns; index += 1) {
-      const cell = row[index];
-      if (cell === undefined) continue;
-      // The longest line, not the whole cell: a wrapped paragraph does not
-      // need a column as wide as its total character count.
-      const widest = Math.max(0, ...cell.split('\n').map((line) => [...line].length));
-      if (widest > content[index]!) content[index] = widest;
-    }
-  }
-
-  return floorWeights(content.map((chars) => Math.min(chars, MAX_COLUMN_CHARS)), columns);
+  return floorWeights(longestLines(rows, columns), columns);
 }
 
 /**

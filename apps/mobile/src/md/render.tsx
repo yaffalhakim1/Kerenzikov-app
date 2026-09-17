@@ -499,6 +499,13 @@ function renderTable(
 ): ReactNode {
   const { styles } = ctx;
   const [head, ...rows] = node.children;
+  // A horizontal ScrollView sizes its content box to the content, so the grid
+  // cannot take its width from `100%` — that resolves to the content's own
+  // width and leaves every cell at its natural size, which is exactly what
+  // made the table read as loose text. It records the width the transcript
+  // offers instead, and lays the grid out against that.
+  const [available, setAvailable] = useState(0);
+  const gridWidth = Math.max(TABLE_MIN_WIDTH, available || TABLE_MIN_WIDTH);
   // Column count from the widest row, so a short row or a header is padded
   // rather than shifting the grid.
   const columns = Math.max(
@@ -545,9 +552,12 @@ function renderTable(
               styles.tableCell,
               // `flexBasis: 0` plus the content weight splits the grid's width
               // by ratio. Every row splits that same budget, so column edges
-              // line up down the table. No shrink: a zero basis has nothing to
-              // shrink, and content wraps inside the track instead.
-              { flexBasis: 0, flexGrow: weights[cellIndex] ?? 0 },
+              // line up down the table, and text longer than a track wraps
+              // inside it rather than widening the grid — the desktop's
+              // `w_full()` + `min_w_0()` pair. `minWidth: 0` is the second half
+              // of that: without it a cell refuses to shrink below its content
+              // and the row overflows its track.
+              { flexBasis: 0, flexGrow: weights[cellIndex] ?? 0, minWidth: 0 },
               cellIndex === columns - 1 && styles.tableCellLast,
             ]}>
             <Text
@@ -561,16 +571,22 @@ function renderTable(
     </View>
   );
   return (
-    <View key={key} style={styles.table}>
-      {/* A table keeps a floor width so a 4-column table compresses to
-          something readable and then scrolls, instead of squashing columns
-          into unreadable slivers. */}
+    <View
+      onLayout={(event) => {
+        const measured = event.nativeEvent.layout.width;
+        if (measured > 0 && measured !== available) setAvailable(measured);
+      }}
+      style={styles.table}>
+      {/* The grid fits the transcript and cells wrap, exactly as the desktop
+          lays a table out. Below the readable floor it keeps its own width and
+          the scroller takes over, since wrapping every cell to a sliver reads
+          worse than scrolling. */}
       <GestureScrollView
         horizontal
         nestedScrollEnabled
         persistentScrollbar
         showsHorizontalScrollIndicator>
-        <View style={[styles.tableGrid, { minWidth: TABLE_MIN_WIDTH }]}>
+        <View style={[styles.tableGrid, { width: gridWidth }]}>
           {head && renderRow(head, 'head', true, rows.length === 0)}
           {rows.map((row, index) => renderRow(row, index, false, index === rows.length - 1))}
         </View>

@@ -42,6 +42,26 @@ describe('columnWeights', () => {
   });
 });
 
+describe('columnWeights stays proportional as content grows', () => {
+  test('two long columns are not flattened to an even split', () => {
+    // Both cells run past any short cap, so a capped measure would call these
+    // identical and hand each half the grid. The longer one must win.
+    const weights = columnWeights(
+      [['Pipes/dashes visible as literal text', 'Parser did not recognise the table']],
+      2,
+    );
+    expect(weights[0]!).toBeGreaterThan(weights[1]!);
+  });
+
+  test('the widest column earns the largest share across many rows', () => {
+    const weights = columnWeights([
+      ['id', 'a much longer description column', 'n'],
+      ['1', 'another long description here', '2'],
+    ], 3);
+    expect(Math.max(...weights)).toBe(weights[1]!);
+  });
+});
+
 describe('cellIsNumeric', () => {
   test('recognises numeric and formatted values', () => {
     expect(cellIsNumeric('42')).toBe(true);
