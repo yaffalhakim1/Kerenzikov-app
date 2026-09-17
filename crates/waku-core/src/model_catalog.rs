@@ -1577,7 +1577,70 @@ fn discover_codex_models(binary: &Path) -> Vec<ProviderModel> {
     }
     let _ = child.kill();
     let _ = child.wait();
+    merge_codex_catalog(models)
+}
+
+/// Adds Codex's built-in catalog to whatever the live roster returned.
+///
+/// The roster only lists the models reachable through Codex's *current* route.
+/// Once Codex is pointed at a gateway that catalog is entirely that gateway's,
+/// so the built-in entries disappear from the picker even though Codex still
+/// knows them and a profile can still select one. Unioning the two keeps every
+/// model the CLI can be asked for selectable; the live roster wins on an id
+/// collision because its entry carries the route's real capabilities.
+///
+/// An empty roster is a failed probe, not an empty catalog: merging here would
+/// turn that into a "successful" built-in-only answer and cache it, hiding the
+/// failure behind a plausible list. The caller's `Failed` handling stands.
+fn merge_codex_catalog(roster: Vec<ProviderModel>) -> Vec<ProviderModel> {
+    if roster.is_empty() {
+        return roster;
+    }
+    let mut models = roster;
+    for built_in in fallback_models(ProviderKind::Codex) {
+        if !models.iter().any(|model| model.id == built_in.id) {
+            models.push(built_in);
+        }
+    }
+    mark_codex_configured_default(&mut models);
     models
+}
+
+/// Marks the model Codex is actually configured to run as the default.
+///
+/// The roster's own `isDefault` is the account's suggested pick, which can
+/// disagree with the configured `model` once the user has chosen one — a
+/// gateway-backed roster goes further and reports no single default at all. The
+/// configured model is what a new session will run, so it is the honest
+/// default; when it is not in the roster the roster's own answer stands.
+fn mark_codex_configured_default(models: &mut [ProviderModel]) {
+    let Some(configured) = codex_configured_model() else {
+        return;
+    };
+    if !models.iter().any(|model| model.id == configured) {
+        return;
+    }
+    for model in models.iter_mut() {
+        model.is_default = model.id == configured;
+    }
+}
+
+/// The `model` Codex's own config selects, read from its config file.
+///
+/// `CODEX_HOME` is honored exactly as Codex honors it. An unreadable or absent
+/// file yields nothing, leaving the roster's own default in place.
+fn codex_configured_model() -> Option<String> {
+    let home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))?;
+    let source = std::fs::read_to_string(home.join("config.toml")).ok()?;
+    let config = source.parse::<toml::Value>().ok()?;
+    config
+        .get("model")
+        .and_then(toml::Value::as_str)
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .map(str::to_owned)
 }
 
 fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
@@ -1588,13 +1651,21 @@ fn parse_codex_model_response(response: &Value) -> Vec<ProviderModel> {
         .flatten()
         .filter_map(|value| {
             let id = value.get("model").and_then(Value::as_str)?;
-            let name = value
+            // A gateway-backed roster reports `displayName` as the raw wire id,
+            // which is not a name a human should read. `display_name_from_slug`
+            // renders it properly ("step-3-7-flash:free" → "Step 3.7 Flash
+            // (Free)") and is the spelling every other provider uses. A real
+            // name from Codex still wins.
+            let reported = value
                 .get("displayName")
                 .and_then(Value::as_str)
-                .filter(|name| !name.trim().is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| display_name_from_slug(id));
-            let mut model = ProviderModel::new(id, normalize_codex_name(&name));
+                .map(str::trim)
+                .filter(|name| !name.is_empty() && *name != id);
+            let name = match reported {
+                Some(name) => normalize_codex_name(name),
+                None => display_name_from_slug(id),
+            };
+            let mut model = ProviderModel::new(id, name);
             // Codex words its routing as "stepfun via kenari" in the model's
             // description — the BYOK gateway is the tail after " via ". The
             // picker shows it beside the CLI name the way OpenCode's does, so
@@ -1863,6 +1934,9 @@ pub(crate) fn display_name_from_slug(slug: &str) -> String {
             "xai" => "xAI".to_owned(),
             // Vendor-agnostic initialisms that title-casing would mangle.
             "oss" => "OSS".to_owned(),
+            "glm" => "GLM".to_owned(),
+            "mcp" => "MCP".to_owned(),
+            "tts" => "TTS".to_owned(),
             _ if part
                 .chars()
                 .all(|char| char.is_ascii_digit() || char == '.') =>
@@ -2068,6 +2142,150 @@ pub(crate) mod tests {
         );
         assert!(models[1].is_default);
         assert_eq!(models[1].service_tiers[0].id, "fast");
+    }
+
+    #[test]
+    fn codex_merge_keeps_built_ins_and_prefers_the_live_roster() {
+        // A gateway-routed roster: none of Codex's own models are listed.
+        let merged = merge_codex_catalog(vec![
+            ProviderModel::new("glm-5-3-flash", "GLM 5.3 Flash"),
+            ProviderModel::new("step-3-7-flash:free", "Step 3.7 Flash (Free)"),
+        ]);
+
+        let ids: Vec<&str> = merged.iter().map(|model| model.id.as_str()).collect();
+        for built_in in [
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+        ] {
+            assert!(ids.contains(&built_in), "{built_in} must stay selectable");
+        }
+        assert!(ids.contains(&"glm-5-3-flash"));
+        assert!(ids.contains(&"step-3-7-flash:free"));
+
+        // A live entry wins over the built-in of the same id, so the roster's
+        // real capabilities are not replaced by the fallback's.
+        let mut roster = fallback_models(ProviderKind::Codex);
+        let index = roster
+            .iter()
+            .position(|model| model.id == "gpt-5.6-sol")
+            .unwrap();
+        roster[index].name = "Roster Name".to_owned();
+        roster[index].sub_provider = Some("kenari".to_owned());
+        let merged = merge_codex_catalog(roster);
+        let sol = merged
+            .iter()
+            .find(|model| model.id == "gpt-5.6-sol")
+            .unwrap();
+        assert_eq!(sol.name, "Roster Name");
+        assert_eq!(sol.sub_provider.as_deref(), Some("kenari"));
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|model| model.id == "gpt-5.6-sol")
+                .count(),
+            1,
+            "the union must not duplicate an id"
+        );
+
+        // An empty roster is a failed probe, so nothing is invented for it.
+        assert!(merge_codex_catalog(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn codex_gateway_ids_get_readable_names_not_raw_ids() {
+        // Shape from a live Codex roster: a gateway-backed entry reports its
+        // `displayName` as the raw wire id, which is not a name to show.
+        let models = parse_codex_model_response(&json!({
+            "result": {
+                "data": [
+                    {
+                        "model": "step-3-7-flash:free",
+                        "displayName": "step-3-7-flash:free",
+                        "description": "stepfun via kenari"
+                    },
+                    {
+                        "model": "glm-5-3-flash",
+                        "displayName": "glm-5-3-flash",
+                        "description": "z-ai via kenari"
+                    },
+                    // A real published name still wins over a derived one.
+                    {
+                        "model": "gpt-5.6-sol",
+                        "displayName": "GPT-5.6-Sol"
+                    }
+                ]
+            }
+        }));
+
+        let name = |id: &str| {
+            models
+                .iter()
+                .find(|model| model.id == id)
+                .map(|model| model.name.as_str())
+        };
+
+        // Never the raw id, and never the hyphen-mangled form.
+        assert_eq!(name("step-3-7-flash:free"), Some("Step 3.7 Flash (Free)"));
+        assert_eq!(name("glm-5-3-flash"), Some("GLM 5.3 Flash"));
+        assert_eq!(name("gpt-5.6-sol"), Some("GPT-5.6-Sol"));
+        for model in &models {
+            assert_ne!(
+                model.name, model.id,
+                "a gateway model must not be labelled with its raw id"
+            );
+        }
+    }
+
+    #[test]
+    fn codex_configured_model_is_the_default_over_the_roster_suggestion() {
+        let home = std::env::temp_dir().join(format!(
+            "waku-codex-default-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("config.toml"),
+            "model = \"glm-5-3-flash\"\nmodel_provider = \"kenari\"\n",
+        )
+        .unwrap();
+
+        let previous = std::env::var_os("CODEX_HOME");
+        // SAFETY: `CODEX_HOME_LOCK` serializes every writer in this crate, and
+        // the variable is restored before the lock is released.
+        let _guard = CODEX_HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        unsafe { std::env::set_var("CODEX_HOME", &home) };
+
+        let mut models = vec![
+            ProviderModel::new("step-3-7-flash:free", "Step 3.7 Flash (Free)"),
+            ProviderModel::new("glm-5-3-flash", "GLM 5.3 Flash"),
+        ];
+        // What the roster itself reported as its suggestion.
+        models[0].is_default = true;
+        mark_codex_configured_default(&mut models);
+        assert!(!models[0].is_default, "the roster suggestion must lose");
+        assert!(models[1].is_default, "the configured model must win");
+
+        // A configured model absent from the roster leaves the roster's own
+        // answer alone rather than marking nothing.
+        std::fs::write(home.join("config.toml"), "model = \"absent\"\n").unwrap();
+        let mut models = vec![ProviderModel::new("only", "Only")];
+        models[0].is_default = true;
+        mark_codex_configured_default(&mut models);
+        assert!(models[0].is_default);
+
+        match &previous {
+            Some(value) => unsafe { std::env::set_var("CODEX_HOME", value) },
+            None => unsafe { std::env::remove_var("CODEX_HOME") },
+        }
+        drop(_guard);
+
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
@@ -2656,7 +2874,7 @@ description = "House explorer with our own rules."
             display_name_from_slug("muse-spark-1-3-contributor"),
             "Muse Spark 1.3 Contributor"
         );
-        assert_eq!(display_name_from_slug("glm-5-3-flash"), "Glm 5.3 Flash");
+        assert_eq!(display_name_from_slug("glm-5-3-flash"), "GLM 5.3 Flash");
         assert_eq!(
             display_name_from_slug("deepseek-v4-1-flash"),
             "Deepseek V4.1 Flash"
@@ -2725,7 +2943,7 @@ description = "House explorer with our own rules."
         );
         // The BYOK provider is what the subtitle shows beside the CLI name.
         assert_eq!(models[0].sub_provider.as_deref(), Some("Kenari"));
-        assert_eq!(models[0].name, "Glm 5.3 Flash");
+        assert_eq!(models[0].name, "GLM 5.3 Flash");
     }
 
     /// Without a named provider there is nothing to scope to, so the routes
