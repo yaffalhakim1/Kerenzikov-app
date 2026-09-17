@@ -37,11 +37,16 @@ release was not code-signed. Choose **More info → Run anyway**.
 
 ## Updating
 
-Kerenzikov does not update itself. This build ships no auto-updater and no
-update feed, so the app has no **Check for Updates…** menu item and no
-**Automatic updates** setting. Install a newer release from the
-[releases page](https://github.com/yaffalhakim1/Kerenzikov-app/releases/latest) when you
-want one.
+Kerenzikov updates itself. On launch it polls this fork's own signed update feed
+(a Sparkle-format appcast on Cloudflare R2), compares the newest version there
+against the one it is running, and offers anything newer in place. **Check for
+Updates…** in the app menu asks on demand, and **Settings → General → Automatic
+updates** controls the launch check.
+
+The installer it downloads is verified against this fork's Ed25519 public key
+before it runs, so a build from any other source, including upstream Waku, is
+rejected. The feed ships no entry for anything but this fork's own signed
+builds. See [RELEASING.md](../RELEASING.md) for how the feed is produced.
 
 Running a newer installer over an existing install replaces it in place: tasks,
 transcripts, and settings are untouched.

@@ -997,11 +997,34 @@ mod windows {
     /// This fork serves its own signed appcast from its own R2 bucket, so
     /// installs update from here instead of upstream's feed.
     #[cfg(target_arch = "aarch64")]
-    const FEED_URL: Option<&str> =
-        Some("https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/appcast-windows-aarch64.xml");
+    const DEFAULT_FEED_URL: &str =
+        "https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/appcast-windows-aarch64.xml";
     #[cfg(not(target_arch = "aarch64"))]
-    const FEED_URL: Option<&str> =
-        Some("https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/appcast-windows-x86_64.xml");
+    const DEFAULT_FEED_URL: &str =
+        "https://pub-a8392f3fe55a424497fe5174b0179915.r2.dev/appcast-windows-x86_64.xml";
+
+    /// The feed this build reads, or `None` when it ships none.
+    ///
+    /// `WAKU_FEED_URL` overrides the baked-in URL so a bad or moved feed can be
+    /// diagnosed, or recovered from, without cutting a release: point a test
+    /// build at a staging bucket, or start a user on a replacement URL after
+    /// the primary one fails. Only an `https://` URL is accepted, because the
+    /// download it leads to must stay encrypted in transit; the Ed25519
+    /// signature is still the trust root, so this widens reachability, not
+    /// trust. An override that is not usable https falls back to the default
+    /// rather than disabling updates.
+    fn feed_url() -> Option<String> {
+        match std::env::var("WAKU_FEED_URL") {
+            Ok(value) if value.trim().starts_with("https://") => Some(value.trim().to_owned()),
+            Ok(value) => {
+                eprintln!(
+                    "Kerenzikov updater: ignoring WAKU_FEED_URL={value:?}; it must be an https:// URL"
+                );
+                Some(DEFAULT_FEED_URL.to_owned())
+            }
+            Err(_) => Some(DEFAULT_FEED_URL.to_owned()),
+        }
+    }
 
     /// Read out of `resources/Info.plist` by the build script, so macOS and
     /// Windows cannot end up trusting different keys.
@@ -1033,6 +1056,9 @@ mod windows {
         /// being dropped, so Check for Updates still answers.
         explicit_check: Arc<AtomicBool>,
         automatic: Arc<AtomicBool>,
+        /// Resolved once at startup, so the `WAKU_FEED_URL` override is read
+        /// on the thread that builds the updater rather than on each check.
+        feed_url: Arc<str>,
         preference_path: PathBuf,
         events: smol::channel::Sender<UpdaterEvent>,
         receiver: smol::channel::Receiver<UpdaterEvent>,
@@ -1051,7 +1077,7 @@ mod windows {
             // Updates…" in the app menu and "Automatic updates" in Settings
             // as controls that can only report "this build ships no update
             // feed" — the Linux updater already bails here, so mirror it.
-            FEED_URL?;
+            let feed_url = feed_url()?;
             if verifying_key().is_none() {
                 eprintln!("Kerenzikov updater: SUPublicEDKey is not a valid ed25519 key");
                 return None;
@@ -1066,6 +1092,7 @@ mod windows {
                 checking: Arc::new(AtomicBool::new(false)),
                 explicit_check: Arc::new(AtomicBool::new(false)),
                 automatic,
+                feed_url: Arc::from(feed_url.as_str()),
                 preference_path,
                 events,
                 receiver,
@@ -1073,7 +1100,7 @@ mod windows {
 
             // Sparkle arms a scheduled checker on macOS; here one silent
             // check per launch is the whole schedule.
-            if FEED_URL.is_some() && updater.automatically_checks_for_updates() {
+            if updater.automatically_checks_for_updates() {
                 updater.start_check(false);
             }
             Some(updater)
@@ -1128,10 +1155,11 @@ mod windows {
                 let _ = events.try_send(UpdaterEvent::StatusChanged(next));
             };
             let events = self.events.clone();
+            let feed_url = Arc::clone(&self.feed_url);
             let spawned = std::thread::Builder::new()
                 .name("waku-updater-check".into())
                 .spawn(move || {
-                    let outcome = fetch_and_stage();
+                    let outcome = fetch_and_stage(&feed_url);
                     // Read once the work is done, so a request that arrived
                     // meanwhile is honored.
                     let report = explicit_check.load(Ordering::Relaxed);
@@ -1248,10 +1276,7 @@ mod windows {
     }
 
     /// Resolve the feed, and stage the installer when it names a newer build.
-    fn fetch_and_stage() -> anyhow::Result<Option<PathBuf>> {
-        let Some(feed_url) = FEED_URL else {
-            anyhow::bail!("this build ships no update feed");
-        };
+    fn fetch_and_stage(feed_url: &str) -> anyhow::Result<Option<PathBuf>> {
         let document = http_get(feed_url)?;
         let Some(item) = feed::newest_item(&document) else {
             anyhow::bail!("the update feed has no signed release");
