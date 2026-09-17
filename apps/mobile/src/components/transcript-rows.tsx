@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  userText: { fontSize: 14, lineHeight: 21 },
+  userText: { fontSize: 16, lineHeight: 23 },
   messageFooterRow: {
     alignItems: 'center',
     flexDirection: 'row',

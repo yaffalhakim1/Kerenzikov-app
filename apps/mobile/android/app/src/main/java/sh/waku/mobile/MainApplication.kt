@@ -9,6 +9,7 @@ import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.ReactPackage
 import com.facebook.react.ReactHost
 import com.facebook.react.common.ReleaseLevel
+import com.facebook.react.common.assets.ReactFontManager
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 
 import expo.modules.ApplicationLifecycleDispatcher
@@ -29,6 +30,12 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Registers the bundled JetBrains Mono faces so a `fontFamily` of
+    // "JetBrains Mono" resolves instead of silently falling back to the
+    // system face. This is what expo-font's config plugin injects; the
+    // android/ project is committed and CI assembles it with Gradle rather
+    // than prebuilding, so the generated resources live here.
+    ReactFontManager.getInstance().addCustomFont(this, "JetBrains Mono", R.font.xml_jet_brains_mono)
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {
