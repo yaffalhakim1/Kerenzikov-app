@@ -55,6 +55,11 @@ export function useMarkdownStyles(): MarkdownStyles {
         color: theme.codeText,
         fontFamily: MonoFont,
         fontSize: 12.5,
+        // Only 400/500/700 are registered for JetBrains Mono. A span nested in
+        // `strong` would otherwise inherit weight 600, find no definition, and
+        // silently fall back to the system sans face.
+        fontWeight: '400',
+        fontStyle: 'normal',
       },
       codeBlock: {
         backgroundColor: theme.inset,
