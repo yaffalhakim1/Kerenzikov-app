@@ -327,6 +327,9 @@ function fileTypeIconName(path: string): FileTypeIconName {
 const PROVIDER_ICONS: Record<ProviderKind, string> = {
   amp: 'i-waku-provider-amp',
   claude: 'i-waku-provider-claude',
+  // CodeWhale's fork descends from `deepseek-tui` and stays DeepSeek routed,
+  // so its existing mark reads correctly next to the label.
+  codeWhale: 'i-waku-provider-deepseek',
   codex: 'i-waku-provider-openai',
   copilot: 'i-waku-github',
   cursor: 'i-waku-provider-cursor',
@@ -349,6 +352,7 @@ export const PROVIDERS: Array<{
 }> = [
   { id: 'amp', name: 'Amp', shortName: 'Amp', command: 'amp' },
   { id: 'claude', name: 'Claude Code', shortName: 'Claude', command: 'claude' },
+  { id: 'codeWhale', name: 'CodeWhale', shortName: 'CodeWhale', command: 'codewhale' },
   { id: 'codex', name: 'Codex CLI', shortName: 'Codex', command: 'codex' },
   { id: 'copilot', name: 'Copilot CLI', shortName: 'Copilot', command: 'copilot' },
   { id: 'cursor', name: 'Cursor CLI', shortName: 'Cursor', command: 'cursor-agent' },

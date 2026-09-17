@@ -1444,6 +1444,7 @@ function providerName(provider: AgentSession['provider']) {
     {
       amp: 'Amp',
       claude: 'Claude Code',
+      codeWhale: 'CodeWhale',
       codex: 'Codex',
       copilot: 'Copilot',
       cursor: 'Cursor Agent',

@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub enum ProviderKind {
     Amp,
     Claude,
+    CodeWhale,
     #[default]
     Codex,
     Copilot,
@@ -28,9 +29,10 @@ pub enum ProviderKind {
 }
 
 impl ProviderKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Amp,
         Self::Claude,
+        Self::CodeWhale,
         Self::Codex,
         Self::Copilot,
         Self::Cursor,
@@ -49,6 +51,7 @@ impl ProviderKind {
         match self {
             Self::Amp => "amp",
             Self::Claude => "claude",
+            Self::CodeWhale => "codewhale",
             Self::Codex => "codex",
             Self::Copilot => "copilot",
             Self::Cursor => "cursor",
@@ -68,6 +71,7 @@ impl ProviderKind {
         match self {
             Self::Amp => "Amp",
             Self::Claude => "Claude Code",
+            Self::CodeWhale => "CodeWhale",
             Self::Codex => "Codex CLI",
             Self::Copilot => "Copilot CLI",
             Self::Cursor => "Cursor CLI",
@@ -87,6 +91,7 @@ impl ProviderKind {
         match self {
             Self::Amp => "Amp",
             Self::Claude => "Claude",
+            Self::CodeWhale => "CodeWhale",
             Self::Codex => "Codex",
             Self::Copilot => "Copilot",
             Self::Cursor => "Cursor",
@@ -106,6 +111,7 @@ impl ProviderKind {
         match self {
             Self::Amp => "amp",
             Self::Claude => "claude",
+            Self::CodeWhale => "codewhale",
             Self::Codex => "codex",
             // The standalone Copilot CLI binary. The `gh copilot` extension is
             // a different CLI and is not probed here.
@@ -228,6 +234,9 @@ pub enum ProviderResumeCursor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resume_at: Option<String>,
     },
+    CodeWhale {
+        session_id: String,
+    },
     Codex {
         thread_id: String,
     },
@@ -285,6 +294,7 @@ impl ProviderResumeCursor {
                 session_id: id,
                 resume_at: None,
             },
+            ProviderKind::CodeWhale => Self::CodeWhale { session_id: id },
             ProviderKind::Codex => Self::Codex { thread_id: id },
             ProviderKind::Copilot => Self::Copilot { session_id: id },
             ProviderKind::Cursor => Self::Cursor {
@@ -316,6 +326,7 @@ impl ProviderResumeCursor {
         match self {
             Self::Amp { .. } => ProviderKind::Amp,
             Self::Claude { .. } => ProviderKind::Claude,
+            Self::CodeWhale { .. } => ProviderKind::CodeWhale,
             Self::Codex { .. } => ProviderKind::Codex,
             Self::Copilot { .. } => ProviderKind::Copilot,
             Self::Cursor { .. } => ProviderKind::Cursor,
@@ -335,6 +346,7 @@ impl ProviderResumeCursor {
         match self {
             Self::Amp { thread_id, .. } => thread_id,
             Self::Claude { session_id, .. }
+            | Self::CodeWhale { session_id }
             | Self::Cursor { session_id, .. }
             | Self::Copilot { session_id }
             | Self::DeepSeek { session_id }
@@ -4306,8 +4318,7 @@ mod tests {
         session.begin_turn("tracked in Waku");
         let before_updated = session.updated_at;
 
-        assert!(!session.refresh_from_provider_history(
-            ProviderSessionHistory::default()));
+        assert!(!session.refresh_from_provider_history(ProviderSessionHistory::default()));
         assert_eq!(session.updated_at, before_updated);
 
         // The stale snapshot echoed back: no growth, nothing newer.
@@ -4448,7 +4459,7 @@ mod tests {
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 14);
+        assert_eq!(ProviderKind::ALL.len(), 15);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

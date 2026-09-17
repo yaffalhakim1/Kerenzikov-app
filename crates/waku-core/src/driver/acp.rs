@@ -73,6 +73,13 @@ fn launch_for(provider: ProviderKind, reasoning_effort: Option<&str>) -> anyhow:
             args: vec!["--acp".into(), "--stdio".into()],
             env: Vec::new(),
         }),
+        // CodeWhale's adapter is intentionally minimal — `initialize`,
+        // `session/new`, `session/prompt`, `session/cancel` — with no
+        // `session/load`, so its transcript cannot be replayed through ACP.
+        ProviderKind::CodeWhale => Ok(AcpLaunch {
+            args: vec!["serve".into(), "--acp".into()],
+            env: Vec::new(),
+        }),
         ProviderKind::Cursor => Ok(AcpLaunch {
             args: vec!["acp".into()],
             env: Vec::new(),
@@ -2185,6 +2192,13 @@ mod tests {
     fn copilot_launches_its_documented_acp_server() {
         let launch = launch_for(ProviderKind::Copilot, None).unwrap();
         assert_eq!(launch.args, ["--acp", "--stdio"]);
+        assert!(launch.env.is_empty());
+    }
+
+    #[test]
+    fn codewhale_launches_its_documented_acp_server() {
+        let launch = launch_for(ProviderKind::CodeWhale, None).unwrap();
+        assert_eq!(launch.args, ["serve", "--acp"]);
         assert!(launch.env.is_empty());
     }
 

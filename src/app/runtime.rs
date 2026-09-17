@@ -640,7 +640,8 @@ fn perform_provider_rewind(
         }
         // Unreachable through the UI, which hides rewinding for providers that
         // answer `supports_conversation_rollback` with false.
-        ProviderKind::Copilot
+        ProviderKind::CodeWhale
+        | ProviderKind::Copilot
         | ProviderKind::Fx
         | ProviderKind::Jcode
         | ProviderKind::Kimi => {
@@ -968,7 +969,8 @@ fn perform_response_fork(mut request: ResponseForkRequest) -> Result<PreparedRes
             }
             // Unreachable through the UI, which hides branching for providers
             // that answer `supports_conversation_fork` with false.
-            ProviderKind::Copilot
+            ProviderKind::CodeWhale
+            | ProviderKind::Copilot
             | ProviderKind::Fx
             | ProviderKind::Jcode
             | ProviderKind::Kimi => anyhow::bail!(tr!(

@@ -165,6 +165,7 @@ pub fn provider_color(theme: &Theme, provider: ProviderKind) -> Hsla {
         ProviderKind::Claude => rgb(0xD97757).into(),
         ProviderKind::DeepSeek => rgb(0x4D6BFE).into(),
         ProviderKind::Codex
+        | ProviderKind::CodeWhale
         | ProviderKind::Copilot
         | ProviderKind::Cursor
         | ProviderKind::Fx
@@ -190,6 +191,9 @@ pub fn provider_icon(provider: ProviderKind) -> &'static str {
         ProviderKind::Amp => "icons/provider-amp.svg",
         ProviderKind::Claude => "icons/provider-claude.svg",
         ProviderKind::Codex => "icons/provider-openai.svg",
+        // CodeWhale's fork descends from `deepseek-tui` and stays DeepSeek
+        // routed, so its existing mark reads correctly next to the label.
+        ProviderKind::CodeWhale => "icons/provider-deepseek.svg",
         // No Copilot-specific mark ships with the app; the GitHub mark is
         // the vendor's and reads correctly next to the "Copilot CLI" label.
         ProviderKind::Copilot => "icons/github.svg",
