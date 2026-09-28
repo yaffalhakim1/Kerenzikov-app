@@ -41,7 +41,7 @@ impl Waku {
         {
             return;
         }
-        self.reveal_sidebar_session(session_id);
+        self.reveal_sidebar_session(session_id, cx);
         let needs_hydration = self
             .state
             .sessions
@@ -400,6 +400,108 @@ impl Waku {
         cx.background_executor()
             .spawn(async move { sweep() })
             .detach();
+    }
+
+    /// Hides a task from the lists without destroying it.
+    ///
+    /// This is what the context menu's removal offers, because the destructive
+    /// version cannot be undone: the row, transcript, messages and Git
+    /// checkpoint refs all stay on the daemon, and only the archive stamp
+    /// decides whether the lists show the task. An accidental click costs one
+    /// "Undo" rather than a lost conversation.
+    pub(super) fn archive_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        // Read the title and flip the flag in one borrow, then drop it before
+        // the store call and the toast, which both need `self` mutably.
+        let title = {
+            let Some(session) = self
+                .state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+            else {
+                return;
+            };
+            if !session.set_archived(true) {
+                return;
+            }
+            session.display_title().to_owned()
+        };
+        // Deliberately not marked dirty and not saved: `SetSessionArchived` is
+        // the single writer of this field. Sending the same stamp again through
+        // `SaveTaskState` would write it from a different dispatch path, with no
+        // ordering between them, so a late save could undo a fresh archive.
+        self.persist_archived(session_id, true);
+        // The row stays on disk, so restoring is a flag flip rather than a
+        // reconstruction; wire it to the toast so the undo is one click.
+        self.show_undo_toast(
+            tr!("session.archived_toast", title = title),
+            Box::new(move |waku, cx| waku.unarchive_session(session_id, cx)),
+        );
+        self.repair_selection_after_removal(session_id, cx);
+        cx.notify();
+    }
+
+    pub(super) fn unarchive_session(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        let Some(session) = self
+            .state
+            .sessions
+            .iter_mut()
+            .find(|session| session.id == session_id)
+        else {
+            return;
+        };
+        if !session.set_archived(false) {
+            return;
+        }
+        self.persist_archived(session_id, false);
+        cx.notify();
+    }
+
+    /// Sends the archive stamp to the daemon and rolls the local flip back if
+    /// it could not be delivered.
+    ///
+    /// The daemon is the source of truth for this field, so a failed send must
+    /// not leave the client believing something the daemon never recorded — the
+    /// next catalog refresh would silently disagree with what the sidebar shows.
+    fn persist_archived(&mut self, session_id: Uuid, archived: bool) {
+        if let Err(error) = self.store.set_session_archived(session_id, archived) {
+            self.show_toast(tr!("errors.save_local_state", error = error));
+            if let Some(session) = self
+                .state
+                .sessions
+                .iter_mut()
+                .find(|session| session.id == session_id)
+            {
+                session.set_archived(!archived);
+            }
+        }
+    }
+
+    /// Keeps a valid task selected after one leaves the visible list, whichever
+    /// way it left (archived or destroyed).
+    fn repair_selection_after_removal(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
+        if self.state.selected_session != Some(session_id) {
+            self.save();
+            return;
+        }
+        let project_id = self
+            .state
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .map(|session| session.project_id);
+        let next_session = self
+            .state
+            .sessions
+            .iter()
+            .filter(|session| Some(session.project_id) == project_id && !session.is_archived())
+            .max_by_key(|session| session.updated_at)
+            .map(|session| session.id);
+        self.state.selected_session = None;
+        match next_session {
+            Some(next) => self.select_session(next, cx),
+            None => self.save(),
+        }
     }
 
     pub(super) fn new_session_action(

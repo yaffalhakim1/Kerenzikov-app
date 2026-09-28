@@ -1090,14 +1090,39 @@ impl Waku {
         };
         match result {
             Ok(snapshot) => {
+                // Lost-then-regained: the banner clears as soon as a sync
+                // succeeds, so it never lingers past the outage it describes.
+                if self.set_daemon_degraded(None, cx) {
+                    return true;
+                }
                 self.apply_remote_task_state(snapshot, cx);
                 true
             }
             Err(error) => {
+                // A failed catalog sync used to reach the console only, so a
+                // client whose daemon had gone away looked merely idle. Surface
+                // it, and keep the last-known state on screen rather than
+                // clearing it.
                 eprintln!("could not refresh daemon task state: {error}");
-                false
+                self.set_daemon_degraded(Some(error), cx);
+                true
             }
         }
+    }
+
+    /// Records whether the desktop is currently out of sync with its daemon,
+    /// returning whether that changed. A message of `None` means recovered.
+    pub(super) fn set_daemon_degraded(
+        &mut self,
+        message: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.daemon_degraded == message {
+            return false;
+        }
+        self.daemon_degraded = message;
+        cx.notify();
+        true
     }
 
     fn apply_remote_task_state(

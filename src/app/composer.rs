@@ -951,7 +951,13 @@ impl Waku {
         };
 
         popover(
-            trigger.caret(false).selected(handle.is_open()),
+            trigger
+                .caret(false)
+                .selected(handle.is_open())
+                .hint(
+                    tr!("models.choose"),
+                    crate::platform::primary_shortcut("⌘/", "Ctrl+/"),
+                ),
             &handle,
             MenuAlign::AboveLeft,
             move |popover, _window, _cx| {
@@ -2832,6 +2838,10 @@ impl Waku {
                                         .when(!escape_stop_armed, |element| {
                                             element.child(icon("icons/stop.svg", 18.0, theme.text))
                                         })
+                                        .tooltip(Tooltip::text_with_shortcut(
+                                            tr!("composer.stop"),
+                                            "Esc",
+                                        ))
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.cancel_turn(cx);
                                         })),

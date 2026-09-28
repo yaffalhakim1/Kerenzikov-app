@@ -216,6 +216,8 @@ daemon.status_exposed:
   en: Exposed
 daemon.status_restarting:
   en: Restarting
+daemon.reconnecting:
+  en: Out of sync with the daemon — reconnecting
 daemon.connection_title:
   en: Listener access
 daemon.connection_description:
@@ -244,6 +246,10 @@ daemon.websocket_url:
   en: WebSocket URL
 daemon.token:
   en: Token
+daemon.copy_pairing:
+  en: Copy pairing link
+daemon.pairing_hint:
+  en: Paste this one link into a mobile client to pair it
 daemon.reveal_token:
   en: Reveal token
 daemon.hide_token:
@@ -402,6 +408,10 @@ settings.automatic_updates_description:
 
 providers.coding_agents:
   en: Coding agents
+providers.refresh:
+  en: Refresh providers
+providers.install:
+  en: Install
 providers.description:
   en: Kerenzikov drives agent CLIs installed on this computer. Install or sign in with each agent's own CLI, then refresh
 providers.web_description:
@@ -488,6 +498,18 @@ common.remove:
   en: Remove
 common.rename:
   en: Rename
+common.undo:
+  en: Undo
+
+session.archive:
+  en: Archive
+session.unarchive:
+  en: Unarchive
+session.archived_toast:
+  en: "Archived \u201C%{title}\u201D"
+
+sidebar.show_archived:
+  en: Show archived
 
 session.new_task:
   en: New task
@@ -496,6 +518,10 @@ sidebar.today:
   en: Today
 sidebar.search:
   en: Search
+sidebar.filter_placeholder:
+  en: Filter tasks
+sidebar.no_matching_tasks:
+  en: No matching tasks
 sidebar.options:
   en: Sidebar options
 sidebar.grouping:
@@ -580,6 +606,13 @@ onboarding.web_description:
   en: Choose a path on the daemon host, or start without a project.
 onboarding.open_project_folder:
   en: Open project folder…
+onboarding.install_agent:
+  en: Install a coding agent to begin
+onboarding.install_agent_description:
+  en: Kerenzikov drives an agent CLI on this computer. Install one of these, sign in, then refresh. You can add a project folder next.
+onboarding.install_agent_footer:
+  en: Already installed one? Refresh to detect it.
+
 onboarding.what_should_we_build:
   en: What should we build?
 onboarding.what_should_we_build_in:
@@ -595,6 +628,8 @@ common.copy_message_title:
   en: Copy Message
 common.copy_selection:
   en: Copy Selection
+common.add_selection_to_composer:
+  en: Add Selection to Composer
 common.copy_to_composer:
   en: Copy to Composer
 common.copy_code:
@@ -863,6 +898,10 @@ activity.tool_call:
 activity.tool_calls:
   en: tool calls
 
+mode.plan:
+  en: Plan
+mode.plan_description:
+  en: Investigate and propose without changing files
 mode.supervised:
   en: Supervised
 mode.auto_accept_edits:

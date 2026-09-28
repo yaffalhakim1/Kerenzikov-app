@@ -179,6 +179,13 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Hide a task from the task lists without destroying anything, or bring
+    /// it back. This is the recoverable counterpart to [`Self::RemoveSession`]:
+    /// the row, transcript, messages and Git checkpoint refs all survive, so an
+    /// accidental removal can be undone.
+    SetSessionArchived {
+        archived: bool,
+    },
     HydrateSession {
         session_id: Uuid,
     },

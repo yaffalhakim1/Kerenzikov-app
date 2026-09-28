@@ -342,12 +342,9 @@ impl Waku {
         let query = self.skills_search.read(cx).content().trim().to_lowercase();
 
         let Some(catalog) = catalog else {
-            // The startup prefetch makes this a first-frames-only state.
-            return div()
-                .size_full()
-                .pt(px(12.0))
-                .child(skills_status_row(&theme, tr!("skills.scanning")))
-                .into_any_element();
+            // Shaped like the list column this becomes, so the page does not
+            // jump when the scan lands.
+            return skills_skeleton(&theme).into_any_element();
         };
         if catalog.skills.is_empty() {
             return skills_empty_state(&theme).into_any_element();
@@ -1397,6 +1394,58 @@ fn skills_status_row(theme: &Theme, message: String) -> Div {
         .text_size(sp(12.5))
         .text_color(theme.text_tertiary)
         .child(SharedString::from(message))
+}
+
+/// Placeholder for the skills page while its first scan is in flight: the list
+/// column's rows on the left, an empty detail pane on the right.
+fn skills_skeleton(theme: &Theme) -> AnyElement {
+    let mut rows = div().flex().flex_col().gap(px(2.0));
+    for index in 0..7 {
+        // Alternating widths so the column reads as titles, not a barcode.
+        let width = if index % 3 == 1 { 132.0 } else { 168.0 };
+        rows = rows.child(
+            div()
+                .px(px(10.0))
+                .py(px(7.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(skeleton::bar(14.0, 14.0, theme))
+                .child(skeleton::bar(width, 12.0, theme)),
+        );
+    }
+    let list = div()
+        .w(px(240.0))
+        .flex_none()
+        .h_full()
+        .border_r_1()
+        .border_color(theme.border)
+        .child(
+            div()
+                .px(px(10.0))
+                .py(px(8.0))
+                .child(skeleton::bar(120.0, 10.0, theme)),
+        )
+        .child(rows);
+    let detail = div()
+        .flex_1()
+        .min_w_0()
+        .p(px(18.0))
+        .flex()
+        .flex_col()
+        .gap(px(10.0))
+        .child(skeleton::bar(200.0, 16.0, theme))
+        .child(skeleton::bar(320.0, 10.0, theme))
+        .child(skeleton::bar(280.0, 10.0, theme))
+        .child(div().mt(px(8.0)).child(skeleton::block(360.0, 72.0, 8.0, theme)));
+    skeleton::pulse(
+        div()
+            .size_full()
+            .min_h_0()
+            .flex()
+            .child(list)
+            .child(detail),
+    )
 }
 
 fn format_bytes(bytes: u64) -> String {

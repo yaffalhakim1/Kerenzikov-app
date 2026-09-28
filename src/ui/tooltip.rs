@@ -6,21 +6,33 @@
 
 use gpui::{
     AnyView, App, AppContext, IntoElement, ParentElement, Render, SharedString, Styled, Window,
-    div, px,
+    div, prelude::*, px,
 };
 
 use crate::theme::{Theme, sp};
 
-/// A single-line hint.
+/// A single-line hint, optionally naming the shortcut that does the same thing.
 pub struct Tooltip {
     label: SharedString,
+    shortcut: Option<SharedString>,
 }
 
 impl Tooltip {
     pub fn new(label: impl Into<SharedString>) -> Self {
         Self {
             label: label.into(),
+            shortcut: None,
         }
+    }
+
+    /// Names the key binding that triggers the same action.
+    ///
+    /// A tooltip is where someone already asking "what is this" finds out how
+    /// to do it without the mouse; leaving the shortcut only in the command
+    /// palette hides it from the exact person who went looking.
+    pub fn with_shortcut(mut self, shortcut: impl Into<SharedString>) -> Self {
+        self.shortcut = Some(shortcut.into());
+        self
     }
 
     /// Build the view GPUI's `.tooltip(..)` expects.
@@ -35,6 +47,20 @@ impl Tooltip {
     ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
         let label = label.into();
         move |window, cx| Tooltip::new(label.clone()).build(window, cx)
+    }
+
+    /// Shorthand for a hint that also names its shortcut.
+    pub fn text_with_shortcut(
+        label: impl Into<SharedString>,
+        shortcut: impl Into<SharedString>,
+    ) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+        let label = label.into();
+        let shortcut = shortcut.into();
+        move |window, cx| {
+            Tooltip::new(label.clone())
+                .with_shortcut(shortcut.clone())
+                .build(window, cx)
+        }
     }
 }
 
@@ -58,7 +84,20 @@ impl Render for Tooltip {
                 .text_size(sp(12.5))
                 .line_height(sp(15.0))
                 .text_color(theme.text_secondary)
-                .child(self.label.clone()),
+                .child(self.label.clone())
+                .when_some(self.shortcut.clone(), |card, shortcut| {
+                    card.child(
+                        div()
+                            .flex_none()
+                            .px(px(5.0))
+                            .py(px(1.0))
+                            .rounded(px(4.0))
+                            .bg(theme.overlay_strong)
+                            .text_size(sp(11.0))
+                            .text_color(theme.text_tertiary)
+                            .child(shortcut),
+                    )
+                }),
         )
     }
 }

@@ -910,7 +910,7 @@ fn handle_approval_request(
     let Some(approval_id) = payload.get("approvalId").and_then(Value::as_str) else {
         return;
     };
-    if *mode.lock() != RuntimeMode::Ask {
+    if !mode.lock().is_read_only() {
         if let Err(error) = server.respond(
             rpc_id,
             json!({

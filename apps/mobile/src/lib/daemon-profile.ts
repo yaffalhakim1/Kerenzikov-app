@@ -102,6 +102,56 @@ export function isPrivateDaemonAddress(address: string): boolean {
   }
 }
 
+/**
+ * A parsed pairing link: the daemon address and the token it carries.
+ *
+ * The desktop copies a single `waku://<token>@<host>/pair?transport=wss` link
+ * so a phone can onboard from one paste instead of matching an address and a
+ * token by hand — the two-field version is where people paste the wrong one
+ * into the wrong box.
+ */
+export interface DaemonPairing {
+  address: string;
+  token: string;
+}
+
+/** Whether the value looks like a pairing link rather than a bare address. */
+export function isDaemonPairingLink(value: string): boolean {
+  return /^waku:\/\//i.test(value.trim());
+}
+
+/**
+ * Parses a pairing link into an address and token.
+ *
+ * Throws with a user-facing message when the link is malformed, so the caller
+ * can surface the reason instead of silently clearing the form.
+ */
+export function parseDaemonPairingLink(value: string): DaemonPairing {
+  const link = value.trim();
+  if (!isDaemonPairingLink(link)) {
+    throw new Error('A pairing link starts with waku://');
+  }
+  let url: URL;
+  try {
+    url = new URL(link);
+  } catch {
+    throw new Error('This pairing link is not a valid URL');
+  }
+  const token = decodeURIComponent(url.username);
+  if (!token || !url.hostname) {
+    throw new Error('This pairing link is missing its address or token');
+  }
+  // The transport travels explicitly because a LAN daemon and a tunneled one
+  // differ only in scheme, and the host gives no reliable clue which it is.
+  const secure = url.searchParams.get('transport') === 'wss';
+  const scheme = secure ? 'wss' : 'ws';
+  const authority = url.port ? `${url.hostname}:${url.port}` : url.hostname;
+  return {
+    address: normalizeDaemonAddress(`${scheme}://${authority}`),
+    token,
+  };
+}
+
 export function parseDaemonProfiles(value: unknown): DaemonProfile[] {
   if (!Array.isArray(value)) return [];
   const seen = new Set<string>();

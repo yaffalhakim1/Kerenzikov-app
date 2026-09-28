@@ -823,7 +823,7 @@ fn stripped(value: Option<&Value>) -> Option<Value> {
 /// resolved agent's own rules mark `ask`; the mode only decides who answers.
 fn auto_replies(mode: RuntimeMode, action: &str) -> bool {
     match mode {
-        RuntimeMode::Ask => false,
+        RuntimeMode::Plan | RuntimeMode::Ask => false,
         RuntimeMode::AutoAcceptEdits => matches!(action, "edit" | "write" | "patch"),
         RuntimeMode::Auto | RuntimeMode::FullAccess => true,
     }

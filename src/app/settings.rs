@@ -604,6 +604,8 @@ impl Waku {
 
         let copy_url_feedback_id = "daemon-url";
         let url_copied = self.control_was_copied(copy_url_feedback_id);
+        // Built before `websocket_url` is moved into the copy button's closure.
+        let pairing_link = daemon_pairing_link(&websocket_url, &token);
         let copy_url = websocket_url.clone();
         let copy_url_button = div()
             .id("copy-daemon-url")
@@ -736,6 +738,60 @@ impl Waku {
                 {
                     cx.write_to_clipboard(ClipboardItem::new_string(key_token.clone()));
                     this.show_control_copied(copy_token_feedback_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
+        // One string carrying everything a client needs, so onboarding is a
+        // single paste instead of an address and a token copied separately —
+        // the two-step version is where people mismatch the two fields. This is
+        // also exactly the payload a QR code would encode, so the contract
+        // exists before any scanner does.
+        let pairing_feedback_id = "daemon-pairing";
+        let pairing_copied = self.control_was_copied(pairing_feedback_id);
+        let click_pairing = pairing_link.clone();
+        let key_pairing = pairing_link.clone();
+        let copy_pairing_button = div()
+            .id("copy-daemon-pairing")
+            .tab_index(0)
+            .h(px(27.0))
+            .px(px(9.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .tooltip(Tooltip::text(tr!("daemon.pairing_hint")))
+            .child(icon(
+                if pairing_copied {
+                    "icons/check.svg"
+                } else {
+                    "icons/external-link.svg"
+                },
+                11.0,
+                theme.text_tertiary,
+            ))
+            .child(if pairing_copied {
+                tr!("common.copied")
+            } else {
+                tr!("daemon.copy_pairing")
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(click_pairing.clone()));
+                this.show_control_copied(pairing_feedback_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(key_pairing.clone()));
+                    this.show_control_copied(pairing_feedback_id, cx);
                     cx.stop_propagation();
                 }
             }));
@@ -1026,6 +1082,7 @@ impl Waku {
                                 )
                                 .child(reveal_token_button)
                                 .child(copy_token_button)
+                                .child(copy_pairing_button)
                                 .child(regenerate_button),
                         )
                         .child(
@@ -2404,6 +2461,23 @@ fn font_size_label(size: f32) -> String {
     }
 }
 
+/// One string a client can paste to reach this daemon: address plus token.
+///
+/// The token rides in the userinfo position so the whole thing stays a valid
+/// URL, and the transport follows as a `secure` hint rather than being
+/// re-derived from the host — a LAN daemon is `ws://` and a tunneled one is
+/// `wss://`, and the client must not have to guess. Pasting this is how a phone
+/// onboards, and it is the exact payload a QR code would eventually carry.
+pub(super) fn daemon_pairing_link(websocket_url: &str, token: &str) -> String {
+    let trimmed = websocket_url.trim();
+    let secure = trimmed.starts_with("wss://");
+    let address = trimmed
+        .trim_start_matches("wss://")
+        .trim_start_matches("ws://");
+    let transport = if secure { "wss" } else { "ws" };
+    format!("waku://{token}@{address}/pair?transport={transport}")
+}
+
 /// "Checked …" caption for the Providers page. Recomputed whenever the page
 /// redraws; precision beyond the minute is noise here.
 fn detection_checked_label(elapsed: Duration) -> String {
@@ -2500,8 +2574,25 @@ fn permission_status_row(
 
 #[cfg(test)]
 mod tests {
-    use super::abbreviate_home_path;
+    use super::{abbreviate_home_path, daemon_pairing_link};
     use std::path::Path;
+
+    #[test]
+    fn pairing_link_carries_address_token_and_transport() {
+        assert_eq!(
+            daemon_pairing_link("ws://192.168.1.10:34123", "abc123"),
+            "waku://abc123@192.168.1.10:34123/pair?transport=ws"
+        );
+        assert_eq!(
+            daemon_pairing_link("wss://waku.example.test", "tok"),
+            "waku://tok@waku.example.test/pair?transport=wss"
+        );
+        // Whitespace from the settings field must not reach the payload.
+        assert_eq!(
+            daemon_pairing_link("  ws://host:1  ", "t"),
+            "waku://t@host:1/pair?transport=ws"
+        );
+    }
 
     #[test]
     fn provider_paths_abbreviate_only_the_home_prefix() {

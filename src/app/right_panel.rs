@@ -2133,7 +2133,10 @@ impl Waku {
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
             .child(icon("icons/panel-right.svg", 14.0, theme.text_tertiary))
-            .tooltip(|window, cx| Tooltip::new(tr!("right_panel.toggle")).build(window, cx))
+            .tooltip(Tooltip::text_with_shortcut(
+                tr!("right_panel.toggle"),
+                crate::platform::primary_shortcut("⇧⌘B", "Ctrl+Shift+B"),
+            ))
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
             })
@@ -3491,13 +3494,12 @@ impl Waku {
                     )
                     .into_any_element()
             }
-            None if self.right_panel_diff_loading => self
-                .render_right_panel_empty_message(
-                    tr!("diff.loading"),
-                    tr!("diff.loading_description"),
-                    cx,
-                )
-                .into_any_element(),
+            None if self.right_panel_diff_loading => {
+                // A diff is on its way, so show its shape: file headers with
+                // ragged line runs beneath, which is what makes the wait read
+                // as loading rather than as "no changes".
+                Self::diff_skeleton(&Theme::current(cx))
+            }
             None if self.right_panel_diff_error.is_some() => self
                 .render_right_panel_empty_message(
                     tr!("diff.unavailable"),
@@ -4344,6 +4346,37 @@ impl Waku {
                     .text_color(theme.text_tertiary)
                     .child(description),
             )
+    }
+
+    /// Placeholder for a diff whose snapshot has not landed. File headers carry
+    /// a short run of lines at staggered widths, so the panel reads as a review
+    /// being prepared rather than an empty one.
+    fn diff_skeleton(theme: &Theme) -> AnyElement {
+        let line = |width: f32| skeleton::bar(width, 9.0, theme);
+        let mut body = div().flex().flex_col().gap(px(14.0)).pt(px(14.0)).px(px(14.0));
+        let files: [(f32, &[f32]); 2] = [
+            (164.0, &[280.0, 208.0, 240.0]),
+            (132.0, &[188.0, 264.0]),
+        ];
+        for (header_width, lines) in files {
+            let mut file = div()
+                .flex()
+                .flex_col()
+                .gap(px(7.0))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(7.0))
+                        .child(icon("icons/file-diff.svg", 13.0, theme.text_tertiary))
+                        .child(skeleton::bar(header_width, 11.0, theme)),
+                );
+            for &width in lines {
+                file = file.child(line(width));
+            }
+            body = body.child(file);
+        }
+        skeleton::pulse(body)
     }
 
     /// Re-reads whichever workspace surface is on screen.

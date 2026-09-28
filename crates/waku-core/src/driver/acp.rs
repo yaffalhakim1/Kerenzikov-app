@@ -376,7 +376,7 @@ async fn run_sdk_connection(
     let pending_user_inputs: PendingAcpUserInputs = Arc::new(Mutex::new(HashMap::new()));
     let prompt_requests = Arc::new(Mutex::new(PendingPrompts::default()));
     let title_refresh = super::title_refresh::NativeTitleRefresh::default();
-    let auto_approve = mode != RuntimeMode::Ask;
+    let auto_approve = !mode.is_read_only();
 
     Client
         .builder()
@@ -780,7 +780,7 @@ fn desired_access_mode(
             .id
             .clone()
     } else if provider == ProviderKind::Fx {
-        let desired = if mode == RuntimeMode::Ask {
+        let desired = if mode.is_read_only() {
             "ask"
         } else {
             "code"

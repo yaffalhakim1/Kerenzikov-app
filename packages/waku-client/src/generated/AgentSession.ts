@@ -80,4 +80,14 @@ provider_session_id?: string | null,
  * Not stored in the session JSON — these are rows in the `messages`
  * table, reattached when the session is hydrated.
  */
-messages: Array<Message>, transcript_blocks: Array<TranscriptBlock>, turns: Array<AgentTurn>, queued_messages?: Array<QueuedMessage>, };
+messages: Array<Message>, transcript_blocks: Array<TranscriptBlock>, turns: Array<AgentTurn>, queued_messages?: Array<QueuedMessage>,
+/**
+ * When the user archived this task, or `None` while it is active.
+ *
+ * Archiving is the reversible half of removal: the row, its transcript,
+ * its messages and its Git checkpoint refs all stay exactly where they
+ * are, and only the task lists stop showing it. Unarchiving clears the
+ * stamp, which is what makes "Undo" after a removal cheap and lossless.
+ * Permanent deletion is a separate, explicit action.
+ */
+archived_at?: number | null, };

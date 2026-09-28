@@ -89,6 +89,14 @@ impl SidebarGroup {
     }
 }
 
+/// Whether a task title contains the (already lowercased) filter query.
+///
+/// Matches the same title the row shows, so a filter can never hide a row whose
+/// text is right there on screen. An empty query matches everything.
+fn filter_matches_session(session: &AgentSession, filter: &str) -> bool {
+    filter.is_empty() || session.display_title().to_lowercase().contains(filter)
+}
+
 fn sidebar_grouping_label(grouping: SidebarGrouping) -> String {
     match grouping {
         SidebarGrouping::Project => tr!("sidebar.grouping_project"),
@@ -325,6 +333,8 @@ pub(super) enum SidebarRow {
     ShowMore(SidebarGroup),
     /// Spacing between date groups.
     GroupSpacer,
+    /// The filter matched no task; shows a hint instead of an empty list.
+    NoMatches,
 }
 
 fn sidebar_session_row_index(rows: &[SidebarRow], session_id: Uuid) -> Option<usize> {
@@ -339,6 +349,7 @@ fn sidebar_row_height(row: SidebarRow) -> Pixels {
         SidebarRow::Session(_) => SIDEBAR_SESSION_ROW_HEIGHT,
         SidebarRow::ShowMore(_) => SIDEBAR_SHOW_MORE_ROW_HEIGHT,
         SidebarRow::GroupSpacer => SIDEBAR_GROUP_SPACER_HEIGHT,
+        SidebarRow::NoMatches => SIDEBAR_GROUP_HEADER_HEIGHT,
     })
 }
 
@@ -472,6 +483,10 @@ impl Waku {
             .cursor_default()
             .hover(|element| element.bg(theme.overlay))
             .active(|element| element.bg(theme.overlay_strong))
+            .tooltip(Tooltip::text_with_shortcut(
+                tr!("menu.toggle_sidebar"),
+                crate::platform::primary_shortcut("⌘B", "Ctrl+B"),
+            ))
             .child(icon("icons/panel-left.svg", 14.0, theme.text_tertiary))
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                 cx.stop_propagation();
@@ -578,6 +593,7 @@ impl Waku {
         let weak = cx.entity().downgrade();
         let grouping = self.state.sidebar_grouping;
         let ordering = self.state.sidebar_ordering;
+        let show_archived = self.show_archived_sessions;
         let options = dropdown_menu(
             div()
                 .id("sidebar-options")
@@ -600,7 +616,15 @@ impl Waku {
             move |_| {
                 let grouping_weak = weak.clone();
                 let ordering_weak = weak.clone();
+                let archived_weak = weak.clone();
                 vec![
+                    MenuItem::new(tr!("sidebar.show_archived"), move |_, cx| {
+                        let _ = archived_weak.update(cx, |this, cx| {
+                            this.toggle_archived_sessions(cx);
+                        });
+                    })
+                    .selected(show_archived),
+                    MenuItem::Separator,
                     MenuItem::submenu_with_value(
                         tr!("sidebar.grouping"),
                         sidebar_grouping_label(grouping),
@@ -1028,7 +1052,7 @@ impl Waku {
             .panel_resize_drag
             .is_some_and(|drag| drag.target == PanelResizeTarget::Sidebar);
 
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time(), cx);
         self.sync_sidebar_rows(&rows);
         // Restored selection exists before ListState knows the viewport size.
         // Retry after the first layout so nearest-edge alignment has a height.
@@ -1046,7 +1070,7 @@ impl Waku {
                         .map(|pending| pending.session_id)
                         .or(this.state.selected_session);
                     if selected_session == Some(session_id) {
-                        this.reveal_sidebar_session(session_id);
+                        this.reveal_sidebar_session(session_id, cx);
                         cx.notify();
                     }
                 });
@@ -1073,6 +1097,17 @@ impl Waku {
                     .flex_none()
                     .px(px(10.0))
                     .child(self.render_sidebar_new_session(cx)),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .px(px(10.0))
+                    .pt(px(6.0))
+                    .child(
+                        TextField::new("sidebar-filter", self.sidebar_search.clone())
+                            .icon("icons/search.svg", 12.0)
+                            .w_full(),
+                    ),
             )
             .child(
                 div()
@@ -1119,8 +1154,8 @@ impl Waku {
 
     /// Keep a newly selected task visible without disturbing the sidebar when
     /// its row is already fully inside the viewport.
-    pub(super) fn reveal_sidebar_session(&self, session_id: Uuid) {
-        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time());
+    pub(super) fn reveal_sidebar_session(&self, session_id: Uuid, cx: &App) {
+        let rows = self.sidebar_rows_cached(Local::now().date_naive(), unix_time(), cx);
         self.sync_sidebar_rows(&rows);
         if let Some(index) = sidebar_session_row_index(&rows, session_id) {
             reveal_sidebar_list_row(&self.sidebar_list_state, &rows, index);
@@ -1137,8 +1172,12 @@ impl Waku {
     /// [`Self::sidebar_rows`] reads: started sessions with their project and
     /// recency, the presentation preferences, the collapsed-group set, and
     /// today's date and the moving project-recency boundary.
-    fn sidebar_rows_cached(&self, today: NaiveDate, now: u64) -> Rc<Vec<SidebarRow>> {
+    fn sidebar_rows_cached(&self, today: NaiveDate, now: u64, cx: &App) -> Rc<Vec<SidebarRow>> {
+        let filter = self.sidebar_filter_query(cx);
         let mut fingerprint = mix(0x51de_ba5e_5eed_c0de, today.num_days_from_ce() as u64);
+        // The query decides which rows exist, so it belongs in the snapshot
+        // identity alongside the grouping and ordering.
+        fingerprint = fingerprint_str(fingerprint, &filter);
         fingerprint = mix(
             fingerprint,
             match self.state.sidebar_grouping {
@@ -1153,12 +1192,18 @@ impl Waku {
                 SidebarOrdering::Oldest => 2,
             },
         );
+        // The archived filter changes which rows exist, so it must be part of
+        // the snapshot identity or a toggle would show stale rows.
+        fingerprint = mix(fingerprint, u64::from(self.show_archived_sessions));
         for session in &self.state.sessions {
             if !session.has_started() {
                 continue;
             }
             fingerprint = mix_uuid(fingerprint, session.id);
             fingerprint = mix_uuid(fingerprint, session.project_id);
+            if session.is_archived() {
+                fingerprint = mix(fingerprint, 0xa2c1_1ced);
+            }
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             if self.state.sidebar_grouping == SidebarGrouping::Project {
                 fingerprint = mix(
@@ -1198,20 +1243,30 @@ impl Waku {
             collapsed,
         );
         if self.sidebar_rows_fingerprint.get() != Some(fingerprint) {
-            *self.sidebar_rows_snapshot.borrow_mut() = Rc::new(self.sidebar_rows(today, now));
+            *self.sidebar_rows_snapshot.borrow_mut() =
+                Rc::new(self.sidebar_rows(today, now, &filter));
             self.sidebar_rows_fingerprint.set(Some(fingerprint));
         }
         self.sidebar_rows_snapshot.borrow().clone()
     }
 
+    /// The sidebar's filter query, normalized for matching.
+    fn sidebar_filter_query(&self, cx: &App) -> String {
+        self.sidebar_search.read(cx).content().trim().to_lowercase()
+    }
+
     /// Snapshot the session history as a flat list of lightweight rows under
     /// the current grouping and ordering preferences.
-    fn sidebar_rows(&self, today: NaiveDate, now: u64) -> Vec<SidebarRow> {
+    fn sidebar_rows(&self, today: NaiveDate, now: u64, filter: &str) -> Vec<SidebarRow> {
         let mut sorted_sessions = self
             .state
             .sessions
             .iter()
             .filter(|session| session.has_started())
+            // Archived tasks are hidden by default; the toggle shows them so a
+            // restored task is reachable without a round trip through a menu.
+            .filter(|session| self.show_archived_sessions || !session.is_archived())
+            .filter(|session| filter_matches_session(session, filter))
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
@@ -1279,6 +1334,13 @@ impl Waku {
                 }
             }
         }
+        // An active filter that matched nothing is not an empty history, and
+        // saying so is the difference between "no tasks" and "no tasks called
+        // that" — the second is the one the user can act on.
+        if rows.len() == 1 && !filter.is_empty() {
+            rows.push(SidebarRow::NoMatches);
+            return rows;
+        }
         if rows.len() == 1 {
             // Keep the header actions visible while there is no history.
             let group = match self.state.sidebar_grouping {
@@ -1341,6 +1403,7 @@ impl Waku {
     }
 
     fn sidebar_row(&self, index: usize, rows: &[SidebarRow], cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
         let Some(row) = rows.get(index) else {
             return div().into_any_element();
         };
@@ -1362,6 +1425,16 @@ impl Waku {
             SidebarRow::GroupSpacer => div()
                 .w_full()
                 .h(px(SIDEBAR_GROUP_SPACER_HEIGHT))
+                .into_any_element(),
+            SidebarRow::NoMatches => div()
+                .w_full()
+                .h(px(SIDEBAR_GROUP_HEADER_HEIGHT))
+                .px(px(8.0))
+                .flex()
+                .items_center()
+                .text_size(sp(12.5))
+                .text_color(theme.text_tertiary)
+                .child(tr_cow!("sidebar.no_matching_tasks"))
                 .into_any_element(),
         }
     }
@@ -1631,7 +1704,7 @@ impl Waku {
 
     pub(super) fn collapse_all_sidebar_groups(&mut self, cx: &mut Context<Self>) {
         let groups = self
-            .sidebar_rows_cached(Local::now().date_naive(), unix_time())
+            .sidebar_rows_cached(Local::now().date_naive(), unix_time(), cx)
             .iter()
             .filter_map(|row| match row {
                 SidebarRow::Header(group) => Some(*group),
@@ -1695,6 +1768,21 @@ impl Waku {
             offset_in_item: Pixels::ZERO,
         });
         self.save();
+        cx.notify();
+    }
+
+    /// Reveals or hides archived tasks in the sidebar.
+    ///
+    /// Runtime-only: the working set is what a launch should open on, and a
+    /// stale "show archived" left on from a previous session would quietly
+    /// reintroduce the clutter archiving exists to remove.
+    fn toggle_archived_sessions(&mut self, cx: &mut Context<Self>) {
+        self.show_archived_sessions = !self.show_archived_sessions;
+        self.sidebar_rows_fingerprint.set(None);
+        self.sidebar_list_state.scroll_to(ListOffset {
+            item_ix: 0,
+            offset_in_item: Pixels::ZERO,
+        });
         cx.notify();
     }
 
@@ -1782,6 +1870,7 @@ impl Waku {
             SessionStatus::Connecting | SessionStatus::Working
         );
         let grouped_by_project = self.state.sidebar_grouping == SidebarGrouping::Project;
+        let archived = session.is_archived();
         let left_padding = if grouped_by_project {
             SIDEBAR_GROUP_CHILD_PADDING
         } else {
@@ -1938,19 +2027,33 @@ impl Waku {
                 &menu,
                 move |_| {
                     let rename_waku = waku.clone();
-                    let remove_waku = waku.clone();
-                    vec![
+                    let archive_waku = waku.clone();
+                    let mut items = vec![
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_waku.update(cx, |waku, cx| {
                                 waku.begin_session_rename(session_id, window, cx);
                             });
                         }),
                         MenuItem::Separator,
-                        MenuItem::new(tr!("common.remove"), move |_, cx| {
-                            let _ = remove_waku
-                                .update(cx, |waku, cx| waku.remove_session(session_id, cx));
-                        }),
-                    ]
+                    ];
+                    // Archiving is the default removal because it is the only
+                    // reversible one. A permanently destructive action is not
+                    // offered from the common row menu at all — it lives in the
+                    // archive view, where the user has already chosen to look at
+                    // what they are about to destroy.
+                    if archived {
+                        let unarchive_waku = waku.clone();
+                        items.push(MenuItem::new(tr!("session.unarchive"), move |_, cx| {
+                            let _ = unarchive_waku
+                                .update(cx, |waku, cx| waku.unarchive_session(session_id, cx));
+                        }));
+                    } else {
+                        items.push(MenuItem::new(tr!("session.archive"), move |_, cx| {
+                            let _ = archive_waku
+                                .update(cx, |waku, cx| waku.archive_session(session_id, cx));
+                        }));
+                    }
+                    items
                 },
             )
         };
@@ -2124,8 +2227,14 @@ impl Waku {
 
     // ── Empty states ───────────────────────────────────────────────────────
 
-    pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> Div {
+    pub(super) fn render_empty_state(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
+        // Nothing installed is a different problem from nothing opened, and it
+        // has to be answered first: until an agent CLI exists, "open a project"
+        // leads straight to a failed `Start`.
+        if let Some(setup) = crate::app::onboarding::render_provider_setup(&self.probes, &theme, cx) {
+            return setup;
+        }
         if self.selected_project().is_none() {
             return div()
                 .flex_1()
@@ -2220,7 +2329,8 @@ impl Waku {
                                     }
                                 })),
                         ),
-                );
+                )
+                .into_any_element();
         }
         let selected_project_id = self.state.selected_project;
         let projectless_selected = self.selected_project().is_some_and(Project::is_projectless);
@@ -2324,6 +2434,7 @@ impl Waku {
                             .child(tr_cow!("onboarding.question_mark"))
                     }),
             )
+            .into_any_element()
     }
 }
 
