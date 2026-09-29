@@ -87,6 +87,7 @@ settings.computer_use_keywords: 电脑操作 屏幕录制 辅助功能 应用 �
 settings.back: 返回
 settings.search: 搜索设置
 daemon.expose_title: 暴露由 Kerenzikov 管理的守护进程
+daemon.reconnecting: 与守护进程不同步 — 正在重连
 daemon.expose_description: 允许本机之外的 Kerenzikov 客户端连接。更改此项只会重启守护进程。
 daemon.status_local: 仅本机
 daemon.status_exposed: 已暴露
@@ -106,6 +107,8 @@ daemon.credentials_description: 在 Kerenzikov Web 中输入这些信息。此�
 daemon.websocket_url: WebSocket 地址
 daemon.token: 令牌
 daemon.reveal_token: 显示令牌
+daemon.copy_pairing: 复制配对链接
+daemon.pairing_hint: 将此链接粘贴到移动客户端即可配对
 daemon.hide_token: 隐藏令牌
 daemon.regenerate_token: 重新生成
 daemon.security_warning: 此令牌可完全访问本机上的任务、文件、Git、附件和编程智能体。在私有网络之外请通过受信任的 TLS 代理使用 WSS。
@@ -182,6 +185,11 @@ settings.local_by_default_web_description: 项目、对话和附件保留在所�
 settings.automatic_updates: 自动更新
 settings.automatic_updates_description: 在后台检查新版本，并在发现更新时提示安装
 providers.coding_agents: 编程智能体
+providers.refresh: 刷新提供方
+providers.install: 安装
+onboarding.install_agent: 安装编程智能体
+onboarding.install_agent_description: Kerenzikov 驱动本机上的智能体 CLI。请安装其中任意一个并登录，然后刷新。之后即可添加项目文件夹。
+onboarding.install_agent_footer: 已安装？刷新即可检测。
 providers.description: Kerenzikov 调用安装在这台电脑上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新
 providers.web_description: Kerenzikov 调用安装在守护进程主机上的智能体命令行工具。请先安装相应工具或完成登录，然后刷新
 providers.check_failed: "无法检查 %{command}：%{error}"
@@ -224,9 +232,16 @@ common.settings: 设置
 common.copy: 复制
 common.remove: 移除
 common.rename: 重命名
+common.undo: 撤销
+session.archive: 归档
+session.unarchive: 取消归档
+session.archived_toast: "已归档“%{title}”"
+sidebar.show_archived: 显示已归档
 session.new_task: 新任务
 sidebar.today: 今天
 sidebar.search: 搜索
+sidebar.filter_placeholder: 筛选任务
+sidebar.no_matching_tasks: 没有匹配的任务
 sidebar.options: 侧边栏选项
 sidebar.grouping: 分组
 sidebar.grouping_project: 项目
@@ -275,6 +290,7 @@ common.copied: 已复制
 common.copy_message: 复制消息
 common.copy_message_title: 复制消息
 common.copy_selection: 复制所选内容
+common.add_selection_to_composer: 将所选内容添加到输入框
 common.copy_to_composer: 复制到输入框
 common.copy_code: 复制代码
 common.cancel: 取消
@@ -402,6 +418,8 @@ activity.plan_step: 计划步骤
 activity.plan_steps: 计划步骤
 activity.tool_call: 工具调用
 activity.tool_calls: 工具调用
+mode.plan: 计划
+mode.plan_description: 先调研并给出方案，不修改文件
 mode.supervised: 监督
 mode.auto_accept_edits: 自动接受修改
 mode.auto: 自动

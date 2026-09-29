@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test';
 
 import {
   displayHost,
+  isDaemonPairingLink,
   isPrivateDaemonAddress,
   normalizeDaemonAddress,
   normalizeDaemonProfile,
+  parseDaemonPairingLink,
   parseDaemonProfiles,
   profileInitials,
 } from './daemon-profile';
@@ -52,6 +54,27 @@ describe('daemon profiles', () => {
   test('creates compact initials', () => {
     expect(profileInitials('Home Mac')).toBe('HM');
     expect(profileInitials('studio')).toBe('ST');
+  });
+
+  test('splits a pairing link into address and token', () => {
+    // The exact shape the desktop's `daemon_pairing_link` writes: the token in
+    // the userinfo position and the transport as an explicit hint.
+    expect(parseDaemonPairingLink('waku://abc123@192.168.1.10:34123/pair?transport=ws'))
+      .toEqual({ address: 'ws://192.168.1.10:34123', token: 'abc123' });
+    expect(parseDaemonPairingLink('waku://tok@waku.example.test/pair?transport=wss'))
+      .toEqual({ address: 'wss://waku.example.test', token: 'tok' });
+  });
+
+  test('only a waku:// value counts as a pairing link', () => {
+    expect(isDaemonPairingLink('waku://t@host:1/pair')).toBe(true);
+    expect(isDaemonPairingLink('  waku://t@host:1/pair')).toBe(true);
+    expect(isDaemonPairingLink('ws://host:1')).toBe(false);
+    expect(isDaemonPairingLink('192.168.1.10:34123')).toBe(false);
+  });
+
+  test('rejects a malformed pairing link with a readable reason', () => {
+    expect(() => parseDaemonPairingLink('ws://host:1')).toThrow('waku://');
+    expect(() => parseDaemonPairingLink('waku://host:1/pair')).toThrow('missing');
   });
 
   test('recovers valid profiles from a partially corrupt registry', () => {

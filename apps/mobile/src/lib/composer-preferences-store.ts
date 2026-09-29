@@ -116,6 +116,6 @@ export async function saveNewTaskExtras(
 }
 
 function isRuntimeMode(value: unknown): value is RuntimeMode {
-  return value === 'ask' || value === 'autoAcceptEdits' ||
+  return value === 'plan' || value === 'ask' || value === 'autoAcceptEdits' ||
     value === 'auto' || value === 'fullAccess';
 }

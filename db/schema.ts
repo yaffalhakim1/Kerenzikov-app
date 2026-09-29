@@ -42,11 +42,21 @@ export const sessions = sqliteTable(
     updatedAt: integer("updated_at").notNull(),
     /** Completion of the most recent assistant turn, unix seconds. */
     lastReplyAt: integer("last_reply_at"),
+    /**
+     * When the user archived this task, unix seconds; NULL while active.
+     *
+     * Archiving only hides the task from the lists — the row, its transcript
+     * and its Git refs all survive, so it is a promoted column rather than a
+     * JSON-only field: the sidebar filters on it while listing, and that scan
+     * must never deserialize a transcript.
+     */
+    archivedAt: integer("archived_at"),
   },
   (table) => [
     index("sessions_by_project").on(table.projectId, table.updatedAt),
     index("sessions_by_updated_at").on(table.updatedAt),
     index("sessions_by_last_reply_at").on(table.lastReplyAt),
+    index("sessions_by_archived_at").on(table.archivedAt),
   ],
 );
 

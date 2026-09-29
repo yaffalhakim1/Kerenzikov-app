@@ -1148,7 +1148,7 @@ impl StateStore {
         let mut sessions = connection
             .prepare(
                 "SELECT id, project_id, title, auto_title, provider, model, status,
-                        created_at, updated_at, last_reply_at
+                        created_at, updated_at, last_reply_at, archived_at
                  FROM sessions ORDER BY updated_at",
             )
             .map_err(to_io_error)?;
@@ -1166,6 +1166,7 @@ impl StateStore {
                     row.get::<_, i64>(7)?,
                     row.get::<_, i64>(8)?,
                     row.get::<_, Option<i64>>(9)?,
+                    row.get::<_, Option<i64>>(10)?,
                 ))
             })
             .map_err(to_io_error)?
@@ -1511,6 +1512,7 @@ type SessionColumns = (
     i64,
     i64,
     Option<i64>,
+    Option<i64>,
 );
 
 /// Builds a list-only session from its columns. `messages`,
@@ -1530,6 +1532,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         created_at,
         updated_at,
         last_reply_at,
+        archived_at,
     ) = row;
     Some(AgentSession {
         id: Uuid::parse_str(&id).ok()?,
@@ -1549,6 +1552,7 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         created_at: created_at as u64,
         updated_at: updated_at as u64,
         last_reply_at: last_reply_at.map(|at| at as u64),
+        archived_at: archived_at.map(|at| at as u64),
         provider_cursor: None,
         available_commands: Vec::new(),
         thread_goal: None,
@@ -1758,8 +1762,8 @@ fn message_fingerprint(message: &Message, position: usize) -> u64 {
 /// listing sessions never has to deserialize a transcript.
 const UPSERT_SESSION: &str = "INSERT INTO sessions(
          id, project_id, title, auto_title, provider, model, status,
-         created_at, updated_at, last_reply_at
-     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         created_at, updated_at, last_reply_at, archived_at
+     ) VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
      ON CONFLICT(id) DO UPDATE SET
          project_id    = excluded.project_id,
          title         = excluded.title,
@@ -1769,7 +1773,8 @@ const UPSERT_SESSION: &str = "INSERT INTO sessions(
          status        = excluded.status,
          created_at    = excluded.created_at,
          updated_at    = excluded.updated_at,
-         last_reply_at = excluded.last_reply_at";
+         last_reply_at = excluded.last_reply_at,
+         archived_at   = excluded.archived_at";
 
 const INSERT_PROJECT: &str = "INSERT INTO projects(id, name, path, position, created_at)
      VALUES(?1, ?2, ?3, ?4, ?5)
@@ -1807,6 +1812,9 @@ fn session_params(session: &AgentSession) -> Vec<rusqlite::types::Value> {
         Value::Integer(session.updated_at as i64),
         session
             .last_reply_at
+            .map_or(Value::Null, |at| Value::Integer(at as i64)),
+        session
+            .archived_at
             .map_or(Value::Null, |at| Value::Integer(at as i64)),
     ]
 }
@@ -3514,6 +3522,58 @@ mod tests {
             .expect("draft exists");
         assert!(!session.has_started());
         assert_eq!(session.project_id, relaunched.selected_project.unwrap());
+        fs::remove_dir_all(directory).ok();
+    }
+
+    /// Archiving must survive a reload with its transcript intact, since the
+    /// whole point of it over `RemoveSession` is that nothing is lost.
+    #[test]
+    fn archived_sessions_keep_their_row_and_flag() {
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("Archive me");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        let session_id = state.sessions[0].id;
+        store.save(&mut state).unwrap();
+
+        assert!(state.sessions[0].set_archived(true));
+        state.mark_session_dirty(session_id);
+        store.save(&mut state).unwrap();
+
+        let restored = store_in(&directory).load().unwrap();
+        let archived = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .expect("an archived task must keep its row");
+        assert!(archived.is_archived());
+
+        // The transcript is still there, which is what makes the undo lossless.
+        let mut restored = restored;
+        store_in(&directory)
+            .hydrate(
+                restored
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                    .unwrap(),
+            )
+            .unwrap();
+        let hydrated = restored
+            .sessions
+            .iter()
+            .find(|session| session.id == session_id)
+            .unwrap();
+        assert!(!hydrated.messages.is_empty());
+
+        // Unarchiving clears the stamp and keeps the task.
+        let store = store_in(&directory);
+        assert!(restored.sessions[0].set_archived(false));
+        store.save(&mut restored).unwrap();
+        let final_state = store_in(&directory).load().unwrap();
+        assert_eq!(final_state.sessions.len(), 1);
+        assert!(!final_state.sessions[0].is_archived());
         fs::remove_dir_all(directory).ok();
     }
 

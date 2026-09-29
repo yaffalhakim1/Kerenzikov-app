@@ -803,6 +803,52 @@ pub(super) fn render_message(params: MessageRender, cx: &mut App) -> AnyElement 
     )
 }
 
+/// Appends quoted text to the composer without discarding what is already
+/// there.
+///
+/// The composer is a draft the user may have spent a while on, so a menu
+/// action that means "include this" must never be a `set_content` that
+/// silently replaces it. The selection goes in as a fenced quote so the agent
+/// reads it as quoted context rather than as the user's own instruction.
+fn append_to_composer(
+    composer: &Entity<ComposerInput>,
+    window: &mut Window,
+    cx: &mut App,
+    selection: &str,
+) {
+    let quote = selection.trim();
+    if quote.is_empty() {
+        return;
+    }
+    // A fence longer than any run already inside the quote, so nested backticks
+    // cannot close the block early.
+    let fence = "`".repeat(longest_backtick_run(quote).max(2) + 1);
+    composer.update(cx, |composer, cx| {
+        let existing = composer.content(cx).to_owned();
+        let mut next = existing.trim_end().to_owned();
+        if !next.is_empty() {
+            next.push_str("\n\n");
+        }
+        next.push_str(&fence);
+        next.push('\n');
+        next.push_str(quote);
+        next.push('\n');
+        next.push_str(&fence);
+        next.push('\n');
+        composer.set_content(next, cx);
+    });
+    let focus_handle = composer.read(cx).focus();
+    window.focus(&focus_handle, cx);
+}
+
+/// Length of the longest consecutive run of backticks in `text`.
+fn longest_backtick_run(text: &str) -> usize {
+    text.split(|character| character != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or(0)
+}
+
 /// The message row's context menu. Rebuilt on each open, so availability checks
 /// here always reflect the current session state.
 #[allow(clippy::too_many_arguments)]
@@ -819,9 +865,20 @@ fn message_menu_items(
     let mut items = Vec::new();
 
     if let Some(selected) = selection.selection.borrow().selected_text() {
+        let copy_selected = selected.clone();
+        // Copy is where a selection already leads; quoting it into the prompt
+        // is the next thing anyone doing that actually wants, so it sits right
+        // beside the copy rather than behind a separate affordance.
+        let insert_composer = composer.clone();
         items.push(MenuItem::new(tr!("common.copy_selection"), move |_, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string(selected.clone()));
+            cx.write_to_clipboard(ClipboardItem::new_string(copy_selected.clone()));
         }));
+        items.push(MenuItem::new(
+            tr!("common.add_selection_to_composer"),
+            move |window, cx| {
+                append_to_composer(&insert_composer, window, cx, &selected);
+            },
+        ));
     }
 
     let copy_content = content.to_owned();

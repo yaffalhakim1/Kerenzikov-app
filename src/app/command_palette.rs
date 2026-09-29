@@ -310,6 +310,50 @@ fn should_show_command_palette_empty_state(result_count: usize, search_pending: 
     result_count == 0 && !search_pending
 }
 
+/// Placeholder rows for a resume list that is still being read from the
+/// provider. Shaped and sized like real rows so the palette does not resize
+/// when they arrive, with the chosen provider's mark kept at the top so the
+/// scan is attributed rather than anonymous.
+fn resume_sessions_skeleton(theme: &Theme, provider: ProviderKind) -> AnyElement {
+    // The provider mark is the one piece of real information available while
+    // the scan runs, so it is painted rather than greyed out: it says which
+    // CLI is being read instead of leaving an anonymous shimmer.
+    let mut rows = div()
+        .flex()
+        .flex_col()
+        .gap(px(2.0))
+        .pt(px(PROVIDER_SECTION_TOP_MARGIN));
+    for index in 0..5 {
+        // Staggered widths read as distinct titles rather than a filled block.
+        let title_width = [212.0, 168.0, 236.0, 148.0, 196.0][index];
+        let mark: AnyElement = if index == 0 {
+            provider_mark(theme, provider, 16.0, provider_color(theme, provider)).into_any_element()
+        } else {
+            skeleton::bar(16.0, 16.0, theme).into_any_element()
+        };
+        rows = rows.child(
+            div()
+                .h(px(RESULT_ROW_HEIGHT))
+                .px(px(11.0))
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .child(mark)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(5.0))
+                        .child(skeleton::bar(title_width, 11.0, theme))
+                        .child(skeleton::bar(title_width * 0.55, 9.0, theme)),
+                ),
+        );
+    }
+    skeleton::pulse(rows).into()
+}
+
 fn should_keep_previous_command_palette_results(
     next_result_count: usize,
     search_pending: bool,
@@ -1718,7 +1762,13 @@ impl Waku {
             .px(px(8.0))
             .pb(px(8.0));
 
-        if show_placeholder_state {
+        if show_loading_state {
+            // A resume list is on its way, so show the rows it will fill rather
+            // than a spinner: the shape is the answer, and it stops the palette
+            // from resizing when the sessions land.
+            let provider = self.command_palette.resume_provider;
+            results = results.child(resume_sessions_skeleton(&theme, provider));
+        } else if show_placeholder_state {
             let error = resume_view
                 .then(|| self.command_palette.provider_session_error.clone())
                 .flatten();

@@ -354,8 +354,12 @@ impl ProviderResumeCursor {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum RuntimeMode {
-    /// Older state files used `plan` as a combined read-only mode. Keep those
-    /// sessions readable without retaining it as a product mode.
+    /// Plan first: investigate and propose, do not touch the workspace. It has
+    /// the same workspace-read-only transport as [`Self::Ask`], but it is a
+    /// distinct product mode because the user is asking for a proposal they
+    /// will then approve, not for a per-edit prompt.
+    Plan,
+    /// Ask before every change.
     Ask,
     AutoAcceptEdits,
     Auto,
@@ -369,28 +373,40 @@ impl<'de> Deserialize<'de> for RuntimeMode {
         D: serde::Deserializer<'de>,
     {
         match String::deserialize(deserializer)?.as_str() {
-            "plan" | "ask" => Ok(Self::Ask),
+            "plan" => Ok(Self::Plan),
+            "ask" => Ok(Self::Ask),
             "autoAcceptEdits" => Ok(Self::AutoAcceptEdits),
             "auto" => Ok(Self::Auto),
             "fullAccess" => Ok(Self::FullAccess),
             other => Err(<D::Error as serde::de::Error>::unknown_variant(
                 other,
-                &["ask", "autoAcceptEdits", "auto", "fullAccess"],
+                &["plan", "ask", "autoAcceptEdits", "auto", "fullAccess"],
             )),
         }
     }
 }
 
 impl RuntimeMode {
-    pub const ACCESS_OPTIONS: [Self; 4] = [
+    pub const ACCESS_OPTIONS: [Self; 5] = [
+        Self::Plan,
         Self::Ask,
         Self::AutoAcceptEdits,
         Self::Auto,
         Self::FullAccess,
     ];
 
+    /// Whether the mode may modify the workspace at all.
+    ///
+    /// The transports that only distinguish "may write" from "may not" treat
+    /// Plan and Ask the same, which is why this exists rather than duplicating
+    /// the pairing across every driver.
+    pub fn is_read_only(self) -> bool {
+        matches!(self, Self::Plan | Self::Ask)
+    }
+
     pub fn label(self) -> String {
         match self {
+            Self::Plan => tr!("mode.plan"),
             Self::Ask => tr!("mode.supervised"),
             Self::AutoAcceptEdits => tr!("mode.auto_accept_edits"),
             Self::Auto => tr!("mode.auto"),
@@ -400,6 +416,7 @@ impl RuntimeMode {
 
     pub fn description(self) -> String {
         match self {
+            Self::Plan => tr!("mode.plan_description"),
             Self::Ask => tr!("mode.supervised_description"),
             Self::AutoAcceptEdits => tr!("mode.auto_accept_edits_description"),
             Self::Auto => tr!("mode.auto_description"),
@@ -409,6 +426,7 @@ impl RuntimeMode {
 
     pub fn icon(self) -> &'static str {
         match self {
+            Self::Plan => "icons/list.svg",
             Self::Ask => "icons/lock.svg",
             Self::AutoAcceptEdits => "icons/pencil.svg",
             Self::Auto => "icons/sparkle.svg",
@@ -1102,6 +1120,15 @@ pub struct AgentSession {
     pub turns: Vec<AgentTurn>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_messages: Vec<QueuedMessage>,
+    /// When the user archived this task, or `None` while it is active.
+    ///
+    /// Archiving is the reversible half of removal: the row, its transcript,
+    /// its messages and its Git checkpoint refs all stay exactly where they
+    /// are, and only the task lists stop showing it. Unarchiving clears the
+    /// stamp, which is what makes "Undo" after a removal cheap and lossless.
+    /// Permanent deletion is a separate, explicit action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<u64>,
     /// Whether the transcript has been read from the database.
     ///
     /// Startup loads only the columns the session list needs, so a session
@@ -1140,6 +1167,7 @@ impl AgentSession {
             created_at: now,
             updated_at: now,
             last_reply_at: None,
+            archived_at: None,
             detail_loaded: true,
             provider_cursor: None,
             available_commands: Vec::new(),
@@ -1178,6 +1206,7 @@ impl AgentSession {
             created_at: self.created_at,
             updated_at: self.updated_at,
             last_reply_at: self.last_reply_at,
+            archived_at: self.archived_at,
             provider_cursor: None,
             available_commands: Vec::new(),
             thread_goal: None,
@@ -1306,6 +1335,30 @@ impl AgentSession {
         self.title = title.to_owned();
         self.updated_at = unix_time();
         true
+    }
+
+    /// Whether this task is archived and therefore hidden from the task lists.
+    pub fn is_archived(&self) -> bool {
+        self.archived_at.is_some()
+    }
+
+    /// Archives or unarchives the task, returning whether anything changed.
+    ///
+    /// `updated_at` deliberately does not move: archiving is a list-visibility
+    /// change, not conversation activity, and stamping it would resort the task
+    /// to the top of the very list it just left.
+    pub fn set_archived(&mut self, archived: bool) -> bool {
+        match (archived, self.archived_at) {
+            (true, None) => {
+                self.archived_at = Some(unix_time());
+                true
+            }
+            (false, Some(_)) => {
+                self.archived_at = None;
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn set_title_from_prompt(&mut self, prompt: &str) {
@@ -3638,12 +3691,25 @@ pub fn compact_path(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    /// `plan` was a legacy alias for the read-only `ask` mode and is now a
+    /// first-class mode, so the old spelling must round-trip as itself rather
+    /// than collapsing into `Ask`.
     #[test]
-    fn legacy_plan_access_mode_loads_as_supervised() {
+    fn plan_access_mode_round_trips_distinctly() {
         let mode: RuntimeMode = serde_json::from_str(r#""plan""#).unwrap();
 
-        assert_eq!(mode, RuntimeMode::Ask);
-        assert_eq!(serde_json::to_string(&mode).unwrap(), r#""ask""#);
+        assert_eq!(mode, RuntimeMode::Plan);
+        assert_eq!(serde_json::to_string(&mode).unwrap(), r#""plan""#);
+        assert!(mode.is_read_only());
+    }
+
+    #[test]
+    fn read_only_modes_are_plan_and_supervised() {
+        assert!(RuntimeMode::Plan.is_read_only());
+        assert!(RuntimeMode::Ask.is_read_only());
+        assert!(!RuntimeMode::AutoAcceptEdits.is_read_only());
+        assert!(!RuntimeMode::Auto.is_read_only());
+        assert!(!RuntimeMode::FullAccess.is_read_only());
     }
 
     #[test]

@@ -91,6 +91,7 @@ settings.computer_use_keywords: コンピュータ 操作 画面収録 アクセ
 settings.back: 戻る
 settings.search: 設定を検索
 daemon.expose_title: 管理対象デーモンを公開
+daemon.reconnecting: デーモンと同期していません — 再接続中
 daemon.expose_description: このマシン以外の Kerenzikov クライアントから接続できるようにします。変更時はデーモンだけが再起動します。
 daemon.status_local: このマシンのみ
 daemon.status_exposed: 公開中
@@ -110,6 +111,8 @@ daemon.credentials_description: Kerenzikov Web に入力してください。URL
 daemon.websocket_url: WebSocket URL
 daemon.token: トークン
 daemon.reveal_token: トークンを表示
+daemon.copy_pairing: ペアリングリンクをコピー
+daemon.pairing_hint: このリンクをモバイルクライアントに貼り付けてペアリングします
 daemon.hide_token: トークンを隠す
 daemon.regenerate_token: 再生成
 daemon.security_warning: このトークンは、このマシン上のタスク、ファイル、Git、添付ファイル、コーディングエージェントへの完全なアクセス権を持ちます。プライベートネットワーク外では信頼できる TLS プロキシ経由で WSS を使用してください。
@@ -190,6 +193,11 @@ settings.automatic_updates: 自動アップデート
 settings.automatic_updates_description: バックグラウンドで新しいバージョンを確認し、インストールを案内します
 
 providers.coding_agents: コーディングエージェント
+providers.refresh: プロバイダーを更新
+providers.install: インストール
+onboarding.install_agent: コーディングエージェントをインストール
+onboarding.install_agent_description: Kerenzikov はこのコンピューター上のエージェント CLI を操作します。いずれかをインストールしてサインインし、更新してください。次にプロジェクトフォルダーを追加できます。
+onboarding.install_agent_footer: すでにインストール済みですか？更新して検出してください。
 providers.description: Kerenzikov はこのコンピュータにインストールされたエージェントの CLI を使用します。各エージェントの CLI をインストールするかログインしてから、更新してください
 providers.web_description: Kerenzikov はデーモンホストにインストールされたエージェント CLI を使用します。各エージェントの CLI をインストールするかログインしてから、更新してください
 providers.check_failed: "%{command} を確認できませんでした：%{error}"
@@ -234,11 +242,18 @@ common.settings: 設定
 common.copy: コピー
 common.remove: 削除
 common.rename: 名前を変更
+common.undo: 取り消す
+session.archive: アーカイブ
+session.unarchive: アーカイブを解除
+session.archived_toast: "「%{title}」をアーカイブしました"
+sidebar.show_archived: アーカイブを表示
 
 session.new_task: 新規タスク
 
 sidebar.today: 今日
 sidebar.search: 検索
+sidebar.filter_placeholder: タスクを絞り込む
+sidebar.no_matching_tasks: 一致するタスクはありません
 sidebar.options: サイドバーオプション
 sidebar.grouping: グループ化
 sidebar.grouping_project: プロジェクト
@@ -290,6 +305,7 @@ common.copied: コピーしました
 common.copy_message: メッセージをコピー
 common.copy_message_title: メッセージをコピー
 common.copy_selection: 選択範囲をコピー
+common.add_selection_to_composer: 選択範囲を入力欄に追加
 common.copy_to_composer: 入力欄にコピー
 common.copy_code: コードをコピー
 common.cancel: キャンセル
@@ -421,6 +437,8 @@ activity.plan_steps: プランのステップ
 activity.tool_call: ツール呼び出し
 activity.tool_calls: ツール呼び出し
 
+mode.plan: 計画
+mode.plan_description: ファイルを変更せずに調査し提案します
 mode.supervised: 監督モード
 mode.auto_accept_edits: 編集を自動承認
 mode.auto: 自動

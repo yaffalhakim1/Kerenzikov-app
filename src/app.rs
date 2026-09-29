@@ -63,7 +63,7 @@ use crate::theme::{Theme, ThemePreference, sp};
 use crate::ui::text_field::TextField;
 use crate::ui::{
     MenuChip, ProjectNameSelector, activity_icon, activity_noun, contain_scroll, file_icon, icon,
-    icon_button, motion, provider_color, provider_mark, status_color, toggle_switch,
+    icon_button, motion, provider_color, provider_mark, skeleton, status_color, toggle_switch,
 };
 use crate::{
     CancelTaskSwitch, CancelTurn, CloseFind, CloseWindow, ConfirmTaskSwitch, CopySelection,
@@ -145,6 +145,9 @@ const STREAM_SAVE_INTERVAL: Duration = Duration::from_secs(1);
 /// Zed keeps status toasts on screen for ten seconds, pausing the countdown
 /// while the pointer is over the toast so a long message remains readable.
 const DEFAULT_TOAST_DURATION: Duration = Duration::from_secs(5);
+/// A toast offering Undo stays a little longer than a plain one, so a
+/// deliberate click is not racing the dismiss timer.
+const UNDO_TOAST_DURATION: Duration = Duration::from_secs(8);
 const MINIMUM_TOAST_RESUME_DURATION: Duration = Duration::from_millis(800);
 const TOAST_ANIMATION_DURATION: Duration = Duration::from_millis(150);
 const TASK_NOTIFICATION_TAG_PREFIX: &str = "waku-task:";
@@ -284,7 +287,6 @@ struct PanelResizeDrag {
     start_width: f32,
 }
 
-#[derive(Debug)]
 struct ToastState {
     message: String,
     tone: ToastTone,
@@ -293,6 +295,26 @@ struct ToastState {
     duration_remaining: Duration,
     timer_started: Option<Instant>,
     hovered: bool,
+    /// Runs when the toast's Undo button is clicked, if it offers one.
+    ///
+    /// A reversible action (archiving a task) hands its inverse here instead of
+    /// asking the user to find the archive view, which is the whole point of
+    /// saying "Undo" rather than "Done".
+    undo: Option<ToastUndo>,
+}
+
+type ToastUndo = Box<dyn FnOnce(&mut Waku, &mut Context<Waku>)>;
+
+impl std::fmt::Debug for ToastState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ToastState")
+            .field("message", &self.message)
+            .field("tone", &self.tone)
+            .field("id", &self.id)
+            .field("has_undo", &self.undo.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1348,6 +1370,24 @@ pub struct Waku {
     /// Number of older sessions revealed inside each project section. This is
     /// runtime-only so every launch starts with the recent three-day view.
     sidebar_project_reveal_counts: HashMap<SidebarGroup, usize>,
+    /// Why the desktop is out of sync with its daemon, or `None` while healthy.
+    ///
+    /// A dropped or refused daemon connection is not a transient event to toast
+    /// away: the app keeps rendering the last-known catalog, so without a
+    /// standing notice a dead connection is indistinguishable from an idle one.
+    daemon_degraded: Option<String>,
+    /// Filter over the sidebar's task rows.
+    ///
+    /// Scoped to the sidebar only: the command palette already searches
+    /// commands and the daemon, and this answers the narrower question "where
+    /// is that task of mine", which should not require leaving the sidebar.
+    sidebar_search: Entity<TextInput>,
+    /// Whether the sidebar lists archived tasks alongside active ones.
+    ///
+    /// Off by default: archiving should actually clear the list, and the toggle
+    /// is how you go get a task back. Runtime-only, like the other sidebar
+    /// disclosure state, so a launch always opens on the working set.
+    show_archived_sessions: bool,
     /// Stable keyboard focus for each virtualized sidebar group header and
     /// its hover-revealed New Task control.
     sidebar_group_header_focuses: RefCell<HashMap<SidebarGroup, FocusHandle>>,
@@ -1650,6 +1690,7 @@ mod file_search;
 mod goal_dialog;
 mod image_preview;
 mod memory_page;
+mod onboarding;
 mod render;
 mod right_panel;
 mod runtime;
@@ -1859,7 +1900,41 @@ impl Waku {
             duration_remaining: DEFAULT_TOAST_DURATION,
             timer_started: None,
             hovered: false,
+            undo: None,
         });
+    }
+
+    /// Shows a toast carrying an Undo affordance.
+    ///
+    /// The undo lingers a little longer than a plain toast so a deliberate
+    /// click is not racing the dismiss timer.
+    pub(super) fn show_undo_toast(
+        &mut self,
+        message: impl Into<String>,
+        undo: ToastUndo,
+    ) {
+        self.show_toast_with_tone(message, ToastTone::Success);
+        if let Some(toast) = self.toast.as_mut() {
+            toast.duration_remaining = UNDO_TOAST_DURATION;
+            toast.undo = Some(undo);
+        }
+    }
+
+    pub(super) fn run_toast_undo(
+        &mut self,
+        id: u64,
+        cx: &mut Context<Self>,
+    ) {
+        // Only the toast that is still on screen may run its action; a stale
+        // click from a replaced toast must not reapply an old inverse.
+        let undo = match self.toast.as_mut() {
+            Some(toast) if toast.id == id => toast.undo.take(),
+            _ => None,
+        };
+        if let Some(undo) = undo {
+            self.dismiss_toast(id);
+            undo(self, cx);
+        }
     }
 
     /// Arm one wake-up for the moment a time-derived label next changes —
@@ -1913,6 +1988,14 @@ impl Waku {
             // Detached timers are deliberately cheap, but their generation
             // must stop them from dismissing a newer toast.
             self.toast_generation = self.toast_generation.wrapping_add(1);
+        }
+    }
+
+    /// Dismisses the toast only if `id` is still the one on screen, so a
+    /// delayed dismiss cannot clear a newer message.
+    fn dismiss_toast(&mut self, id: u64) {
+        if self.toast.as_ref().is_some_and(|toast| toast.id == id) {
+            self.hide_toast();
         }
     }
 
@@ -2037,6 +2120,11 @@ impl Waku {
             TextInput::new(window, cx)
                 .clear_on_escape()
                 .placeholder(tr!("skills.search"))
+        });
+        let sidebar_search = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .clear_on_escape()
+                .placeholder(tr!("sidebar.filter_placeholder"))
         });
         let memory_input = cx.new(|cx| {
             TextInput::new(window, cx)
@@ -2606,6 +2694,16 @@ impl Waku {
                 }
             })
             .detach();
+            cx.subscribe(&sidebar_search, |this: &mut Self, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Edited) {
+                    // The row list is memoized by a fingerprint the filter
+                    // participates in, so drop the cached snapshot rather than
+                    // waiting for another input to change it.
+                    this.sidebar_rows_fingerprint.set(None);
+                    cx.notify();
+                }
+            })
+            .detach();
             cx.subscribe(
                 &memory_input,
                 |this: &mut Self, _, event: &InputEvent, cx| match event {
@@ -2904,6 +3002,9 @@ impl Waku {
                 session_rename_input,
                 sidebar_collapsed_groups: HashSet::new(),
                 sidebar_project_reveal_counts: HashMap::new(),
+                sidebar_search,
+                daemon_degraded: None,
+                show_archived_sessions: false,
                 sidebar_group_header_focuses: RefCell::new(HashMap::new()),
                 sidebar_group_compose_focuses: RefCell::new(HashMap::new()),
                 sidebar_show_more_focuses: RefCell::new(HashMap::new()),
@@ -2989,6 +3090,7 @@ impl Waku {
                 settings_scrollbar: ScrollbarState::new(),
                 header_drag_armed: false,
                 toast: startup_toast.map(|message| ToastState {
+                    undo: None,
                     message,
                     tone: ToastTone::Alert,
                     id: 0,

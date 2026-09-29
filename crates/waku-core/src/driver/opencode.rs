@@ -160,7 +160,11 @@ fn opencode_permission_rules(mode: RuntimeMode) -> Value {
     };
 
     match mode {
-        RuntimeMode::Ask => Value::Array(vec![rule("bash", "ask"), rule("edit", "ask")]),
+        // OpenCode gates at permission time rather than in a separate read-only
+        // session, so Plan asks before touching anything, same as Ask.
+        RuntimeMode::Plan | RuntimeMode::Ask => {
+            Value::Array(vec![rule("bash", "ask"), rule("edit", "ask")])
+        }
         RuntimeMode::AutoAcceptEdits => {
             Value::Array(vec![rule("bash", "ask"), rule("edit", "allow")])
         }

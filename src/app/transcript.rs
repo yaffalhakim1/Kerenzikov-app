@@ -922,6 +922,18 @@ pub(super) fn mix_uuid(hash: u64, id: Uuid) -> u64 {
     mix(mix(hash, bits as u64), (bits >> 64) as u64)
 }
 
+/// Folds a string into a fingerprint, byte by byte.
+///
+/// Used for short identity-bearing strings (a filter query, a title) rather
+/// than document bodies, so the per-byte loop is not on a hot path.
+pub(super) fn fingerprint_str(hash: u64, value: &str) -> u64 {
+    let mut hash = mix(hash, value.len() as u64);
+    for byte in value.bytes() {
+        hash = mix(hash, u64::from(byte));
+    }
+    hash
+}
+
 fn mix_turn_id(hash: u64, turn_id: Option<Uuid>) -> u64 {
     match turn_id {
         Some(turn_id) => mix_uuid(hash, turn_id),

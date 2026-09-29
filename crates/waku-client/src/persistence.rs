@@ -1039,6 +1039,19 @@ impl StateStore {
             .map_err(to_io_error)
     }
 
+    /// Hides a task from the lists, or restores it, without destroying anything.
+    ///
+    /// This is the recoverable half of removal: it is a daemon-side session
+    /// mutation, so it goes through the runtime mailbox rather than a plain
+    /// notify, which also guarantees it is ordered against a concurrent
+    /// removal for the same task.
+    pub fn set_session_archived(&self, session_id: Uuid, archived: bool) -> io::Result<()> {
+        self.daemon
+            .client()
+            .notify(session_id, Uuid::nil(), Command::SetSessionArchived { archived })
+            .map_err(to_io_error)
+    }
+
     pub fn blob_sweep(&self) -> impl FnOnce() + Send + 'static {
         let daemon = self.daemon.clone();
         move || {

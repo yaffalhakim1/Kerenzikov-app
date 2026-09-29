@@ -874,7 +874,9 @@ impl CodexDriver {
 
 fn codex_permissions(mode: RuntimeMode) -> (&'static str, &'static str, &'static str) {
     match mode {
-        RuntimeMode::Ask => ("untrusted", "read-only", "user"),
+        // Plan and Ask both run the session read-only; Codex has one sandbox
+        // for it. Plan is the product-level promise, Ask the prompt frequency.
+        RuntimeMode::Plan | RuntimeMode::Ask => ("untrusted", "read-only", "user"),
         RuntimeMode::AutoAcceptEdits => ("on-request", "workspace-write", "user"),
         RuntimeMode::Auto => ("on-request", "workspace-write", "auto_review"),
         RuntimeMode::FullAccess => ("never", "danger-full-access", "user"),

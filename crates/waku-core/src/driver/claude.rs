@@ -93,7 +93,8 @@ pub struct ClaudeDriver {
 /// The permission posture Claude is launched with.
 fn permission_mode(mode: RuntimeMode) -> &'static str {
     match mode {
-        RuntimeMode::Ask => "default",
+        // Claude has one read-only posture, so Plan and Ask share it.
+        RuntimeMode::Plan | RuntimeMode::Ask => "default",
         RuntimeMode::AutoAcceptEdits => "acceptEdits",
         RuntimeMode::Auto => "auto",
         RuntimeMode::FullAccess => "bypassPermissions",
@@ -244,7 +245,7 @@ impl ClaudeDriver {
         });
 
         let (commands, command_rx) = unbounded();
-        let auto_approve = mode != RuntimeMode::Ask;
+        let auto_approve = !mode.is_read_only();
         let turn_active = Arc::new(Mutex::new(false));
         let pending_task_stops = Arc::new(Mutex::new(HashMap::<String, BackgroundWorkKey>::new()));
         let pending_user_inputs = Arc::new(Mutex::new(HashMap::<String, Value>::new()));

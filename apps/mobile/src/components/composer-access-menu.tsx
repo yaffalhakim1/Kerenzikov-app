@@ -11,6 +11,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { runtimeModeLabel } from '@/lib/session-presentation';
 
 const MODE_ICONS = {
+  plan: { ios: 'list.bullet', android: 'checklist', web: 'checklist' },
   ask: { ios: 'lock', android: 'lock', web: 'lock' },
   autoAcceptEdits: { ios: 'pencil', android: 'edit', web: 'edit' },
   auto: { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' },

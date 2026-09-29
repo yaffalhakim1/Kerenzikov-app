@@ -8,6 +8,7 @@ use gpui::{
 pub mod menu;
 pub mod motion;
 pub mod scrollbar;
+pub mod skeleton;
 pub mod text_field;
 pub mod tooltip;
 
@@ -362,6 +363,19 @@ impl MenuChip {
     /// Soft fill marking the chip as the open menu's trigger.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Attaches a hint, optionally naming the key binding that opens the same
+    /// menu, so a chip reveals its shortcut where the user is already looking.
+    pub fn hint(mut self, label: impl Into<SharedString>, shortcut: &'static str) -> Self {
+        let label = label.into();
+        self.base = if shortcut.is_empty() {
+            self.base.tooltip(tooltip::Tooltip::text(label))
+        } else {
+            self.base
+                .tooltip(tooltip::Tooltip::text_with_shortcut(label, shortcut))
+        };
         self
     }
 }

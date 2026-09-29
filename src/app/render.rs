@@ -282,6 +282,7 @@ impl Render for Waku {
         let commit_dialog = self.render_commit_dialog(cx);
         let goal_dialog = self.render_goal_dialog(window, cx);
         let toast = self.render_active_toast(cx);
+        let degraded_banner = self.render_daemon_degraded_banner(cx);
         let content = div()
             .key_context("Waku")
             .on_action(cx.listener(Self::close_window_or_right_panel_tab_action))
@@ -417,6 +418,17 @@ impl Render for Waku {
             .children(task_switcher)
             .into_any_element();
 
+        let content = match degraded_banner {
+            Some(banner) => div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(banner)
+                .child(div().flex_1().min_h_0().child(content))
+                .into_any_element(),
+            None => content,
+        };
+
         self.render_window_frame(content, window, cx)
     }
 }
@@ -439,18 +451,66 @@ mod tests {
 }
 
 impl Waku {
+    /// A standing notice that the desktop is out of sync with its daemon.
+    ///
+    /// Unlike a toast this does not dismiss itself: the condition persists until
+    /// the connection is back, and a user reading a stale task list deserves to
+    /// know it is stale for as long as that is true.
+    fn render_daemon_degraded_banner(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let detail = self.daemon_degraded.as_ref()?;
+        let theme = Theme::current(cx);
+        Some(
+            div()
+                .id("daemon-degraded-banner")
+                .w_full()
+                .flex_none()
+                .px(px(14.0))
+                .py(px(6.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .bg(theme.warning.opacity(0.14))
+                .border_b_1()
+                .border_color(theme.warning.opacity(0.3))
+                .child(icon("icons/alert.svg", 13.0, theme.warning))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(sp(12.5))
+                        .line_height(sp(16.0))
+                        .text_color(theme.text)
+                        .child(tr!("daemon.reconnecting")),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .max_w(px(420.0))
+                        .overflow_hidden()
+                        .text_size(sp(12.0))
+                        .text_color(theme.text_tertiary)
+                        .child(SharedString::from(detail.clone())),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// Arm the dismiss timer and build the floating toast layer, if a toast
     /// is active. Every full-window surface (workspace and settings alike)
     /// must include this, or a toast raised there stays invisible until the
     /// user navigates away.
     fn render_active_toast(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.start_toast_dismiss_timer(cx);
-        let toast = self
-            .toast
-            .as_ref()
-            .map(|toast| (toast.message.clone(), toast.tone, toast.id));
-        toast.map(|(message, tone, generation)| {
-            self.render_toast(message, tone, generation, cx)
+        let toast = self.toast.as_ref().map(|toast| {
+            (
+                toast.message.clone(),
+                toast.tone,
+                toast.id,
+                toast.undo.is_some(),
+            )
+        });
+        toast.map(|(message, tone, generation, has_undo)| {
+            self.render_toast(message, tone, generation, has_undo, cx)
                 .into_any_element()
         })
     }
@@ -460,6 +520,7 @@ impl Waku {
         message: String,
         tone: ToastTone,
         generation: u64,
+        has_undo: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let theme = Theme::current(cx);
@@ -509,6 +570,39 @@ impl Waku {
                 }
             }));
 
+        // Only a toast that carries an inverse offers Undo. It is a text
+        // affordance rather than an icon so the verb is explicit, and it is the
+        // last thing before dismiss so it is where a reach for "fix that" lands.
+        let undo = has_undo.then(|| {
+            div()
+                .id(SharedString::from(format!("undo-toast-{generation}")))
+                .tab_index(0)
+                .flex_none()
+                .h(px(22.0))
+                .px(px(9.0))
+                .rounded(px(6.0))
+                .flex()
+                .items_center()
+                .cursor_default()
+                .text_size(sp(12.5))
+                .font_weight(FontWeight::MEDIUM)
+                .text_color(theme.text)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay))
+                .active(|element| element.bg(theme.overlay_strong))
+                .child(tr!("common.undo"))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.run_toast_undo(generation, cx);
+                    cx.stop_propagation();
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                        this.run_toast_undo(generation, cx);
+                        cx.stop_propagation();
+                    }
+                }))
+        });
+
         div()
             .id(SharedString::from(format!("toast-layer-{generation}")))
             .absolute()
@@ -544,6 +638,7 @@ impl Waku {
                     .child(md::render::frame_reset(self.toast_selection.clone()))
                     .child(icon(status_icon, 14.0, status_color))
                     .child(div().flex_1().min_w_0().whitespace_normal().child(message))
+                    .children(undo)
                     .child(dismiss)
                     .child(self.toast_selection_input()),
             )

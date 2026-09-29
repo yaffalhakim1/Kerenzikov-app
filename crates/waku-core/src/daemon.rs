@@ -396,8 +396,7 @@ impl Backend for WakuBackend {
                         ) {
                             merge_stale_session_metadata(existing, session);
                         } else {
-                            preserve_daemon_checkpoints(existing, &mut session);
-                            *existing = session;
+                            adopt_client_projection(existing, session);
                         }
                     } else {
                         state.sessions.push(session);
@@ -459,6 +458,28 @@ impl Backend for WakuBackend {
                 }
                 let removed = self.sessions.lock().remove(&session_id);
                 drop(removed);
+                Ok(ResponsePayload::Ack)
+            }
+            Command::SetSessionArchived { archived } => {
+                // Nothing is deleted here, which is the entire point: the row,
+                // its transcript and its checkpoint refs stay put, and only the
+                // archived flag decides whether the task lists show it. The
+                // tombstone below is therefore never set — a later SaveTaskState
+                // carrying this session must still be able to update it.
+                let mut state = self.task_state.lock();
+                let Some(session) = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                else {
+                    bail!("task {session_id} is unavailable");
+                };
+                if session.set_archived(archived) {
+                    // The stamp lives in the session JSON, so the row must be
+                    // marked dirty for the save to rewrite its detail blob.
+                    state.mark_session_dirty(session_id);
+                    self.task_store.save(&mut state)?;
+                }
                 Ok(ResponsePayload::Ack)
             }
             Command::HydrateSession { session_id } => {
@@ -947,6 +968,21 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
             existing.queued_messages.push(queued);
         }
     }
+}
+
+/// Replaces a stored session with a client's newer projection, keeping the
+/// fields the daemon owns.
+///
+/// A save is a client's whole view of a session, assembled some time before it
+/// was sent. Two daemon-owned fields can therefore be stale in it even when the
+/// projection is otherwise the newest: the Git checkpoints ending turns, and
+/// the archive stamp. Neither may be taken from the client.
+fn adopt_client_projection(existing: &mut AgentSession, mut incoming: AgentSession) {
+    preserve_daemon_checkpoints(existing, &mut incoming);
+    // Written only by `SetSessionArchived`; a save assembled before that landed
+    // carries `None` and would silently un-archive the task.
+    incoming.archived_at = existing.archived_at;
+    *existing = incoming;
 }
 
 /// Ending checkpoints are produced and stored by the daemon. A second client
@@ -1863,6 +1899,7 @@ fn handle_driver_command(
         | Command::LoadTaskState
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
+        | Command::SetSessionArchived { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
@@ -2238,6 +2275,45 @@ mod tests {
         preserve_daemon_checkpoints(&existing, &mut incoming);
 
         assert_eq!(incoming.turns[0].checkpoint.as_ref(), Some(&checkpoint));
+    }
+
+    /// The archive stamp is daemon-owned: it is written by
+    /// `SetSessionArchived`, while a client's ordinary state save may have been
+    /// assembled before that landed. The stale projection carries `None`, so
+    /// without the guard the next streaming checkpoint would silently put the
+    /// task back in the lists.
+    #[test]
+    fn stale_client_projection_cannot_clear_the_archive_stamp() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        existing.begin_turn("archive me");
+        assert!(existing.set_archived(true));
+
+        // What a save assembled before the archive looked like: the same task,
+        // still active, arriving after the archive landed.
+        let mut stale_projection = existing.clone();
+        stale_projection.archived_at = None;
+        stale_projection.title = "Renamed elsewhere".into();
+
+        adopt_client_projection(&mut existing, stale_projection);
+
+        assert!(
+            existing.is_archived(),
+            "a stale state save must not clear the daemon-owned archive stamp"
+        );
+        // Everything else in the projection is still adopted.
+        assert_eq!(existing.title, "Renamed elsewhere");
+
+        // The stamp is daemon-owned in both directions: a save cannot archive
+        // either, so `SetSessionArchived` stays the only writer and the two
+        // dispatch paths can never disagree about this field.
+        let mut unarchived = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let mut archiving_projection = unarchived.clone();
+        assert!(archiving_projection.set_archived(true));
+        adopt_client_projection(&mut unarchived, archiving_projection);
+        assert!(
+            !unarchived.is_archived(),
+            "only SetSessionArchived may set the archive stamp"
+        );
     }
 
     #[test]

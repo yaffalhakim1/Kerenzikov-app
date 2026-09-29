@@ -22,8 +22,10 @@ import { NativeTint, Radius } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { useDaemon } from "@/lib/daemon-context";
 import {
+  isDaemonPairingLink,
   isPrivateDaemonAddress,
   normalizeDaemonAddress,
+  parseDaemonPairingLink,
 } from "@/lib/daemon-profile";
 
 export default function DaemonEditorScreen() {
@@ -182,8 +184,23 @@ export default function DaemonEditorScreen() {
               inputMode="url"
               keyboardType="url"
               onChangeText={(value) => {
-                setAddress(value);
                 setLocalError(null);
+                // One paste should be enough: a pairing link fills both
+                // fields, a bare address keeps behaving as before.
+                if (isDaemonPairingLink(value)) {
+                  try {
+                    const pairing = parseDaemonPairingLink(value);
+                    setAddress(pairing.address);
+                    setToken(pairing.token);
+                    void Haptics.selectionAsync();
+                    return;
+                  } catch (cause) {
+                    setLocalError(
+                      cause instanceof Error ? cause.message : String(cause),
+                    );
+                  }
+                }
+                setAddress(value);
               }}
               blurOnSubmit={false}
               onSubmitEditing={() => tokenInput.current?.focus()}
