@@ -1,8 +1,10 @@
 name: Tests
 
+# Pull requests only. A merge into `main` is a squash of a branch whose head
+# already passed this exact matrix, so re-running it on the merge commit tests
+# nothing new — it just burns runners and lands a second, redundant run beside
+# whichever release or deploy the merge was for.
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
