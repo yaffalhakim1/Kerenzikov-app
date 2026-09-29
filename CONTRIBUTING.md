@@ -48,6 +48,25 @@ Windows needs the MSVC toolchain (Visual Studio Build Tools with the C++
 workload and the Windows SDK) so Cargo can link and so the resource compiler
 is available for the executable's icon and version block.
 
+### Moving `target/` off a full system drive
+
+`target/` may be a directory junction pointing at another local volume. Nothing
+in the build depends on it being a real directory: `cargo` and every script in
+`scripts/` resolve the literal path `target/`, and a junction is transparent to
+them. On a machine whose system drive is nearly full:
+
+```powershell
+cargo clean
+robocopy <repo>\target Y:\Rust\waku-target /E /MOVE
+cmd /c mklink /J <repo>\target Y:\Rust\waku-target
+```
+
+> [!WARNING]
+> If `target/` is a junction, do **not** clear it with
+> `Remove-Item -Recurse` — that follows the link and deletes the build tree on
+> the other volume. Use `cargo clean` (which is junction-aware), or remove the
+> link itself with `cmd /c rmdir target`.
+
 ## Linux bundle
 
 To produce a distro-compatible release archive with the desktop and daemon
