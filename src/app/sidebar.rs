@@ -2231,8 +2231,14 @@ impl Waku {
         let theme = Theme::current(cx);
         // Nothing installed is a different problem from nothing opened, and it
         // has to be answered first: until an agent CLI exists, "open a project"
-        // leads straight to a failed `Start`.
-        if let Some(setup) = crate::app::onboarding::render_provider_setup(&self.probes, &theme, cx) {
+        // leads straight to a failed `Start`. Gated on detection having
+        // answered, so the seeded uninstalled probes are not mistaken for one.
+        if let Some(setup) = crate::app::onboarding::render_provider_setup(
+            &self.probes,
+            self.provider_detection_checked_at.is_some(),
+            &theme,
+            cx,
+        ) {
             return setup;
         }
         if self.selected_project().is_none() {

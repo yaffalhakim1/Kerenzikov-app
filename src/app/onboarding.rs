@@ -22,9 +22,6 @@ const SUGGESTED_PROVIDERS: [ProviderKind; 4] = [
 ];
 
 /// Whether any installed provider has been seen at all.
-///
-/// `probes` is empty until the daemon answers, which must not read as "nothing
-/// installed" — the caller keeps showing nothing until it has an answer.
 pub(super) fn has_installed_provider(probes: &[ProviderProbe]) -> bool {
     probes.iter().any(|probe| probe.installed)
 }
@@ -42,16 +39,29 @@ pub(super) fn suggested_install_url(provider: ProviderKind) -> Option<&'static s
 }
 
 /// Renders the "install an agent first" panel, or `None` when a provider is
-/// already available or the probe has not answered yet.
+/// already available or detection has not answered yet.
+///
+/// `detected` is what separates "no agent is installed" from "we have not
+/// looked yet": `probes` is seeded with every provider marked uninstalled at
+/// startup, so a non-empty list means nothing on its own. Reading it as an
+/// answer is what made this panel flash on startup and then vanish as soon as
+/// the real detection replaced the seed.
 pub(super) fn render_provider_setup(
     probes: &[ProviderProbe],
+    detected: bool,
     theme: &Theme,
     cx: &mut Context<Waku>,
 ) -> Option<AnyElement> {
-    if probes.is_empty() || has_installed_provider(probes) {
+    if !setup_is_due(probes, detected) {
         return None;
     }
     Some(provider_setup_body(theme, cx).into_any_element())
+}
+
+/// Whether the install panel is the right thing to show: detection has
+/// answered, and it found nothing to run.
+fn setup_is_due(probes: &[ProviderProbe], detected: bool) -> bool {
+    detected && !has_installed_provider(probes)
 }
 
 fn provider_setup_body(theme: &Theme, cx: &mut Context<Waku>) -> Div {
@@ -178,4 +188,45 @@ fn provider_setup_row(provider: ProviderKind, theme: &Theme) -> Div {
                     cx.open_url(url);
                 }),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn probe(provider: ProviderKind, installed: bool) -> ProviderProbe {
+        ProviderProbe {
+            provider,
+            installed,
+            path: None,
+            models: Vec::new(),
+            agent_presets: Vec::new(),
+            catalog_error: None,
+        }
+    }
+
+    /// The startup seed marks every provider uninstalled, so a non-empty list
+    /// is not evidence of anything. Treating it as an answer made the panel
+    /// flash on launch and vanish once detection replaced the seed.
+    #[test]
+    fn seeded_uninstalled_probes_are_not_an_answer() {
+        let seeded = vec![
+            probe(ProviderKind::Claude, false),
+            probe(ProviderKind::Codex, false),
+        ];
+        assert!(!has_installed_provider(&seeded));
+
+        // Not yet detected: keep the ordinary empty state, whatever the seed
+        // happens to say.
+        assert!(!setup_is_due(&seeded, false));
+        // Detection answered and found nothing: now the panel is due.
+        assert!(setup_is_due(&seeded, true));
+    }
+
+    #[test]
+    fn an_installed_provider_suppresses_the_panel() {
+        let detected = vec![probe(ProviderKind::Codex, true)];
+        assert!(has_installed_provider(&detected));
+        assert!(!setup_is_due(&detected, true));
+    }
 }
