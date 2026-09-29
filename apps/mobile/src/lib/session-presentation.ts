@@ -285,6 +285,7 @@ export function providerLabel(provider: ProviderKind): string {
 
 export function runtimeModeLabel(mode: RuntimeMode): string {
   const labels: Record<RuntimeMode, string> = {
+    plan: 'Plan',
     ask: 'Ask first',
     autoAcceptEdits: 'Accept edits',
     auto: 'Auto',

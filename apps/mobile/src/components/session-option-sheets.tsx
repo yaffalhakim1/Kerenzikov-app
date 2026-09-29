@@ -491,6 +491,7 @@ export function ModelPickerSheet({
 }
 
 const ACCESS_MODES: Array<{ id: RuntimeMode; description: string }> = [
+  { id: 'plan', description: 'Investigate and propose without changing files.' },
   { id: 'ask', description: 'Approve every command and file edit.' },
   { id: 'autoAcceptEdits', description: 'Edits apply automatically; commands still ask.' },
   { id: 'auto', description: 'Works autonomously inside the project.' },

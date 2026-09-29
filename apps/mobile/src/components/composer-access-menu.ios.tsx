@@ -28,8 +28,13 @@ import { runtimeModeLabel } from '@/lib/session-presentation';
 const ACCESS_MODES: Array<{
   id: RuntimeMode;
   description: string;
-  icon: 'lock' | 'pencil' | 'sparkles' | 'lock.open';
+  icon: 'list.bullet' | 'lock' | 'pencil' | 'sparkles' | 'lock.open';
 }> = [
+  {
+    id: 'plan',
+    description: 'Investigate and propose without changing files.',
+    icon: 'list.bullet',
+  },
   { id: 'ask', description: 'Approve every command and file edit.', icon: 'lock' },
   {
     id: 'autoAcceptEdits',
@@ -48,7 +53,11 @@ const ACCESS_MODES: Array<{
  * composer trigger and receives the native popover arrow and dismissal model. */
 export function ComposerAccessMenu({ mode, onApply }: ComposerAccessMenuProps) {
   const theme = useTheme();
-  const selected = ACCESS_MODES.find((item) => item.id === mode) ?? ACCESS_MODES[3]!;
+  // Named fallback, not an index: the list grows as modes are added, and a
+  // positional default silently changes meaning when it does.
+  const selected =
+    ACCESS_MODES.find((item) => item.id === mode) ??
+    ACCESS_MODES.find((item) => item.id === 'fullAccess')!;
 
   return (
     <Host ignoreSafeArea="all" matchContents>
