@@ -12,6 +12,34 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.38]
+
+- The phone app starts much faster. It used to hold the splash screen until it
+  had finished connecting to your desktop, so an unreachable or slow machine
+  meant staring at the logo for seconds; it now opens as soon as your saved
+  daemons are read, and the connection reports itself in the usual banner.
+- Streaming replies no longer stutter. The fade on newly arrived text was being
+  drawn by the app's own thread about thirty times a second, competing with the
+  text still arriving; that work now happens on the graphics chip, so a long
+  reply stays smooth as it streams. Reasoning traces get the same treatment.
+- Opening a task no longer flashes a loading spinner before the messages
+  appear, and opening Settings no longer blinks while it checks for updates.
+  When you are already on the newest version the update row shows no button at
+  all; a failed check still offers a retry.
+- The task list is easier to reach. Search and New task sit at the top, the
+  drawer covers the whole screen instead of leaving a strip of the chat
+  showing, and Settings has a permanent button in the bottom-left, available
+  whatever the connection is doing.
+- New tasks can start from a template. Eight ready-made openings — "Explore the
+  codebase", "Catch me up", "Debug an issue" and more — fill the composer so the
+  wording stays yours to edit before it is sent.
+- The composer says what it will run: the model and the agent, named above the
+  input, with a ring beside them that opens the context window in the same
+  numbers the desktop shows.
+- Corners across the sidebar and composer are tighter and now match the desktop,
+  and the connecting indicator uses the app's own green rather than a warning
+  colour.
+
 ## [0.1.37]
 
 - Removing a task is no longer permanent. Removal now archives: the task, its
