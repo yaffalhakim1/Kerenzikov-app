@@ -12,6 +12,46 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.37]
+
+- Removing a task is no longer permanent. Removal now archives: the task, its
+  full conversation and its Git checkpoints all stay on disk, it simply leaves
+  the list, and the notification that appears offers an Undo that puts it
+  straight back. A "Show archived" entry in the sidebar menu reveals what has
+  been archived, and a task can be unarchived from its own menu at any time.
+  Nothing is destroyed unless you delete an archived task explicitly.
+- Plan before you build. A new **Plan** access mode sits ahead of the others:
+  the agent investigates and proposes without changing a single file, so you can
+  read the approach first and then switch to a mode that writes. It is available
+  from the access control in the composer on desktop, and from both access
+  sheets on the phone.
+- A first launch with no coding agent installed now says so. Instead of
+  inviting you to open a project and then failing the moment you try to send,
+  the welcome screen names the agents Kerenzikov drives, links each one's
+  install page, and offers a refresh once you have installed one.
+- Long operations no longer look like nothing happened. The Skills library, the
+  session resume list and the changes view all draw their own shape while the
+  first result is still being read, so a wait reads as a wait rather than as an
+  empty screen.
+- When the connection to the background service drops, the app says so and
+  keeps saying so. Previously a lost connection was silent unless you happened
+  to notice the task list had stopped updating; a bar now reports it and clears
+  itself as soon as the service is reachable again.
+- Finding an old task is quicker. The sidebar has its own filter field, so a
+  long history can be narrowed to one task without leaving the sidebar, and a
+  search that matches nothing says so instead of showing an empty list.
+- Selected text can be sent with your next message. Select part of a reply and
+  choose **Add Selection to Composer** to quote it into the prompt, with
+  whatever you had already typed left untouched.
+- Hovering a control now tells you its shortcut. The sidebar and right panel
+  toggles, the stop button and the model picker all name the key that does the
+  same thing, instead of leaving the shortcut discoverable only in the command
+  palette.
+- Pairing a phone is one paste. Settings → Daemon can copy a single pairing
+  link containing both the address and the token; pasting it into the mobile
+  app fills in both fields at once, rather than copying two values and hoping
+  they land in the right boxes.
+
 ## [0.1.36]
 
 - Code on the phone finally looks like code. Every mono surface rendered in the
