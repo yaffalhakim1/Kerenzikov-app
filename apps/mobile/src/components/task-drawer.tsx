@@ -304,6 +304,18 @@ function TaskDrawerContent({
         own region between them and never slides underneath either. */}
       <View style={[styles.drawerHeader, { paddingTop: insets.top + 8 }]}>
         <DaemonPill onPress={() => setDaemonPickerOpen(true)} />
+        <AppPressable
+          accessibilityLabel="Close task history"
+          accessibilityRole="button"
+          hitSlop={10}
+          onPress={onClose}
+          style={({ pressed }) => [styles.drawerClose, { opacity: pressed ? 0.55 : 1 }]}>
+          <AppSymbol
+            name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            size={17}
+            tintColor={theme.textSecondary}
+          />
+        </AppPressable>
       </View>
 
       <SectionList
@@ -746,8 +758,18 @@ const styles = StyleSheet.create({
   drawerHost: { flex: 1 },
   drawerScene: { flex: 1 },
   drawerHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingBottom: 10,
+  },
+  drawerClose: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
   },
   sectionHeader: {
     alignItems: 'center',

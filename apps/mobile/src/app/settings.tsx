@@ -160,6 +160,24 @@ export default function SettingsScreen() {
               tintColor={theme.textTertiary}
             />
           </AppPressable>
+          {/* Usage is something you look at deliberately, not while working, so
+              it belongs beside the other library screens rather than in the
+              header of every task. */}
+          <AppPressable
+            accessibilityRole="button"
+            onPress={() => router.push('/usage')}
+            style={({ pressed }) => [
+              styles.row,
+              { borderTopColor: theme.separator, borderTopWidth: StyleSheet.hairlineWidth },
+              pressed ? { backgroundColor: theme.surfaceMuted } : null,
+            ]}>
+            <Text style={[styles.rowLabel, { color: theme.text }]}>Usage</Text>
+            <AppSymbol
+              name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+              size={13}
+              tintColor={theme.textTertiary}
+            />
+          </AppPressable>
         </View>
 
         {!settings.data ? (

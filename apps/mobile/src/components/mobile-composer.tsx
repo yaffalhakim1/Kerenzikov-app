@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AgentPresetMenu } from './agent-preset-menu';
 import { AppSymbol } from './app-symbol';
 import { AttachmentChip } from './attachment-chip';
+import { ContextGaugeButton } from './context-gauge';
 import { ComposerAccessMenu } from './composer-access-menu';
 import {
   ComposerAttachmentMenu,
@@ -34,7 +35,7 @@ import {
 import { ComposerTextInput } from './composer-text-input';
 import type { ComposerTextInputProps } from './composer-text-input.types';
 import { ProviderIcon } from './provider-icon';
-import { ModelSheet, modelDisplayName } from './session-option-sheets';
+import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
 import { GlassSurface } from './glass-surface';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
@@ -54,6 +55,7 @@ import {
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
+import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { agentPresetAvailable } from '@/lib/session-presentation';
 import { useRuntime } from '@/lib/runtime-context';
 import { isDaemonDisconnectError } from '@/lib/runtime-errors';
@@ -112,8 +114,21 @@ export function ComposerCard({
  * Shared by the session and new-task screens so the two composers cannot drift
  * apart in structure — the row's spacing lives here, not at each call site.
  */
-export function ComposerHeader({ children }: { children: ReactNode }) {
-  return <View style={styles.headerRow}>{children}</View>;
+export function ComposerHeader({
+  children,
+  trailing,
+}: {
+  children: ReactNode;
+  /** Right-aligned, e.g. the context ring; the chips stay left. */
+  trailing?: ReactNode;
+}) {
+  return (
+    <View style={styles.headerRow}>
+      {children}
+      <View style={styles.toolbarSpacer} />
+      {trailing}
+    </View>
+  );
 }
 
 /**
@@ -209,22 +224,19 @@ export function SendButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.sendButton,
-        {
-          backgroundColor: disabled
-            ? theme.surfaceMuted
-            : steering ? NativeTint : theme.inverse,
-          opacity: pressed || busy ? 0.6 : 1,
-        },
+        { opacity: pressed || busy ? 0.6 : 1 },
       ]}>
       {busy ? (
-        <ActivityIndicator color={disabled ? theme.textTertiary : theme.onInverse} size="small" />
+        <ActivityIndicator color={theme.textSecondary} size="small" />
       ) : (
         <AppSymbol
           name={queueing
             ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
-            : { ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
-          size={17}
-          tintColor={disabled ? theme.textTertiary : steering ? '#ffffff' : theme.onInverse}
+            : { ios: 'paperplane.fill', android: 'send', web: 'send' }}
+          size={19}
+          tintColor={
+            disabled ? theme.textTertiary : steering ? theme.accent : theme.text
+          }
         />
       )}
     </AppPressable>
@@ -251,6 +263,7 @@ export function MobileComposer({
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
+  const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
   const busy = sessionBusy(session);
   const supportsAgentPreset = agentPresetAvailable(session, busy);
   // One probe feeds both halves of the header — the model's name and whether a
@@ -258,10 +271,13 @@ export function MobileComposer({
   // cache-shared query, so rendering both costs one request.
   const providerModels = useProviderModels(session.provider);
   const agentPresets = providerModels.data?.agent_presets ?? [];
-  const selectedModelName = modelDisplayName(
-    providerModels.data?.models,
-    session.model ?? null,
-  );
+  const sessionModels = providerModels.data?.models;
+  const selectedModelName = modelDisplayName(sessionModels, session.model ?? null);
+  // The effective model, so the traits sheet edits what will actually run —
+  // a session with no explicit pick is on the provider's default.
+  const activeModel = session.model
+    ? sessionModels?.find((item) => item.id === session.model)
+    : sessionModels?.find((item) => item.is_default) ?? sessionModels?.[0];
   const showAgentPreset = supportsAgentPreset && agentPresets.length > 0;
   const taskState = useTaskState();
   const projectPath = taskState.data?.projects.find(
@@ -633,7 +649,8 @@ export function MobileComposer({
         ) : undefined}
         editable={!disconnected && !submitting}
         header={(
-          <ComposerHeader>
+          <ComposerHeader
+            trailing={<ContextGaugeButton usage={session.context_usage} />}>
             <ComposerTargetChip
               accessibilityLabel={`Model, ${selectedModelName}`}
               color={theme.text}
@@ -661,6 +678,13 @@ export function MobileComposer({
               mode={session.runtime_mode}
               onApply={(mode) => applyOptions({ runtimeMode: mode })}
             />
+            {activeModel && modelHasConfigurableTraits(activeModel) && (
+              <ComposerIconButton
+                icon={{ ios: 'brain.head.profile', android: 'psychology', web: 'psychology' }}
+                label="Reasoning and model options"
+                onPress={() => setTraitsSheetOpen(true)}
+              />
+            )}
           </>
         )}
         placeholder={placeholder}
@@ -725,6 +749,20 @@ export function MobileComposer({
         reasoningEffort={session.reasoning_effort ?? null}
         visible={modelSheetOpen}
       />
+
+      {activeModel && (
+        <ModelTraitsSheet
+          model={activeModel}
+          onApply={(changes) => applyOptions(changes)}
+          onDismiss={() => setTraitsSheetOpen(false)}
+          selection={{
+            reasoningEffort: session.reasoning_effort ?? null,
+            serviceTier: session.service_tier ?? null,
+            contextWindow: session.context_window ?? null,
+          }}
+          visible={traitsSheetOpen}
+        />
+      )}
     </View>
   );
 }
@@ -973,9 +1011,9 @@ const styles = StyleSheet.create({
   shell: { paddingHorizontal: 12, paddingTop: 4 },
   card: {
     borderRadius: 26,
-    paddingBottom: 8,
+    paddingBottom: 14,
     paddingHorizontal: 10,
-    paddingTop: 6,
+    paddingTop: 12,
   },
   headerRow: {
     alignItems: 'center',
@@ -996,11 +1034,11 @@ const styles = StyleSheet.create({
   },
   input: {
     fontSize: 16,
-    lineHeight: 21,
-    maxHeight: 120,
-    minHeight: 42,
+    lineHeight: 22,
+    maxHeight: 140,
+    minHeight: 64,
     paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
   attachmentStack: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 4, paddingTop: 4 },
   attachmentItem: { position: 'relative' },
@@ -1032,7 +1070,9 @@ const styles = StyleSheet.create({
   attachmentName: { flexShrink: 1, fontSize: 12, fontWeight: '600' },
   toolbar: { alignItems: 'center', flexDirection: 'row', marginTop: 2 },
   toolbarSpacer: { flex: 1 },
-  cluster: { alignItems: 'center', flexDirection: 'row', gap: 2 },
+  // No gap: each control already carries its own 36pt box, and the invisible
+  // space between them reads as the spacing.
+  cluster: { alignItems: 'center', flexDirection: 'row' },
   // Material's minimum touch target is 48dp; these render at 36dp visually
   // (AppPressable adds the padding back via hitSlop) so the toolbar stays
   // dense without dropping below the reachable minimum.
@@ -1044,12 +1084,12 @@ const styles = StyleSheet.create({
     width: 36,
   },
   sendButton: {
-    // Rounded box echoing the composer card's rounding, not a full circle.
+    // Same footprint as the other toolbar controls: the send glyph is another
+    // icon in the row, not a raised button, so it carries no fill of its own.
     alignItems: 'center',
-    borderRadius: Radius.medium,
+    borderRadius: Radius.pill,
     height: 36,
     justifyContent: 'center',
-    marginLeft: 4,
     width: 36,
   },
   errorBanner: {

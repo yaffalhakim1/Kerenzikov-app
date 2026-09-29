@@ -316,10 +316,14 @@ export function agentPresetAvailable(session: AgentSession, busy: boolean): bool
   return session.provider === 'openCode' || session.provider === 'openCode2';
 }
 
-export function contextPercent(session: AgentSession): number | null {
-  const usage = session.context_usage;
+/** Occupancy as a whole percentage, or null when the window size is unknown. */
+export function contextUsagePercent(usage: AgentSession['context_usage']): number | null {
   if (!usage || !usage.window) return null;
   return Math.max(0, Math.min(100, Math.round((usage.tokens / usage.window) * 100)));
+}
+
+export function contextPercent(session: AgentSession): number | null {
+  return contextUsagePercent(session.context_usage);
 }
 
 /**

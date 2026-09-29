@@ -118,13 +118,6 @@ function AppNavigator() {
       ? () => nativeHeaderButtons([drawerAction])
       : undefined,
   }), [drawerAction]);
-  /** Usage is a screen you visit deliberately, so it hangs off the home and
-   * new-task bars rather than the drawer, which belongs to task history. */
-  const usageAction = useMemo<HeaderActionSpec>(() => ({
-    icon: { ios: "chart.bar", android: "bar_chart", web: "bar_chart" },
-    label: "Usage",
-    onPress: () => router.push("/usage"),
-  }), []);
   const settingsAction = useMemo<HeaderActionSpec>(() => ({
     icon: { ios: "gearshape", android: "settings", web: "settings" },
     label: "Settings",
@@ -134,7 +127,6 @@ function AppNavigator() {
     ...drawerHeader,
     headerRight: () => (
       <HeaderActionGroup>
-        <HeaderAction {...usageAction} />
         <HeaderAction {...settingsAction} />
       </HeaderActionGroup>
     ),
@@ -144,9 +136,9 @@ function AppNavigator() {
     // rather than these plain items, so passing them there renders nothing
     // where the JS glass pill below already carries the same actions.
     unstable_headerRightItems: Platform.OS === "ios"
-      ? () => nativeHeaderButtons([usageAction, settingsAction])
+      ? () => nativeHeaderButtons([settingsAction])
       : undefined,
-  }), [drawerHeader, settingsAction, usageAction]);
+  }), [drawerHeader, settingsAction]);
 
   useEffect(() => {
     // Hide once bootstrap has settled (or the safety timeout fired) — not on the
