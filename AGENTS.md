@@ -45,6 +45,41 @@
   caching, or anything else a streaming frame reaches; it also records the
   counter-based measurement playbook that actually finds regressions.
 
+## Mobile performance
+
+The phone app is React Native, so the desktop's rules do not carry over — but
+the principle does: rendering owns the frame, and anything a frame reaches must
+already be in memory.
+
+- Frame work belongs on the compositor. An animation driven by a JS timer
+  (`setTimeout` / `setInterval` / `requestAnimationFrame` re-arming itself) is a
+  paint loop on the JS thread, and it competes with the stream commits it is
+  drawing. Use `Animated` with `useNativeDriver: true` when the start, end,
+  duration and curve are known up front; a Reanimated worklet when the value
+  depends on something only known mid-animation; JS only when layout must
+  change (`apps/mobile/src/components/activity-sheet.tsx` is the worklet
+  precedent).
+- Never compute per frame what the renderer takes as a number. Animating a
+  colour — parsing and rebuilding a string, per span, per frame — is the usual
+  offender; `opacity` multiplies foreground and background alpha natively, so
+  pass the number and let it. Computing a colour once at render is fine; doing
+  it in a frame loop is not.
+- Smells that mean a JS paint loop: a timer that re-arms inside a `useEffect`
+  with no dependency array, `Date.now()` read during render, and a cache
+  wrapped around a value that is computed every frame. The cache is the tell —
+  it means someone knew the work was too expensive per frame, and the answer is
+  to stop doing it per frame rather than to remember it.
+- Precedent: the streaming veil decides in `apps/mobile/src/md/veil.ts` (a pure
+  schedule handing each span an opacity and its remaining time) and draws in
+  `VeilFade` (`apps/mobile/src/md/render.tsx`) — decide once in JS, draw on the
+  compositor.
+- Never block first paint on the network or on storage. `booted` hides the
+  splash as soon as the saved profiles are read, before the daemon connects
+  (`apps/mobile/src/lib/daemon-context.tsx`); the connection reports itself
+  through the banner instead. Long or repeated reads off the daemon get a
+  short-lived cache rather than a re-fetch per screen mount
+  (`apps/mobile/src/lib/app-update.ts`).
+
 ## Accessibility
 
 - Treat accessibility as a product requirement too. GPUI does not yet expose a

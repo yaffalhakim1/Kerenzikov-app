@@ -104,3 +104,34 @@ export async function checkForUpdate(
   }
   return availableUpdate(parseManifest(await response.json()), current);
 }
+
+/** How long an answer is reused before the next visit re-checks. */
+const CHECK_TTL_MS = 5 * 60_000;
+
+let lastCheck: { at: number; update: AvailableUpdate | null } | null = null;
+
+/** The last check's answer, or `undefined` when nothing recent is cached.
+ *  Callers use this to render a settled row without a spinner first. */
+export function peekUpdateCheck(now = Date.now()): AvailableUpdate | null | undefined {
+  if (!lastCheck || now - lastCheck.at >= CHECK_TTL_MS) return undefined;
+  return lastCheck.update;
+}
+
+/**
+ * `checkForUpdate` behind a short-lived cache.
+ *
+ * Settings re-mounts on every visit, and the plain check hit the network each
+ * time — so the row flashed through "checking" before it could say what it
+ * already knew. A failed check leaves the previous answer cached rather than
+ * remembering the failure.
+ */
+export async function checkForUpdateCached(
+  fetchFn: typeof fetch = fetch,
+  current: number = currentVersionCode(),
+): Promise<AvailableUpdate | null> {
+  const cached = peekUpdateCheck();
+  if (cached !== undefined) return cached;
+  const update = await checkForUpdate(fetchFn, current);
+  lastCheck = { at: Date.now(), update };
+  return update;
+}

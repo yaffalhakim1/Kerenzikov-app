@@ -25,8 +25,9 @@ import {
 } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  checkForUpdate,
+  checkForUpdateCached,
   currentVersionCode,
+  peekUpdateCheck,
   type AvailableUpdate,
 } from '@/lib/app-update';
 import {
@@ -38,22 +39,27 @@ import { providerLabel } from '@/lib/session-presentation';
 
 function UpdateRow() {
   const theme = useTheme();
-  const [update, setUpdate] = useState<AvailableUpdate | null>(null);
+  const [update, setUpdate] = useState<AvailableUpdate | null>(
+    () => peekUpdateCheck() ?? null,
+  );
   const [checking, setChecking] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const version = Constants.expoConfig?.version ?? '';
 
   const check = useCallback(async () => {
     setChecking(true);
     setStatus(null);
+    setFailed(false);
     try {
-      const found = await checkForUpdate(
+      const found = await checkForUpdateCached(
         fetch,
         currentVersionCode(Constants.expoConfig),
       );
       setUpdate(found);
       if (!found) setStatus('Kerenzikov is up to date.');
     } catch (cause) {
+      setFailed(true);
       setStatus(cause instanceof Error ? cause.message : String(cause));
     } finally {
       setChecking(false);
@@ -61,7 +67,14 @@ function UpdateRow() {
   }, []);
 
   useEffect(() => {
-    void check();
+    // A recent answer renders straight away. Re-checking on every mount is
+    // what made this row flash through a spinner each time Settings opened.
+    const cached = peekUpdateCheck();
+    if (cached === undefined) {
+      void check();
+    } else if (!cached) {
+      setStatus('Kerenzikov is up to date.');
+    }
   }, [check]);
 
   return (
@@ -80,8 +93,12 @@ function UpdateRow() {
             { borderTopColor: theme.separator, borderTopWidth: StyleSheet.hairlineWidth },
           ]}>
           <Text style={[styles.rowLabel, { color: theme.text }]}>
-            {update ? `Update to ${update.versionName}` : 'Check for updates'}
+            {update ? `Update to ${update.versionName}` : 'Updates'}
           </Text>
+          {/* Nothing to act on when the build is current, so the row shows no
+              button at all: an always-present "Check" both invited a pointless
+              tap and flashed while it ran. A failed check still offers a retry,
+              which is the one case the user has something to do about. */}
           {checking ? (
             <ActivityIndicator color={theme.textTertiary} />
           ) : update ? (
@@ -94,7 +111,7 @@ function UpdateRow() {
               ]}>
               <Text style={styles.actionLabel}>Download</Text>
             </AppPressable>
-          ) : (
+          ) : failed ? (
             <AppPressable
               accessibilityRole="button"
               onPress={() => void check()}
@@ -102,9 +119,9 @@ function UpdateRow() {
                 styles.action,
                 { backgroundColor: theme.surfaceMuted, opacity: pressed ? 0.7 : 1 },
               ]}>
-              <Text style={[styles.actionLabel, { color: theme.text }]}>Check</Text>
+              <Text style={[styles.actionLabel, { color: theme.text }]}>Retry</Text>
             </AppPressable>
-          )}
+          ) : null}
         </View>
       </View>
       <Text style={[styles.footer, { color: theme.textTertiary }]}>

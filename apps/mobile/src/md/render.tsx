@@ -18,8 +18,10 @@ import type {
 } from 'mdast';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { memo, useEffect, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  Animated,
+  Easing,
   Image,
   Linking,
   StyleSheet,
@@ -33,10 +35,48 @@ import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import { AppPressable } from '@/components/app-pressable';
 import { AppSymbol } from '@/components/app-symbol';
 
-import { applyAlpha } from './color';
 import { PENDING_LINK_URL } from './mend';
 import { columnWidthsFor } from './table';
-import { splitRunAtSpans, type RowVeil, type VeilSpan } from './veil';
+import { VEIL_CURVE_POW, splitRunAtSpans, type RowVeil, type VeilSpan } from './veil';
+
+/**
+ * One run of appended text dissolving in.
+ *
+ * The fade is a native-driver opacity animation, so it runs on the compositor
+ * at display rate and costs the JS thread nothing. It replaced a JS timer that
+ * sampled the veil and re-rendered every span's colour ~30 times a second —
+ * frame work landing on the JS thread precisely while a stream is committing.
+ *
+ * `opacity` and `remainingMs` are read once, at mount: the veil handed this run
+ * a starting alpha and the time it has left, and from there the run owns its
+ * own fade. Later renders (more text arriving) update the props of a span that
+ * is already animating and must not disturb it.
+ */
+export function VeilFade({
+  opacity,
+  remainingMs,
+  children,
+}: {
+  opacity: number;
+  remainingMs: number;
+  children: ReactNode;
+}) {
+  const value = useRef(new Animated.Value(opacity)).current;
+  useEffect(() => {
+    Animated.timing(value, {
+      toValue: 1,
+      duration: Math.max(1, remainingMs),
+      // The same curve `veilOpacity` applies: 1 - (1 - t) ^ VEIL_CURVE_POW.
+      easing: Easing.out(Easing.poly(VEIL_CURVE_POW)),
+      useNativeDriver: true,
+    }).start();
+    // Mount-only by design; see above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // RN's text attributes multiply foreground *and* background alpha by this,
+  // which is exactly what the previous inline `applyAlpha` pair did.
+  return <Animated.Text style={{ opacity: value }}>{children}</Animated.Text>;
+}
 
 export interface MarkdownStyles {
   body: TextStyle & { color: string };
@@ -92,8 +132,6 @@ interface InlineContext {
   block: RenderContext;
   spans: readonly VeilSpan[];
   cursor: { value: number };
-  /** Effective foreground color, for fading pieces that inherit it. */
-  ink: string;
 }
 
 export function openLinkExternally(url: string) {
@@ -160,12 +198,8 @@ function beginTextElement(ctx: RenderContext, flat: string): readonly VeilSpan[]
   return spans;
 }
 
-function inlineContext(
-  ctx: RenderContext,
-  flat: string,
-  ink: string,
-): InlineContext {
-  return { block: ctx, spans: beginTextElement(ctx, flat), cursor: { value: 0 }, ink };
+function inlineContext(ctx: RenderContext, flat: string): InlineContext {
+  return { block: ctx, spans: beginTextElement(ctx, flat), cursor: { value: 0 } };
 }
 
 /**
@@ -181,18 +215,18 @@ function renderLeaf(
   ictx.cursor.value += value.length;
   if (!value) return [];
   const pieces = splitRunAtSpans(start, value.length, ictx.spans);
-  return pieces.map(([pieceStart, pieceEnd, opacity]) => {
+  return pieces.map(([pieceStart, pieceEnd, opacity, remainingMs]) => {
     const slice = value.slice(pieceStart - start, pieceEnd - start);
     if (opacity >= 1 && !style) return slice;
-    const faded: TextStyle = {};
     if (opacity < 1) {
-      faded.color = applyAlpha(style?.color ?? ictx.ink, opacity);
-      if (style?.backgroundColor) {
-        faded.backgroundColor = applyAlpha(style.backgroundColor, opacity);
-      }
+      return (
+        <VeilFade key={`p${pieceStart}`} opacity={opacity} remainingMs={remainingMs}>
+          <Text style={style}>{slice}</Text>
+        </VeilFade>
+      );
     }
     return (
-      <Text key={`p${pieceStart}`} style={[style, faded]}>
+      <Text key={`p${pieceStart}`} style={style}>
         {slice}
       </Text>
     );
@@ -210,7 +244,7 @@ function renderInline(
       case 'html':
         return renderLeaf(node.value, ictx);
       case 'inlineCode':
-        return renderLeaf(node.value, { ...ictx, ink: styles.codespan.color }, styles.codespan);
+        return renderLeaf(node.value, ictx, styles.codespan);
       case 'break':
         return renderLeaf('\n', ictx);
       case 'strong':
@@ -228,7 +262,7 @@ function renderInline(
       case 'delete':
         return (
           <Text key={`n${index}`} style={styles.strikethrough}>
-            {renderInline(node.children, { ...ictx, ink: styles.strikethrough.color })}
+            {renderInline(node.children, ictx)}
           </Text>
         );
       case 'link': {
@@ -241,7 +275,7 @@ function renderInline(
             onPress={pending ? undefined : () => ictx.block.onOpenLink(node.url)}
             style={styles.link}
             suppressHighlighting>
-            {renderInline(node.children, { ...ictx, ink: styles.link.color })}
+            {renderInline(node.children, ictx)}
           </Text>
         );
       }
@@ -249,7 +283,7 @@ function renderInline(
         // Unresolved references render as link-styled text without a target.
         return (
           <Text key={`n${index}`} style={styles.link}>
-            {renderInline(node.children, { ...ictx, ink: styles.link.color })}
+            {renderInline(node.children, ictx)}
           </Text>
         );
       case 'image':
@@ -307,7 +341,7 @@ function renderParagraph(
   key: string | number,
 ): ReactNode {
   const { styles } = ctx;
-  const ictx = inlineContext(ctx, flattenInline(children), styles.body.color);
+  const ictx = inlineContext(ctx, flattenInline(children));
   const segments = paragraphSegments(children);
   return (
     <View key={key} style={styles.paragraph}>
@@ -434,7 +468,6 @@ function renderCode(
     block: ctx,
     spans,
     cursor: { value: 0 },
-    ink: styles.codeLine.color,
   };
   return (
     <View key={key} style={styles.codeBlock}>
@@ -477,14 +510,16 @@ function renderListItem(
   // The marker is a veil element of its own: a freshly streamed item must
   // dissolve in whole — a solid bullet floating over still-fading text reads
   // as a hole in the list.
-  const spans = beginTextElement(ctx, marker);
-  const opacity = spans.length ? spans[0]![2] : 1;
-  const markerStyle = opacity < 1
-    ? [styles.listMarker, { color: applyAlpha(styles.listMarker.color, opacity) }]
-    : styles.listMarker;
+  const span = beginTextElement(ctx, marker)[0];
   return (
     <View key={key} style={styles.listItem}>
-      <Text style={markerStyle}>{marker}</Text>
+      {span && span[2] < 1 ? (
+        <VeilFade opacity={span[2]} remainingMs={span[3]}>
+          <Text style={styles.listMarker}>{marker}</Text>
+        </VeilFade>
+      ) : (
+        <Text style={styles.listMarker}>{marker}</Text>
+      )}
       <View style={styles.listContent}>
         {item.children.map((child, index) => renderBlock(child, ctx, index))}
       </View>
@@ -539,7 +574,7 @@ function renderTable(
         // A cell the row does not reach stays blank but keeps its track, so a
         // ragged markdown row cannot knock the grid out of alignment.
         const flat = cell ? flattenInline(cell.children) : '';
-        const ictx = inlineContext(ctx, flat, textStyle.color);
+        const ictx = inlineContext(ctx, flat);
         return (
           <View
             key={cellIndex}
@@ -589,7 +624,7 @@ export function renderBlock(
       return renderParagraph(node.children, ctx, key);
     case 'heading': {
       const style = styles.heading[node.depth - 1] ?? styles.heading[5]!;
-      const ictx = inlineContext(ctx, flattenInline(node.children), style.color);
+      const ictx = inlineContext(ctx, flattenInline(node.children));
       return (
         <Text key={key} selectable style={style}>
           {renderInline(node.children, ictx)}
@@ -625,7 +660,7 @@ export function renderBlock(
       return <View key={key} style={styles.hr} />;
     case 'html': {
       // Raw HTML stays literal text, matching the desktop transcript.
-      const ictx = inlineContext(ctx, node.value, styles.body.color);
+      const ictx = inlineContext(ctx, node.value);
       return (
         <View key={key} style={styles.paragraph}>
           <Text selectable style={styles.body}>

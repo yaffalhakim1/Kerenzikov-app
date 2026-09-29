@@ -19,7 +19,6 @@ import {
   useCallback,
   useContext,
   useEffect,
-  useReducer,
   useRef,
   useState,
   type ReactNode,
@@ -43,7 +42,7 @@ import { MonoFont, NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { findActivityBlock, type ActivityGroupTarget } from '@/lib/session-presentation';
-import { applyAlpha } from '@/md/color';
+import { VeilFade } from '@/md/render';
 import { RowVeil, splitRunAtSpans } from '@/md/veil';
 
 type OpenActivityGroup = (target: ActivityGroupTarget) => void;
@@ -444,30 +443,24 @@ function FileChange({ change }: { change: ActivityFileChange }) {
   );
 }
 
-/** Streaming reasoning dissolves in like the desktop's strided reasoning
- * veil: appended text fades at half the message veil's tick rate, and text
- * present at mount is adopted at full opacity. */
+/** Streaming reasoning dissolves in like the message veil. Appended text is
+ * faded by a compositor animation per run; text present at mount is adopted at
+ * full opacity. */
 function ReasoningText({ content, live }: { content: string; live: boolean }) {
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
   const veil = useRef<RowVeil | null>(null);
   veil.current ??= new RowVeil(content.length > 0);
-  const [, bump] = useReducer((count: number) => count + 1, 0);
   const spans = live && !reducedMotion ? veil.current.advance(0, content, Date.now()) : [];
-  useEffect(() => {
-    if (!spans.length) return;
-    const timer = setTimeout(bump, 66);
-    return () => clearTimeout(timer);
-  });
   return (
     <Text selectable style={[styles.bodyText, { color: theme.textSecondary }]}>
-      {splitRunAtSpans(0, content.length, spans).map(([start, end, opacity]) =>
+      {splitRunAtSpans(0, content.length, spans).map(([start, end, opacity, remainingMs]) =>
         opacity >= 1 ? (
           content.slice(start, end)
         ) : (
-          <Text key={start} style={{ color: applyAlpha(theme.textSecondary, opacity) }}>
+          <VeilFade key={start} opacity={opacity} remainingMs={remainingMs}>
             {content.slice(start, end)}
-          </Text>
+          </VeilFade>
         ),
       )}
     </Text>

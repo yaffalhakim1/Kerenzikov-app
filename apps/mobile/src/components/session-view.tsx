@@ -463,11 +463,17 @@ export function SessionView({
               onDevSample={devPrompt ? probe.sample : undefined}
             />
           </ActivitySheetHost>
+        ) : session ? (
+          // The session is in hand and the transcript is a frame or two behind
+          // it by design (see the mount effect above). Rendering an empty body
+          // keeps that gap invisible; treating it as "loading" flashed a
+          // spinner on every open, which is the blink.
+          <View style={styles.placeholder} />
         ) : (
           <View style={styles.placeholder}>
             <SessionEmpty
               error={query.error}
-              loading={Boolean(session) || query.isPending}
+              loading={query.isPending}
               missing={query.data === null}
             />
           </View>

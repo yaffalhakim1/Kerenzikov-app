@@ -24,8 +24,21 @@ interface Chunk {
   durationMs: number;
 }
 
-/** One faded range of an element's visible text: [start, end, opacity]. */
-export type VeilSpan = readonly [start: number, end: number, opacity: number];
+/**
+ * One fading range of an element's visible text:
+ * `[start, end, opacityNow, remainingMs]`.
+ *
+ * The renderer animates `opacityNow → 1` over `remainingMs` itself, on the
+ * compositor. This module only decides *what* is fading and for *how much
+ * longer*; it never samples the opacity frame by frame, so nothing here has to
+ * run per frame.
+ */
+export type VeilSpan = readonly [
+  start: number,
+  end: number,
+  opacity: number,
+  remainingMs: number,
+];
 
 export function veilOpacity(progress: number): number {
   const clamped = Math.min(1, Math.max(0, progress));
@@ -88,26 +101,32 @@ class ElementVeil {
           start: prefix,
           end: text.length,
           startedAt: now,
-          durationMs: veilDurationMs(this.emaMs),
+          // A burst of appended chunks fades faster, so a fast stream does not
+          // leave a growing backlog of half-transparent text. Baked in here
+          // because the renderer runs the fade itself: once a span is
+          // animating it can no longer be sped up from this side.
+          durationMs: veilDurationMs(this.emaMs) / veilBoost(this.chunks.length + 1),
         });
       }
       this.previous = text;
     }
 
-    const pruneBoost = veilBoost(this.chunks.length);
+    // A fade's whole life is spent inside `remainingMs`, which the renderer
+    // consumes in one animation — so a chunk past its deadline is simply done
+    // and drops out here rather than being reported as complete.
     this.chunks = this.chunks.filter(
-      (chunk) => Math.max(0, now - chunk.startedAt) * pruneBoost < chunk.durationMs,
+      (chunk) => Math.max(0, now - chunk.startedAt) < chunk.durationMs,
     );
-    const boost = veilBoost(this.chunks.length);
     return this.chunks.map((chunk) => {
       const elapsed = Math.max(0, now - chunk.startedAt);
-      const progress = Math.min(1, Math.max(0, (elapsed * boost) / chunk.durationMs));
-      return [chunk.start, chunk.end, veilOpacity(progress)] as const;
+      const progress = Math.min(1, Math.max(0, elapsed / chunk.durationMs));
+      return [
+        chunk.start,
+        chunk.end,
+        veilOpacity(progress),
+        Math.max(1, chunk.durationMs - elapsed),
+      ] as const;
     });
-  }
-
-  isFading(): boolean {
-    return this.chunks.length > 0;
   }
 }
 
@@ -156,27 +175,21 @@ export class RowVeil {
     }
     return veil.advance(text, now);
   }
-
-  isFading(): boolean {
-    for (const element of this.elements.values()) {
-      if (element.isFading()) return true;
-    }
-    return false;
-  }
 }
 
 /**
  * Split one leaf text run at veil boundaries. `start` is the run's offset in
- * the element's flattened text. Returns [sliceStart, sliceEnd, opacity]
- * pieces covering the run exactly; opacity 1 means unveiled.
+ * the element's flattened text. Returns `[sliceStart, sliceEnd, opacity,
+ * remainingMs]` pieces covering the run exactly; opacity 1 means unveiled and
+ * carries no time.
  */
 export function splitRunAtSpans(
   start: number,
   length: number,
   spans: readonly VeilSpan[],
-): Array<readonly [number, number, number]> {
+): Array<readonly [number, number, number, number]> {
   const end = start + length;
-  if (!spans.length || length === 0) return [[start, end, 1]];
+  if (!spans.length || length === 0) return [[start, end, 1, 0]];
   const cuts = new Set([start, end]);
   for (const [from, to] of spans) {
     if (from > start && from < end) cuts.add(from);
@@ -186,6 +199,8 @@ export function splitRunAtSpans(
   return ordered.slice(0, -1).map((pieceStart, index) => {
     const pieceEnd = ordered[index + 1]!;
     const span = spans.find(([from, to]) => from <= pieceStart && pieceEnd <= to);
-    return [pieceStart, pieceEnd, span && span[2] < 1 ? span[2] : 1] as const;
+    return span && span[2] < 1
+      ? ([pieceStart, pieceEnd, span[2], span[3]] as const)
+      : ([pieceStart, pieceEnd, 1, 0] as const);
   });
 }
