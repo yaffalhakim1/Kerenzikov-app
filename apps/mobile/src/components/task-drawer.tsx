@@ -14,7 +14,6 @@ import {
 } from 'react';
 import {
   ActivityIndicator,
-  Keyboard,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -111,10 +110,10 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
   const params = useGlobalSearchParams<{ id?: string | string[] }>();
   const { width } = useWindowDimensions();
   const [open, setOpen] = useState(false);
-  // While the search field is focused the keyboard can swallow the first tap on
-  // the drawer overlay, leaving it uncloseable; this adds a one-tap catcher.
-  const [searchFocused, setSearchFocused] = useState(false);
-  const drawerWidth = Math.max(0, Math.min(360, width - 44));
+  // Full-bleed: the drawer replaces the screen rather than leaving a strip of
+  // the chat showing, so the task list is not squeezed into a phone-width
+  // column with a permanently visible sliver behind it.
+  const drawerWidth = width;
   const drawerEnabled = daemon.phase === 'booting' || daemon.profiles.length > 0;
   const openTaskDrawer = useCallback(() => {
     if (drawerEnabled) setOpen(true);
@@ -152,7 +151,6 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
                 drawerWidth={drawerWidth}
                 selectedSessionId={selectedSessionId}
                 onClose={closeTaskDrawer}
-                onSearchFocus={setSearchFocused}
               />
             )}
             // Narrow edge so wide code/tables can pan horizontally without
@@ -165,17 +163,6 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           </Drawer>
         ) : (
           drawerScene
-        )}
-        {open && searchFocused && (
-          <AppPressable
-            accessibilityLabel="Close task history"
-            accessibilityRole="button"
-            onPress={() => {
-              Keyboard.dismiss();
-              closeTaskDrawer();
-            }}
-            style={[styles.drawerCloseCatcher, { left: drawerWidth }]}
-          />
         )}
       </View>
     </TaskDrawerContext.Provider>
@@ -192,12 +179,10 @@ function TaskDrawerContent({
   drawerWidth,
   selectedSessionId,
   onClose,
-  onSearchFocus,
 }: {
   drawerWidth: number;
   selectedSessionId: string | null;
   onClose: () => void;
-  onSearchFocus?: (focused: boolean) => void;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
@@ -463,8 +448,6 @@ function TaskDrawerContent({
                   style={[styles.searchInput, { color: theme.text }]}
                   value={search}
                   onChangeText={setSearch}
-                  onFocus={() => onSearchFocus?.(true)}
-                  onBlur={() => onSearchFocus?.(false)}
                 />
                 {search.length > 0 && (
                   <AppPressable
@@ -762,15 +745,6 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   drawerHost: { flex: 1 },
   drawerScene: { flex: 1 },
-  // Rendered above the drawer, covering only the strip of screen beside the
-  // drawer (where the dim overlay lives) so a single tap blurs search + closes.
-  drawerCloseCatcher: {
-    bottom: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    zIndex: 1000,
-  },
   drawerHeader: {
     paddingHorizontal: 12,
     paddingBottom: 10,
