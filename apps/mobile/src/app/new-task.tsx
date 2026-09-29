@@ -33,9 +33,12 @@ import {
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
 import {
   ComposerCard,
+  ComposerHeader,
   ComposerIconButton,
+  ComposerTargetChip,
   SendButton,
 } from '@/components/mobile-composer';
+import { ProviderIcon } from '@/components/provider-icon';
 import { RemoteProjectPicker } from '@/components/remote-project-picker';
 import { ResumeSessionSheet } from '@/components/session-option-sheets';
 import { useScreenHeaderInset } from '@/components/screen-header';
@@ -486,13 +489,9 @@ export default function NewTaskScreen() {
           value={selectedProject?.name ?? 'Choose a project'}
           onPress={() => setOpenSheet('project')}
         />
-        <SelectorRow
-          icon={{ ios: 'sparkle', android: 'auto_awesome', web: 'auto_awesome' }}
-          label="Model"
-          loading={catalog.isPending}
-          value={modelLabel}
-          onPress={() => setOpenSheet('model')}
-        />
+        {/* The model moved into the composer header, where the session screen
+            already keeps it — one place to answer "what will run this", rather
+            than the same name in a setup row and again above the input. */}
         <SelectorRow
           icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
           label="Workspace"
@@ -569,6 +568,28 @@ export default function NewTaskScreen() {
               )}
             </View>
           ) : undefined}
+          header={provider ? (
+            <ComposerHeader>
+              <ComposerTargetChip
+                accessibilityLabel={`Model, ${modelLabel}`}
+                color={theme.text}
+                label={modelLabel}
+                leading={<ProviderIcon provider={provider} size={15} />}
+                onPress={() => setOpenSheet('model')}
+              />
+              {supportsAgentPreset && agentPresets.length > 0 && !submitting && (
+                <AgentPresetMenu
+                  agentPreset={agentPreset}
+                  onApply={(selection) => {
+                    void Haptics.selectionAsync();
+                    setAgentPreset(selection.agentPreset);
+                  }}
+                  provider={provider}
+                  variant="inline"
+                />
+              )}
+            </ComposerHeader>
+          ) : undefined}
           left={(
             <>
               <ComposerAttachmentMenu
@@ -584,16 +605,6 @@ export default function NewTaskScreen() {
           placeholder={`Work on ${daemon.activeProfile?.name ?? 'your daemon'}`}
           right={(
             <>
-              {supportsAgentPreset && agentPresets.length > 0 && !submitting && (
-                <AgentPresetMenu
-                  agentPreset={agentPreset}
-                  onApply={(selection) => {
-                    void Haptics.selectionAsync();
-                    setAgentPreset(selection.agentPreset);
-                  }}
-                  provider={provider}
-                />
-              )}
               {activeModel && modelHasConfigurableTraits(activeModel) && (
                 <ComposerIconButton
                   icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}

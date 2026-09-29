@@ -107,6 +107,16 @@ export function ComposerCard({
 }
 
 /**
+ * The composer's header row: what a message will run on.
+ *
+ * Shared by the session and new-task screens so the two composers cannot drift
+ * apart in structure — the row's spacing lives here, not at each call site.
+ */
+export function ComposerHeader({ children }: { children: ReactNode }) {
+  return <View style={styles.headerRow}>{children}</View>;
+}
+
+/**
  * The composer's header chip: what a message will run on.
  *
  * Sized to the model/agent names rather than to an icon, because the point of
@@ -623,7 +633,7 @@ export function MobileComposer({
         ) : undefined}
         editable={!disconnected && !submitting}
         header={(
-          <View style={styles.headerRow}>
+          <ComposerHeader>
             <ComposerTargetChip
               accessibilityLabel={`Model, ${selectedModelName}`}
               color={theme.text}
@@ -639,7 +649,7 @@ export function MobileComposer({
                 variant="inline"
               />
             )}
-          </View>
+          </ComposerHeader>
         )}
         left={(
           <>
