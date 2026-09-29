@@ -30,7 +30,12 @@ const PERSON_ICON = { ios: 'person', android: 'person', web: 'person' } as const
 /** SwiftUI Menu so the agent picker stays attached to the composer trigger and
  * receives the native popover arrow and dismissal model, mirroring the desktop
  * agent chip. */
-export function AgentPresetMenu({ provider, agentPreset, onApply }: AgentPresetMenuProps) {
+export function AgentPresetMenu({
+  provider,
+  agentPreset,
+  onApply,
+  variant = 'chip',
+}: AgentPresetMenuProps) {
   const theme = useTheme();
   const probe = useProviderModels(provider);
   const presets = probe.data?.agent_presets ?? [];
@@ -38,15 +43,27 @@ export function AgentPresetMenu({ provider, agentPreset, onApply }: AgentPresetM
     ?? presets.find((preset) => preset.is_default)
     ?? presets[0];
   const label = selected?.name ?? `${providerLabel(provider)} agent`;
+  const inline = variant === 'inline';
 
   return (
     <Host ignoreSafeArea="all" matchContents>
       <Menu
         label={(
           <RNHostView matchContents>
-            <View accessible={false} style={[styles.trigger, { borderColor: theme.border }]}>
-              <AppSymbol name={PERSON_ICON} size={15} tintColor={theme.textSecondary} />
-              <Text style={[styles.label, { color: theme.textSecondary }]} numberOfLines={1}>
+            <View
+              accessible={false}
+              style={
+                inline ? styles.inlineTrigger : [styles.trigger, { borderColor: theme.border }]
+              }>
+              {inline ? null : (
+                <AppSymbol name={PERSON_ICON} size={15} tintColor={theme.textSecondary} />
+              )}
+              <Text
+                style={[
+                  inline ? styles.inlineLabel : styles.label,
+                  { color: inline ? theme.accent : theme.textSecondary },
+                ]}
+                numberOfLines={1}>
                 {label}
               </Text>
             </View>
@@ -105,5 +122,15 @@ const styles = StyleSheet.create({
     color: '#666666',
     fontSize: 13,
     fontWeight: '500',
+  },
+  inlineTrigger: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 1,
+    gap: 5,
+  },
+  inlineLabel: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

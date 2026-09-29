@@ -54,7 +54,10 @@ function statusPresentation(
     case 'connecting':
     case 'booting':
     case 'reconnecting':
-      return { label, color: theme.warning, busy: true };
+      // The brand colour, matching the desktop's live-activity pulses: this is
+      // the app working, not a warning. Shape still carries the state — a
+      // spinner while busy, a dot when settled — so colour is not the only cue.
+      return { label, color: theme.accent, busy: true };
     case 'error':
       return { label, color: theme.danger, busy: false };
     default:

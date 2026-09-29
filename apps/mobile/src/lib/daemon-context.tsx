@@ -305,8 +305,13 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
         const selected = savedProfiles.some((item) => item.id === savedActiveId)
           ? savedActiveId!
           : savedProfiles[0]!.id;
-        await activate(selected, savedProfiles);
+        // Reveal the app before the connection is attempted. `activate` awaits
+        // the WebSocket handshake, so holding the splash on it made the launch
+        // as slow as the daemon was — seconds against a slow or unreachable
+        // host. Every screen already renders the connecting and outage states,
+        // so the connection has somewhere to land meanwhile.
         setBooted(true);
+        await activate(selected, savedProfiles);
       } catch (cause) {
         setStatus({
           ...IDLE,

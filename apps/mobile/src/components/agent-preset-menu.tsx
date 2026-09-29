@@ -14,7 +14,12 @@ import { providerLabel } from '@/lib/session-presentation';
 const PERSON_ICON = { ios: 'person', android: 'person', web: 'person' } as const;
 
 /** Non-iOS fallback. iOS replaces this with a native anchored popover. */
-export function AgentPresetMenu({ provider, agentPreset, onApply }: AgentPresetMenuProps) {
+export function AgentPresetMenu({
+  provider,
+  agentPreset,
+  onApply,
+  variant = 'chip',
+}: AgentPresetMenuProps) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
   const probe = useProviderModels(provider);
@@ -23,6 +28,7 @@ export function AgentPresetMenu({ provider, agentPreset, onApply }: AgentPresetM
     ?? presets.find((preset) => preset.is_default)
     ?? presets[0];
   const label = selected?.name ?? `${providerLabel(provider)} agent`;
+  const inline = variant === 'inline';
 
   return (
     <>
@@ -31,14 +37,21 @@ export function AgentPresetMenu({ provider, agentPreset, onApply }: AgentPresetM
         accessibilityRole="button"
         onPress={() => setOpen(true)}
         style={({ pressed }) => [
-          styles.trigger,
+          inline ? styles.inlineTrigger : styles.trigger,
           {
             borderColor: theme.border,
             opacity: pressed ? 0.55 : 1,
           },
         ]}>
-        <AppSymbol name={PERSON_ICON} size={15} tintColor={theme.textSecondary} />
-        <Text style={[styles.label, { color: theme.textSecondary }]} numberOfLines={1}>
+        {inline ? null : (
+          <AppSymbol name={PERSON_ICON} size={15} tintColor={theme.textSecondary} />
+        )}
+        <Text
+          style={[
+            inline ? styles.inlineLabel : styles.label,
+            { color: inline ? theme.accent : theme.textSecondary },
+          ]}
+          numberOfLines={1}>
           {label}
         </Text>
       </AppPressable>
@@ -70,5 +83,15 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  inlineTrigger: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 1,
+    gap: 5,
+  },
+  inlineLabel: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });

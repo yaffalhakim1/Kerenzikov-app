@@ -4,6 +4,7 @@ import { activitiesForBlock } from '@waku/client/event-reducer';
 
 import { TranscriptMarkdownCache } from '../md/transcript-cache';
 import {
+  agentPresetAvailable,
   buildTranscriptPipeline,
   buildTranscriptRows,
   contextPercent,
@@ -547,6 +548,36 @@ describe('message search rows', () => {
       snippet: `hit ${index}`,
     }));
     expect(messageSearchRows(matches, sessions, 5)).toHaveLength(5);
+  });
+});
+
+describe('agent preset availability', () => {
+  // `sessionHasStarted` also reads `last_reply_at`, so an unstarted fixture has
+  // to clear all four signals rather than only the transcript.
+  const unstarted = { messages: [], turns: [], provider_cursor: null, last_reply_at: null };
+
+  test('offers presets on a composable provider before the session starts', () => {
+    for (const provider of ['codex', 'deepSeek', 'openCode', 'openCode2'] as const) {
+      expect(agentPresetAvailable(session({ provider, ...unstarted }), false)).toBe(true);
+    }
+  });
+
+  test('hides presets for providers that compose none', () => {
+    for (const provider of ['claude', 'amp', 'cursor'] as const) {
+      expect(agentPresetAvailable(session({ provider, ...unstarted }), false)).toBe(false);
+    }
+  });
+
+  test('a started session keeps presets only where the provider swaps live', () => {
+    // The default fixture is started (it carries a message).
+    expect(agentPresetAvailable(session({ provider: 'codex' }), false)).toBe(false);
+    expect(agentPresetAvailable(session({ provider: 'deepSeek' }), false)).toBe(false);
+    expect(agentPresetAvailable(session({ provider: 'openCode' }), false)).toBe(true);
+    expect(agentPresetAvailable(session({ provider: 'openCode2' }), false)).toBe(true);
+  });
+
+  test('a busy turn never re-roles the agent', () => {
+    expect(agentPresetAvailable(session({ provider: 'openCode', ...unstarted }), true)).toBe(false);
   });
 });
 

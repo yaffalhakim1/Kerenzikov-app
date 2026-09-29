@@ -23,8 +23,10 @@ import { AppPressable } from '@/components/app-pressable';
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AgentPresetMenu } from './agent-preset-menu';
 import { AppSymbol } from './app-symbol';
 import { AttachmentChip } from './attachment-chip';
+import { ContextGaugeButton } from './context-gauge';
 import { ComposerAccessMenu } from './composer-access-menu';
 import {
   ComposerAttachmentMenu,
@@ -32,14 +34,12 @@ import {
 } from './composer-attachment-menu';
 import { ComposerTextInput } from './composer-text-input';
 import type { ComposerTextInputProps } from './composer-text-input.types';
-import { GlassSurface, liquidGlass } from './glass-surface';
-// Agent-profile picker hidden on mobile.
-// import { AgentPresetMenu } from './agent-preset-menu';
-import { ModelSheet } from './session-option-sheets';
+import { ProviderIcon } from './provider-icon';
+import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
+import { GlassSurface } from './glass-surface';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
-// import { useComposerCommands, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
-import { useComposerCommands, useTaskState } from '@/hooks/use-daemon-data';
+import { useComposerCommands, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
 import {
   detectComposerTrigger,
   filterComposerCommands,
@@ -55,6 +55,8 @@ import {
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
+import { modelHasConfigurableTraits } from '@/lib/model-traits';
+import { agentPresetAvailable } from '@/lib/session-presentation';
 import { useRuntime } from '@/lib/runtime-context';
 import { isDaemonDisconnectError } from '@/lib/runtime-errors';
 
@@ -65,11 +67,14 @@ import { isDaemonDisconnectError } from '@/lib/runtime-errors';
  */
 export function ComposerCard({
   beforeInput,
+  header,
   left,
   right,
   ...inputProps
 }: ComposerTextInputProps & {
   beforeInput?: ReactNode;
+  /** What is about to receive the message: model and agent, above the input. */
+  header?: ReactNode;
   left?: ReactNode;
   right?: ReactNode;
 }) {
@@ -80,12 +85,13 @@ export function ComposerCard({
       interactive
       style={[
         styles.card,
-        !liquidGlass && {
-          borderColor: theme.border,
-          borderWidth: StyleSheet.hairlineWidth,
-        },
+        // The brand rim is the composer's signature, so it is drawn on both the
+        // glass host and the flat fallback rather than only where the system
+        // material is missing.
+        { borderColor: theme.accent, borderWidth: 1 },
       ]}>
       {beforeInput}
+      {header}
       <ComposerTextInput
         multiline
         placeholderTextColor={theme.textTertiary}
@@ -99,6 +105,62 @@ export function ComposerCard({
         <View style={styles.cluster}>{right}</View>
       </View>
     </GlassSurface>
+  );
+}
+
+/**
+ * The composer's header row: what a message will run on.
+ *
+ * Shared by the session and new-task screens so the two composers cannot drift
+ * apart in structure — the row's spacing lives here, not at each call site.
+ */
+export function ComposerHeader({
+  children,
+  trailing,
+}: {
+  children: ReactNode;
+  /** Right-aligned, e.g. the context ring; the chips stay left. */
+  trailing?: ReactNode;
+}) {
+  return (
+    <View style={styles.headerRow}>
+      {children}
+      <View style={styles.toolbarSpacer} />
+      {trailing}
+    </View>
+  );
+}
+
+/**
+ * The composer's header chip: what a message will run on.
+ *
+ * Sized to the model/agent names rather than to an icon, because the point of
+ * the row is to answer "which model, which agent" without opening a sheet.
+ */
+export function ComposerTargetChip({
+  accessibilityLabel,
+  leading,
+  label,
+  color,
+  onPress,
+}: {
+  accessibilityLabel: string;
+  leading?: ReactNode;
+  label: string;
+  color: string;
+  onPress: () => void;
+}) {
+  return (
+    <AppPressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.targetChip, { opacity: pressed ? 0.55 : 1 }]}>
+      {leading}
+      <Text numberOfLines={1} style={[styles.targetChipLabel, { color }]}>
+        {label}
+      </Text>
+    </AppPressable>
   );
 }
 
@@ -162,22 +224,19 @@ export function SendButton({
       onPress={onPress}
       style={({ pressed }) => [
         styles.sendButton,
-        {
-          backgroundColor: disabled
-            ? theme.surfaceMuted
-            : steering ? NativeTint : theme.inverse,
-          opacity: pressed || busy ? 0.6 : 1,
-        },
+        { opacity: pressed || busy ? 0.6 : 1 },
       ]}>
       {busy ? (
-        <ActivityIndicator color={disabled ? theme.textTertiary : theme.onInverse} size="small" />
+        <ActivityIndicator color={theme.textSecondary} size="small" />
       ) : (
         <AppSymbol
           name={queueing
             ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
-            : { ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
-          size={17}
-          tintColor={disabled ? theme.textTertiary : steering ? '#ffffff' : theme.onInverse}
+            : { ios: 'paperplane.fill', android: 'send', web: 'send' }}
+          size={19}
+          tintColor={
+            disabled ? theme.textTertiary : steering ? theme.accent : theme.text
+          }
         />
       )}
     </AppPressable>
@@ -204,28 +263,22 @@ export function MobileComposer({
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
+  const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
   const busy = sessionBusy(session);
-  // Agent-profile picker hidden on mobile. The preset probe drove only that
-  // picker, so it is parked here too rather than probing on every mount.
-  // const sessionHasStarted =
-  //   session.turns.length > 0 || session.messages.length > 0 || !!session.provider_cursor;
-  // Mirrors desktop AgentSession::can_choose_agent_preset: presets are offered
-  // by Codex | DeepSeek | OpenCode | OpenCode2, and a started session still
-  // qualifies when the provider can switch a live agent (OpenCode | OpenCode2).
-  // Codex composes through its own ~/.codex/agents/*.toml directory and has no
-  // live switch, so a started Codex session keeps the role it began with.
-  // const presetProvider =
-  //   session.provider === 'codex'
-  //   || session.provider === 'deepSeek'
-  //   || session.provider === 'openCode'
-  //   || session.provider === 'openCode2';
-  // const liveAgentSwitch =
-  //   session.provider === 'openCode' || session.provider === 'openCode2';
-  // const supportsAgentPreset =
-  //   !busy
-  //   && presetProvider
-  //   && (!sessionHasStarted || liveAgentSwitch);
-  // const agentPresetProbe = useProviderModels(supportsAgentPreset ? session.provider : null);
+  const supportsAgentPreset = agentPresetAvailable(session, busy);
+  // One probe feeds both halves of the header — the model's name and whether a
+  // preset picker has anything to offer. `AgentPresetMenu` reads the same
+  // cache-shared query, so rendering both costs one request.
+  const providerModels = useProviderModels(session.provider);
+  const agentPresets = providerModels.data?.agent_presets ?? [];
+  const sessionModels = providerModels.data?.models;
+  const selectedModelName = modelDisplayName(sessionModels, session.model ?? null);
+  // The effective model, so the traits sheet edits what will actually run —
+  // a session with no explicit pick is on the provider's default.
+  const activeModel = session.model
+    ? sessionModels?.find((item) => item.id === session.model)
+    : sessionModels?.find((item) => item.is_default) ?? sessionModels?.[0];
+  const showAgentPreset = supportsAgentPreset && agentPresets.length > 0;
   const taskState = useTaskState();
   const projectPath = taskState.data?.projects.find(
     (project) => project.id === session.project_id,
@@ -595,6 +648,26 @@ export function MobileComposer({
           </>
         ) : undefined}
         editable={!disconnected && !submitting}
+        header={(
+          <ComposerHeader
+            trailing={<ContextGaugeButton usage={session.context_usage} />}>
+            <ComposerTargetChip
+              accessibilityLabel={`Model, ${selectedModelName}`}
+              color={theme.text}
+              label={selectedModelName}
+              leading={<ProviderIcon provider={session.provider} size={15} />}
+              onPress={() => setModelSheetOpen(true)}
+            />
+            {showAgentPreset && (
+              <AgentPresetMenu
+                agentPreset={session.agent_preset ?? null}
+                onApply={(selection) => applyOptions(selection)}
+                provider={session.provider}
+                variant="inline"
+              />
+            )}
+          </ComposerHeader>
+        )}
         left={(
           <>
             <ComposerAttachmentMenu
@@ -605,25 +678,18 @@ export function MobileComposer({
               mode={session.runtime_mode}
               onApply={(mode) => applyOptions({ runtimeMode: mode })}
             />
-            <ComposerIconButton
-              icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}
-              label="Model"
-              onPress={() => setModelSheetOpen(true)}
-            />
+            {activeModel && modelHasConfigurableTraits(activeModel) && (
+              <ComposerIconButton
+                icon={{ ios: 'brain.head.profile', android: 'psychology', web: 'psychology' }}
+                label="Reasoning and model options"
+                onPress={() => setTraitsSheetOpen(true)}
+              />
+            )}
           </>
         )}
         placeholder={placeholder}
         right={(
           <>
-            {/* Agent-profile picker hidden on mobile.
-            {supportsAgentPreset && agentPresets.length > 0 && (
-              <AgentPresetMenu
-                agentPreset={session.agent_preset ?? null}
-                onApply={(selection) => applyOptions(selection)}
-                provider={session.provider}
-              />
-            )}
-            */}
             {busy && (
               <AppPressable
                 accessibilityLabel="Stop agent"
@@ -683,6 +749,20 @@ export function MobileComposer({
         reasoningEffort={session.reasoning_effort ?? null}
         visible={modelSheetOpen}
       />
+
+      {activeModel && (
+        <ModelTraitsSheet
+          model={activeModel}
+          onApply={(changes) => applyOptions(changes)}
+          onDismiss={() => setTraitsSheetOpen(false)}
+          selection={{
+            reasoningEffort: session.reasoning_effort ?? null,
+            serviceTier: session.service_tier ?? null,
+            contextWindow: session.context_window ?? null,
+          }}
+          visible={traitsSheetOpen}
+        />
+      )}
     </View>
   );
 }
@@ -931,17 +1011,34 @@ const styles = StyleSheet.create({
   shell: { paddingHorizontal: 12, paddingTop: 4 },
   card: {
     borderRadius: 26,
-    paddingBottom: 8,
+    paddingBottom: 14,
     paddingHorizontal: 10,
-    paddingTop: 6,
+    paddingTop: 12,
+  },
+  headerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 6,
+    paddingTop: 4,
+  },
+  targetChip: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 1,
+    gap: 5,
+  },
+  targetChipLabel: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   input: {
     fontSize: 16,
-    lineHeight: 21,
-    maxHeight: 120,
-    minHeight: 42,
+    lineHeight: 22,
+    maxHeight: 140,
+    minHeight: 64,
     paddingHorizontal: 6,
-    paddingVertical: 8,
+    paddingVertical: 12,
   },
   attachmentStack: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 4, paddingTop: 4 },
   attachmentItem: { position: 'relative' },
@@ -973,7 +1070,9 @@ const styles = StyleSheet.create({
   attachmentName: { flexShrink: 1, fontSize: 12, fontWeight: '600' },
   toolbar: { alignItems: 'center', flexDirection: 'row', marginTop: 2 },
   toolbarSpacer: { flex: 1 },
-  cluster: { alignItems: 'center', flexDirection: 'row', gap: 2 },
+  // No gap: each control already carries its own 36pt box, and the invisible
+  // space between them reads as the spacing.
+  cluster: { alignItems: 'center', flexDirection: 'row' },
   // Material's minimum touch target is 48dp; these render at 36dp visually
   // (AppPressable adds the padding back via hitSlop) so the toolbar stays
   // dense without dropping below the reachable minimum.
@@ -985,12 +1084,12 @@ const styles = StyleSheet.create({
     width: 36,
   },
   sendButton: {
-    // Rounded box echoing the composer card's rounding, not a full circle.
+    // Same footprint as the other toolbar controls: the send glyph is another
+    // icon in the row, not a raised button, so it carries no fill of its own.
     alignItems: 'center',
-    borderRadius: Radius.medium,
+    borderRadius: Radius.pill,
     height: 36,
     justifyContent: 'center',
-    marginLeft: 4,
     width: 36,
   },
   errorBanner: {

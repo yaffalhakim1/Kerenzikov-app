@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -33,9 +34,12 @@ import {
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
 import {
   ComposerCard,
+  ComposerHeader,
   ComposerIconButton,
+  ComposerTargetChip,
   SendButton,
 } from '@/components/mobile-composer';
+import { ProviderIcon } from '@/components/provider-icon';
 import { RemoteProjectPicker } from '@/components/remote-project-picker';
 import { ResumeSessionSheet } from '@/components/session-option-sheets';
 import { useScreenHeaderInset } from '@/components/screen-header';
@@ -84,6 +88,54 @@ type SheetKind =
   | 'traits'
   | 'workspace'
   | 'branch';
+
+/**
+ * Ready-made openings for the blank-page problem, mirroring the desktop's
+ * prompt starters. Tapping fills the composer rather than sending, so the
+ * wording can be adjusted before it goes anywhere.
+ */
+const PROMPT_TEMPLATES = [
+  {
+    icon: { ios: 'safari', android: 'explore', web: 'explore' },
+    prompt: 'Explore this codebase and explain how the main pieces fit together.',
+    title: 'Explore the codebase',
+  },
+  {
+    icon: { ios: 'clock.arrow.circlepath', android: 'history', web: 'history' },
+    prompt: 'Catch me up on what changed recently and what still needs attention.',
+    title: 'Catch me up',
+  },
+  {
+    icon: { ios: 'arrow.left.arrow.right', android: 'compare_arrows', web: 'compare_arrows' },
+    prompt: 'Lay out the options for this and the trade-offs between them.',
+    title: 'Weigh my options',
+  },
+  {
+    icon: { ios: 'checklist', android: 'checklist', web: 'checklist' },
+    prompt: 'Plan this feature end to end before writing any code.',
+    title: 'Start feature planning',
+  },
+  {
+    icon: { ios: 'target', android: 'track_changes', web: 'track_changes' },
+    prompt: 'Turn this into a clear, checkable goal for the task.',
+    title: 'Craft a Goal',
+  },
+  {
+    icon: { ios: 'calendar', android: 'calendar_month', web: 'calendar_month' },
+    prompt: 'Break this into scheduled steps I can follow.',
+    title: 'Schedule a Task',
+  },
+  {
+    icon: { ios: 'ladybug', android: 'bug_report', web: 'bug_report' },
+    prompt: 'Debug this issue and tell me the root cause.',
+    title: 'Debug an issue',
+  },
+  {
+    icon: { ios: 'doc.text.magnifyingglass', android: 'find_in_page', web: 'find_in_page' },
+    prompt: 'Review my current changes and point out anything risky.',
+    title: 'Review my changes',
+  },
+] as const;
 
 export default function NewTaskScreen() {
   const theme = useTheme();
@@ -465,59 +517,90 @@ export default function NewTaskScreen() {
       style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Title and back button are the native navigation bar's; keep clear of it. */}
       <View style={{ height: headerInset }} />
-      <View style={styles.spacer} />
+      {/* The setup area scrolls. With the keyboard up this region is all that
+          can give, and without a scroll it simply overflowed — which pushed the
+          composer, the last child, under the keyboard. */}
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        style={styles.scroll}>
+        <View style={styles.templates}>
+          {PROMPT_TEMPLATES.map((template) => (
+            <AppPressable
+              accessibilityLabel={`Start from: ${template.title}`}
+              accessibilityRole="button"
+              key={template.title}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                setPrompt(template.prompt);
+              }}
+              style={({ pressed }) => [
+                styles.templateChip,
+                {
+                  backgroundColor: theme.surface,
+                  borderColor: theme.border,
+                  opacity: pressed ? 0.6 : 1,
+                },
+              ]}>
+              <AppSymbol name={template.icon} size={13} tintColor={theme.textSecondary} />
+              <Text
+                numberOfLines={1}
+                style={[styles.templateLabel, { color: theme.text }]}>
+                {template.title}
+              </Text>
+            </AppPressable>
+          ))}
+        </View>
 
-      <View style={styles.rows}>
-        <SelectorRow
-          icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
-          label="Daemon"
-          loading={
-            daemon.phase === 'connecting'
-            || daemon.phase === 'booting'
-            || daemon.phase === 'reconnecting'
-          }
-          value={daemon.activeProfile?.name ?? 'Add a daemon'}
-          onPress={() => setOpenSheet('daemon')}
-        />
-        <SelectorRow
-          icon={{ ios: 'folder', android: 'folder', web: 'folder' }}
-          label="Project"
-          loading={taskState.isPending}
-          value={selectedProject?.name ?? 'Choose a project'}
-          onPress={() => setOpenSheet('project')}
-        />
-        <SelectorRow
-          icon={{ ios: 'sparkle', android: 'auto_awesome', web: 'auto_awesome' }}
-          label="Model"
-          loading={catalog.isPending}
-          value={modelLabel}
-          onPress={() => setOpenSheet('model')}
-        />
-        <SelectorRow
-          icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
-          label="Workspace"
-          value={isolated ? 'Isolated worktree' : 'Work locally'}
-          onPress={() => setOpenSheet('workspace')}
-        />
-        {isolated && (
+        <View style={styles.rows}>
           <SelectorRow
-            icon={{ ios: 'arrow.triangle.branch', android: 'account_tree', web: 'account_tree' }}
-            label="Base branch"
-            loading={branches.isPending && branches.fetchStatus !== 'idle'}
-            value={branchLabel}
-            onPress={() => setOpenSheet('branch')}
+            icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
+            label="Daemon"
+            loading={
+              daemon.phase === 'connecting'
+              || daemon.phase === 'booting'
+              || daemon.phase === 'reconnecting'
+            }
+            value={daemon.activeProfile?.name ?? 'Add a daemon'}
+            onPress={() => setOpenSheet('daemon')}
           />
-        )}
-        <SelectorRow
-          icon={{ ios: 'arrow.uturn.down', android: 'restart_alt', web: 'restart_alt' }}
-          label="Resume external session"
-          value="Resume from CLI"
-          onPress={() => {
-            void Haptics.selectionAsync();
-            setResumeOpen(true);
-          }}
-        />
-      </View>
+          <SelectorRow
+            icon={{ ios: 'folder', android: 'folder', web: 'folder' }}
+            label="Project"
+            loading={taskState.isPending}
+            value={selectedProject?.name ?? 'Choose a project'}
+            onPress={() => setOpenSheet('project')}
+          />
+          {/* The model moved into the composer header, where the session screen
+              already keeps it — one place to answer "what will run this", rather
+              than the same name in a setup row and again above the input. */}
+          <SelectorRow
+            icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
+            label="Workspace"
+            value={isolated ? 'Isolated worktree' : 'Work locally'}
+            onPress={() => setOpenSheet('workspace')}
+          />
+          {isolated && (
+            <SelectorRow
+              icon={{ ios: 'arrow.triangle.branch', android: 'account_tree', web: 'account_tree' }}
+              label="Base branch"
+              loading={branches.isPending && branches.fetchStatus !== 'idle'}
+              value={branchLabel}
+              onPress={() => setOpenSheet('branch')}
+            />
+          )}
+          <SelectorRow
+            icon={{ ios: 'arrow.uturn.down', android: 'restart_alt', web: 'restart_alt' }}
+            label="Resume external session"
+            value="Resume from CLI"
+            onPress={() => {
+              void Haptics.selectionAsync();
+              setResumeOpen(true);
+            }}
+          />
+        </View>
+      </ScrollView>
 
       <View style={[styles.composerShell, { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 }]}>
         {error && (
@@ -569,6 +652,28 @@ export default function NewTaskScreen() {
               )}
             </View>
           ) : undefined}
+          header={provider ? (
+            <ComposerHeader>
+              <ComposerTargetChip
+                accessibilityLabel={`Model, ${modelLabel}`}
+                color={theme.text}
+                label={modelLabel}
+                leading={<ProviderIcon provider={provider} size={15} />}
+                onPress={() => setOpenSheet('model')}
+              />
+              {supportsAgentPreset && agentPresets.length > 0 && !submitting && (
+                <AgentPresetMenu
+                  agentPreset={agentPreset}
+                  onApply={(selection) => {
+                    void Haptics.selectionAsync();
+                    setAgentPreset(selection.agentPreset);
+                  }}
+                  provider={provider}
+                  variant="inline"
+                />
+              )}
+            </ComposerHeader>
+          ) : undefined}
           left={(
             <>
               <ComposerAttachmentMenu
@@ -579,28 +684,18 @@ export default function NewTaskScreen() {
                 mode={runtimeMode}
                 onApply={setRuntimeMode}
               />
+              {activeModel && modelHasConfigurableTraits(activeModel) && (
+                <ComposerIconButton
+                  icon={{ ios: 'brain.head.profile', android: 'psychology', web: 'psychology' }}
+                  label="Reasoning and model options"
+                  onPress={() => setOpenSheet('traits')}
+                />
+              )}
             </>
           )}
           placeholder={`Work on ${daemon.activeProfile?.name ?? 'your daemon'}`}
           right={(
             <>
-              {supportsAgentPreset && agentPresets.length > 0 && !submitting && (
-                <AgentPresetMenu
-                  agentPreset={agentPreset}
-                  onApply={(selection) => {
-                    void Haptics.selectionAsync();
-                    setAgentPreset(selection.agentPreset);
-                  }}
-                  provider={provider}
-                />
-              )}
-              {activeModel && modelHasConfigurableTraits(activeModel) && (
-                <ComposerIconButton
-                  icon={{ ios: 'speedometer', android: 'speed', web: 'speed' }}
-                  label="Model options"
-                  onPress={() => setOpenSheet('traits')}
-                />
-              )}
               <SendButton
                 busy={submitting}
                 disabled={startDisabled}
@@ -774,7 +869,27 @@ function SelectorRow({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  spacer: { flex: 1 },
+  // Grows to fill when there is room, so the setup rows sit just above the
+  // composer; shrinks and scrolls once the keyboard takes the space.
+  scroll: { flex: 1 },
+  scrollContent: { flexGrow: 1, justifyContent: 'flex-end', paddingBottom: 8 },
+  templates: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingBottom: 16,
+    paddingHorizontal: Spacing.three,
+  },
+  templateChip: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  templateLabel: { fontSize: 13, fontWeight: '500' },
   rows: { gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three },
   row: {
     alignItems: 'center',

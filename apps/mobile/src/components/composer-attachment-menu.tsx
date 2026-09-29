@@ -29,8 +29,8 @@ export function ComposerAttachmentMenu({
       accessibilityState={{ disabled }}
       style={[styles.trigger, { opacity: disabled ? 0.35 : 1 }]}>
       <AppSymbol
-        name={{ ios: 'paperclip', android: 'attach_file', web: 'attach_file' }}
-        size={20}
+        name={{ ios: 'plus', android: 'add', web: 'add' }}
+        size={19}
         tintColor={theme.textSecondary}
       />
     </View>
@@ -52,6 +52,9 @@ export function ComposerAttachmentMenu({
 }
 
 const styles = StyleSheet.create({
+  // A plain plus at the same 36pt footprint as its neighbours: the ring made
+  // this one control a different shape from the rest of the row, and at the
+  // shared icon size the strokes sat too close to it to read cleanly.
   trigger: {
     alignItems: 'center',
     borderRadius: Radius.pill,

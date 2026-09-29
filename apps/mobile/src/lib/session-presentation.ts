@@ -294,10 +294,36 @@ export function runtimeModeLabel(mode: RuntimeMode): string {
   return labels[mode];
 }
 
-export function contextPercent(session: AgentSession): number | null {
-  const usage = session.context_usage;
+/**
+ * Whether an agent-preset picker has anything useful to offer this session.
+ *
+ * Mirrors the desktop rule (`AgentSession::can_choose_agent_preset`): presets
+ * belong to Codex, DeepSeek, OpenCode and OpenCode 2. A session that has
+ * already started keeps them only where the provider can swap a live agent —
+ * Codex composes through its own `~/.codex/agents` directory with no live
+ * switch, so a started Codex session keeps the role it began with. A busy turn
+ * is never interrupted to re-role the agent.
+ */
+export function agentPresetAvailable(session: AgentSession, busy: boolean): boolean {
+  if (busy) return false;
+  const supported =
+    session.provider === 'codex'
+    || session.provider === 'deepSeek'
+    || session.provider === 'openCode'
+    || session.provider === 'openCode2';
+  if (!supported) return false;
+  if (!sessionHasStarted(session)) return true;
+  return session.provider === 'openCode' || session.provider === 'openCode2';
+}
+
+/** Occupancy as a whole percentage, or null when the window size is unknown. */
+export function contextUsagePercent(usage: AgentSession['context_usage']): number | null {
   if (!usage || !usage.window) return null;
   return Math.max(0, Math.min(100, Math.round((usage.tokens / usage.window) * 100)));
+}
+
+export function contextPercent(session: AgentSession): number | null {
+  return contextUsagePercent(session.context_usage);
 }
 
 /**

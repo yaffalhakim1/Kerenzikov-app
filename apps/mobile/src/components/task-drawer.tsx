@@ -14,7 +14,6 @@ import {
 } from 'react';
 import {
   ActivityIndicator,
-  Keyboard,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -43,7 +42,6 @@ import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useSessionMessageSearch, useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
-import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { sessionIsRunning } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import {
@@ -60,7 +58,6 @@ import {
 } from '@/lib/session-presentation';
 
 const DaemonPickerHeight = 38;
-const SearchDockGap = 14;
 const SIDEBAR_PREFS_KEY = 'waku.mobile.sidebar-prefs.v1';
 
 interface SidebarPrefs {
@@ -111,10 +108,10 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
   const params = useGlobalSearchParams<{ id?: string | string[] }>();
   const { width } = useWindowDimensions();
   const [open, setOpen] = useState(false);
-  // While the search field is focused the keyboard can swallow the first tap on
-  // the drawer overlay, leaving it uncloseable; this adds a one-tap catcher.
-  const [searchFocused, setSearchFocused] = useState(false);
-  const drawerWidth = Math.max(0, Math.min(360, width - 44));
+  // Full-bleed: the drawer replaces the screen rather than leaving a strip of
+  // the chat showing, so the task list is not squeezed into a phone-width
+  // column with a permanently visible sliver behind it.
+  const drawerWidth = width;
   const drawerEnabled = daemon.phase === 'booting' || daemon.profiles.length > 0;
   const openTaskDrawer = useCallback(() => {
     if (drawerEnabled) setOpen(true);
@@ -152,7 +149,6 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
                 drawerWidth={drawerWidth}
                 selectedSessionId={selectedSessionId}
                 onClose={closeTaskDrawer}
-                onSearchFocus={setSearchFocused}
               />
             )}
             // Narrow edge so wide code/tables can pan horizontally without
@@ -165,17 +161,6 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           </Drawer>
         ) : (
           drawerScene
-        )}
-        {open && searchFocused && (
-          <AppPressable
-            accessibilityLabel="Close task history"
-            accessibilityRole="button"
-            onPress={() => {
-              Keyboard.dismiss();
-              closeTaskDrawer();
-            }}
-            style={[styles.drawerCloseCatcher, { left: drawerWidth }]}
-          />
         )}
       </View>
     </TaskDrawerContext.Provider>
@@ -192,16 +177,13 @@ function TaskDrawerContent({
   drawerWidth,
   selectedSessionId,
   onClose,
-  onSearchFocus,
 }: {
   drawerWidth: number;
   selectedSessionId: string | null;
   onClose: () => void;
-  onSearchFocus?: (focused: boolean) => void;
 }) {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const keyboardHeight = useKeyboardHeight();
   const daemon = useDaemon();
   const runtime = useRuntime();
   const taskState = useTaskState();
@@ -311,15 +293,89 @@ function TaskDrawerContent({
     }
   }
 
+  // Search and New task lead the drawer rather than floating over its foot.
+  // Both are things you reach for on the way in, and at the bottom they sat
+  // behind the keyboard the search itself raised.
+  const drawerToolbar = (daemon.profiles.length > 0 || daemon.phase === 'booting') ? (
+    <View style={styles.drawerToolbar}>
+      <GlassSurface interactive style={styles.searchCapsule}>
+        <View style={styles.searchCapsuleInner}>
+          <AppSymbol
+            name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
+            size={17}
+            tintColor={theme.textSecondary}
+          />
+          <TextInput
+            accessibilityLabel="Search tasks"
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder="Search"
+            placeholderTextColor={theme.textTertiary}
+            selectionColor={NativeTint}
+            style={[styles.searchInput, { color: theme.text }]}
+            value={search}
+            onChangeText={setSearch}
+          />
+          {search.length > 0 && (
+            <AppPressable
+              accessibilityLabel="Clear search"
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => setSearch('')}
+              style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+              <AppSymbol
+                name={{ ios: 'xmark.circle.fill', android: 'cancel', web: 'cancel' }}
+                size={16}
+                tintColor={theme.textTertiary}
+              />
+            </AppPressable>
+          )}
+        </View>
+      </GlassSurface>
+      {daemon.phase === 'connected' && (
+        <GlassSurface
+          interactive
+          style={[styles.composeButton, Platform.OS === 'android' && styles.rippleClip]}>
+          <AppPressable
+            accessibilityLabel="New task"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={showNewTask}
+            style={({ pressed }) => [styles.roundInner, { opacity: pressed ? 0.5 : 1 }]}>
+            <AppSymbol
+              name={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
+              size={20}
+              tintColor={theme.text}
+            />
+          </AppPressable>
+        </GlassSurface>
+      )}
+    </View>
+  ) : null;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.screen, { backgroundColor: theme.background }]}>
-      {/* Pill and search dock are in normal flow, so the list scrolls in its
-        own region between them and never slides underneath either. */}
+      {/* Pill, search and New task are all in normal flow above the list, so
+        the list scrolls in its own region underneath them. */}
       <View style={[styles.drawerHeader, { paddingTop: insets.top + 8 }]}>
         <DaemonPill onPress={() => setDaemonPickerOpen(true)} />
+        <AppPressable
+          accessibilityLabel="Close task history"
+          accessibilityRole="button"
+          hitSlop={10}
+          onPress={onClose}
+          style={({ pressed }) => [styles.chromeIcon, { opacity: pressed ? 0.55 : 1 }]}>
+          <AppSymbol
+            name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            size={17}
+            tintColor={theme.textSecondary}
+          />
+        </AppPressable>
       </View>
+
+      {drawerToolbar}
 
       <SectionList
         sections={sections}
@@ -442,66 +498,22 @@ function TaskDrawerContent({
         stickySectionHeadersEnabled={false}
       />
 
-      {(daemon.profiles.length > 0 || daemon.phase === 'booting') && (
-        <View
-          pointerEvents="box-none"
-          style={[styles.searchDock, { paddingBottom: insets.bottom + SearchDockGap + keyboardHeight }]}>
-          <GlassSurface interactive style={styles.searchCapsule}>
-              <View style={styles.searchCapsuleInner}>
-                <AppSymbol
-                  name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
-                  size={17}
-                  tintColor={theme.textSecondary}
-                />
-                <TextInput
-                  accessibilityLabel="Search tasks"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  placeholder="Search"
-                  placeholderTextColor={theme.textTertiary}
-                  selectionColor={NativeTint}
-                  style={[styles.searchInput, { color: theme.text }]}
-                  value={search}
-                  onChangeText={setSearch}
-                  onFocus={() => onSearchFocus?.(true)}
-                  onBlur={() => onSearchFocus?.(false)}
-                />
-                {search.length > 0 && (
-                  <AppPressable
-                    accessibilityLabel="Clear search"
-                    accessibilityRole="button"
-                    hitSlop={8}
-                    onPress={() => setSearch('')}
-                    style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-                    <AppSymbol
-                      name={{ ios: 'xmark.circle.fill', android: 'cancel', web: 'cancel' }}
-                      size={16}
-                      tintColor={theme.textTertiary}
-                    />
-                  </AppPressable>
-                )}
-              </View>
-            </GlassSurface>
-            {daemon.phase === 'connected' && (
-              <GlassSurface
-                interactive
-                style={[styles.composeButton, Platform.OS === 'android' && styles.rippleClip]}>
-                <AppPressable
-                  accessibilityLabel="New task"
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={showNewTask}
-                  style={({ pressed }) => [styles.roundInner, { opacity: pressed ? 0.5 : 1 }]}>
-                  <AppSymbol
-                    name={{ ios: 'square.and.pencil', android: 'edit_square', web: 'edit' }}
-                    size={20}
-                    tintColor={theme.text}
-                  />
-                </AppPressable>
-              </GlassSurface>
-            )}
-        </View>
-      )}
+      {/* Below the list and always present: Settings stays reachable whatever
+          the connection is doing, unlike the toolbar above it. */}
+      <View style={[styles.drawerFooter, { paddingBottom: insets.bottom + 8 }]}>
+        <AppPressable
+          accessibilityLabel="Settings"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={() => router.push('/settings')}
+          style={({ pressed }) => [styles.chromeIcon, { opacity: pressed ? 0.55 : 1 }]}>
+          <AppSymbol
+            name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
+            size={19}
+            tintColor={theme.textSecondary}
+          />
+        </AppPressable>
+      </View>
 
       {renameTarget && (
         <RenameDialog
@@ -762,30 +774,43 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   drawerHost: { flex: 1 },
   drawerScene: { flex: 1 },
-  // Rendered above the drawer, covering only the strip of screen beside the
-  // drawer (where the dim overlay lives) so a single tap blurs search + closes.
-  drawerCloseCatcher: {
-    bottom: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    zIndex: 1000,
-  },
   drawerHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     paddingHorizontal: 12,
     paddingBottom: 10,
+  },
+  // Shared by the drawer's own controls (close, settings). Round, unlike the
+  // toolbar's rounded rectangles: an icon button takes a circular ripple, and
+  // the ripple is clipped to this radius, so the shape is what makes the press
+  // feedback read as a circle rather than a square.
+  chromeIcon: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  drawerFooter: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    paddingHorizontal: Spacing.three,
+    paddingTop: 8,
   },
   sectionHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 6,
-    // The block's vertical rhythm lives here, not on the label. With it on
-    // `sectionTitle` the row centered the title's own margin against an
-    // unmargined icon, so the icon rode above the baseline it labels.
-    marginBottom: 4,
-    marginTop: 14,
+    // A folder is a control, so its own height is the tap target: the vertical
+    // rhythm lives in this padding rather than in margins on the label, which
+    // left the pressable only as tall as the text.
+    marginBottom: 2,
+    marginTop: 8,
+    minHeight: 48,
     paddingLeft: 14,
     paddingRight: 12,
+    paddingVertical: 10,
   },
   filterInner: { alignItems: 'center', justifyContent: 'center' },
   filterHeading: {
@@ -797,14 +822,16 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   roundInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
-  searchDock: {
+  drawerToolbar: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
-    marginTop: 6,
+    paddingBottom: 10,
     paddingHorizontal: Spacing.three,
   },
-  searchCapsule: { borderRadius: Radius.pill, flex: 1 },
+  // Rounded rectangle, matching the desktop sidebar's search row (7pt) rather
+  // than a full pill.
+  searchCapsule: { borderRadius: Radius.small, flex: 1 },
   searchCapsuleInner: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -813,8 +840,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   searchInput: { flex: 1, fontSize: 16.5, paddingVertical: 10 },
-  composeButton: { borderRadius: Radius.pill, height: 50, width: 50 },
-  daemonButton: { borderRadius: Radius.pill, maxWidth: 176 },
+  // Same rounded rectangle as the search field beside it: a circle here was
+  // louder than the action it carries.
+  composeButton: { borderRadius: Radius.small, height: 50, width: 50 },
+  // Same rounded rectangle as the toolbar's other controls, so the header
+  // reads as one row rather than a pill beside squares.
+  daemonButton: { borderRadius: Radius.small, maxWidth: 176 },
   /** Parent-side clip that rounds Android's rectangular ripple drawable. */
   rippleClip: { overflow: 'hidden' },
   daemonButtonInner: {
@@ -874,18 +905,22 @@ const styles = StyleSheet.create({
   messageTitle: { flex: 1, fontSize: 14.5, fontWeight: '500' },
   messageSnippet: { fontSize: 12.5, lineHeight: 17 },
   sessionMenu: {
-    // Clip to the daemon chooser's card radius so the selected fill and the
-    // Android ripple both take the row's rounded shape.
-    borderRadius: Radius.large,
-    overflow: 'hidden',
-    height: 48,
+    // Clips the selected fill and the Android ripple to the row's shape. No
+    // height of its own: it wraps `sessionRow`, and a second height here only
+    // ever disagreed with it — at 48 it silently clipped a 56pt row back down.
+    borderRadius: Radius.small,
     marginHorizontal: 12,
+    overflow: 'hidden',
   },
   sessionRow: {
     alignItems: 'center',
-    borderRadius: Radius.large,
+    // A rounded rectangle, not a pill: matches the desktop sidebar's 7pt row
+    // radius, where a fully-round row reads as a chip rather than a list item.
+    borderRadius: Radius.small,
     flexDirection: 'row',
-    height: 48,
+    // 56 rather than the 48 minimum: a task title is the row you aim at most,
+    // and at 48 the ripple read as barely taller than the text.
+    height: 56,
     paddingHorizontal: 12,
   },
   sessionContent: { flex: 1 },

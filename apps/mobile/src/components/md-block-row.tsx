@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { Animated, StyleSheet } from 'react-native';
 
 import { MonoFont } from '@/constants/theme';
@@ -241,7 +241,6 @@ export function MdBlockLive({
   seeded: boolean;
   styles: MarkdownStyles;
 }) {
-  const [, bump] = useReducer((count: number) => count + 1, 0);
   const reducedMotion = useReducedMotion();
   useEffect(() => () => veils.drop(rowKey), [rowKey, veils]);
 
@@ -261,11 +260,8 @@ export function MdBlockLive({
   veil?.beginFrame();
   const children = blocks.map((block, index) => renderBlock(block.node, ctx, index));
   veil?.finishFrame();
-  const fading = veil?.isFading() ?? false;
-  useEffect(() => {
-    if (!fading) return;
-    const timer = setTimeout(bump, 33);
-    return () => clearTimeout(timer);
-  });
+  // No ticker. Each fading run animates itself on the compositor from the
+  // opacity and remaining time the veil handed it, so this row only renders
+  // when its text changes — not ~30 times a second while a stream runs.
   return <>{children}</>;
 }

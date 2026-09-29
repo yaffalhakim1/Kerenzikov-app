@@ -20,6 +20,7 @@ import {
 
 import { ActivitySheetHost } from '@/components/activity-sheet';
 import { ConnectionBanner } from '@/components/connection-banner';
+import { ContextGaugeButton } from '@/components/context-gauge';
 import { MobileComposer } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
 import {
@@ -49,10 +50,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
 import { sessionBusy } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
-import {
-  displaySessionTitle,
-  turnOptionsForSession,
-} from '@/lib/session-presentation';
+import { displaySessionTitle, turnOptionsForSession } from '@/lib/session-presentation';
 
 const SURFACE_MENU_COMMANDS = [
   { id: 'terminal', title: 'Terminal', symbol: 'terminal' },
@@ -357,14 +355,8 @@ export function SessionView({
       label: 'Task history',
       onPress: openTaskDrawer,
     };
-    const newTask: HeaderActionSpec = {
-      icon: { ios: 'square.and.pencil', android: 'edit_square', web: 'edit' },
-      label: 'New task',
-      onPress: () => router.dismissTo('/'),
-    };
     const nativeItems: NativeStackHeaderItem[] = hasSession
       ? [
-          ...nativeHeaderButtons([newTask]),
           {
             type: 'menu',
             label: 'Task options',
@@ -403,7 +395,7 @@ export function SessionView({
       headerRight: hasSession
         ? () => (
             <HeaderActionGroup>
-              <HeaderAction {...newTask} />
+              <ContextGaugeButton size={20} usage={session?.context_usage} />
               <MenuView
                 actions={taskMenuActions}
                 containerColor="#ffffff"
@@ -440,7 +432,19 @@ export function SessionView({
           ]
         : undefined,
     };
-  }, [handleTaskMenuCommand, hasSession, openTaskDrawer, subtitle, taskMenuActions, title]);
+  }, [
+    // Keyed on the numbers, not the session object: the bar must not be
+    // rebuilt on every stream tick, but the ring does have to move when the
+    // context window fill changes.
+    session?.context_usage?.tokens,
+    session?.context_usage?.window,
+    handleTaskMenuCommand,
+    hasSession,
+    openTaskDrawer,
+    subtitle,
+    taskMenuActions,
+    title,
+  ]);
 
   return (
     <KeyboardAvoidingView
@@ -459,11 +463,17 @@ export function SessionView({
               onDevSample={devPrompt ? probe.sample : undefined}
             />
           </ActivitySheetHost>
+        ) : session ? (
+          // The session is in hand and the transcript is a frame or two behind
+          // it by design (see the mount effect above). Rendering an empty body
+          // keeps that gap invisible; treating it as "loading" flashed a
+          // spinner on every open, which is the blink.
+          <View style={styles.placeholder} />
         ) : (
           <View style={styles.placeholder}>
             <SessionEmpty
               error={query.error}
-              loading={Boolean(session) || query.isPending}
+              loading={query.isPending}
               missing={query.data === null}
             />
           </View>
