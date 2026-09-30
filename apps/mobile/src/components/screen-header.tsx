@@ -6,7 +6,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
   useWindowDimensions,
 } from "react-native";
 
@@ -14,6 +13,7 @@ import { AppPressable } from "./app-pressable";
 import { AppSymbol } from "./app-symbol";
 import { GlassSurface } from "./glass-surface";
 import { Radius } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useTheme } from "@/hooks/use-theme";
 
 /** Pop when there is history; otherwise land on the task list. A screen

@@ -45,6 +45,7 @@ import {
   type TranscriptListHandle,
 } from '@/components/transcript-list';
 import { SessionEmpty } from '@/components/transcript-rows';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSession, useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
@@ -99,6 +100,7 @@ export function SessionView({
   devPrompt?: string;
 }) {
   const theme = useTheme();
+  const scheme = useColorScheme();
   const daemon = useDaemon();
   const runtime = useRuntime();
   const { openTaskDrawer } = useTaskDrawer();
@@ -398,7 +400,7 @@ export function SessionView({
               <ContextGaugeButton size={20} usage={session?.context_usage} />
               <MenuView
                 actions={taskMenuActions}
-                containerColor="#ffffff"
+                colorScheme={scheme}
                 title={title}
                 onPressAction={({ nativeEvent }) =>
                   handleTaskMenuCommand(nativeEvent.event)

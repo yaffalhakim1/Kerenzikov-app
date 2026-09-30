@@ -9,6 +9,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -42,7 +43,7 @@ import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useSessionMessageSearch, useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
-import { sessionIsRunning } from '@/lib/mobile-runtime';
+import { sessionIsRunning, sessionListSummary, type SessionListSummary } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import {
   displaySessionTitle,
@@ -50,6 +51,7 @@ import {
   groupSessions,
   messageSearchRows,
   providerLabel,
+  stabilizeSessionSummaries,
   withoutHiddenSessions,
   type MessageSearchRow,
   type SessionGrouping,
@@ -146,7 +148,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
             overlayStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.18)' }}
             renderDrawerContent={() => (
               <TaskDrawerContent
-                drawerWidth={drawerWidth}
+                drawerRowWidth={drawerWidth - 24}
                 selectedSessionId={selectedSessionId}
                 onClose={closeTaskDrawer}
               />
@@ -174,11 +176,11 @@ export function useTaskDrawer(): TaskDrawerContextValue {
 }
 
 function TaskDrawerContent({
-  drawerWidth,
+  drawerRowWidth,
   selectedSessionId,
   onClose,
 }: {
-  drawerWidth: number;
+  drawerRowWidth: number;
   selectedSessionId: string | null;
   onClose: () => void;
 }) {
@@ -197,7 +199,7 @@ function TaskDrawerContent({
   }, [search]);
   const messageSearch = useSessionMessageSearch(messageQuery);
   const [daemonPickerOpen, setDaemonPickerOpen] = useState(false);
-  const [renameTarget, setRenameTarget] = useState<AgentSession | null>(null);
+  const [renameTarget, setRenameTarget] = useState<SessionListSummary | null>(null);
   // Sidebar grouping/ordering, persisted like the desktop's sidebar prefs.
   const [prefs, setPrefs] = useState<SidebarPrefs>(DEFAULT_SIDEBAR_PREFS);
   const [filterOpen, setFilterOpen] = useState(false);
@@ -224,8 +226,12 @@ function TaskDrawerContent({
   }, []);
   const hiddenSessions = useMemo(() => new Set(prefs.hidden), [prefs.hidden]);
   const foldedGroups = useMemo(() => new Set(prefs.folded), [prefs.folded]);
+  // Summaries, not full sessions: the list draws only title, provider, project
+  // and recency, and holding the full objects here would rebuild every row on
+  // each streamed delta the runtime writes back into task state.
+  const listSessions = useStableSessionSummaries(taskState.data?.sessions);
   const visibleSessions = useMemo(() => {
-    const sessions = withoutHiddenSessions(taskState.data?.sessions ?? [], hiddenSessions);
+    const sessions = withoutHiddenSessions(listSessions, hiddenSessions);
     if (!search.trim()) return sessions;
     const query = search.trim().toLocaleLowerCase();
     const projects = new Map(taskState.data?.projects.map((project) => [project.id, project]));
@@ -239,7 +245,7 @@ function TaskDrawerContent({
         session.model,
       ].some((value) => value?.toLocaleLowerCase().includes(query));
     });
-  }, [hiddenSessions, search, taskState.data]);
+  }, [hiddenSessions, listSessions, search, taskState.data?.projects]);
   const sections = useMemo(() => {
     const built = taskState.data
       ? groupSessions(taskState.data.projects, visibleSessions, new Date(), prefs)
@@ -267,11 +273,14 @@ function TaskDrawerContent({
   }, [onClose, selectedSessionId]);
 
   const handleSelect = useCallback((sessionId: string) => showSession(sessionId), [showSession]);
-  const handleRename = useCallback((session: AgentSession) => setRenameTarget(session), []);
+  const handleRename = useCallback(
+    (session: SessionListSummary) => setRenameTarget(session),
+    [],
+  );
   /** Removing is a local list filter, not a daemon delete: the task and its
    *  transcript stay on the daemon for every other device. Undo lives in the
    *  task list sheet, which clears the whole hidden set. */
-  const handleRemove = useCallback((session: AgentSession) => {
+  const handleRemove = useCallback((session: SessionListSummary) => {
     updatePrefs({ hidden: [...prefs.hidden, session.id] });
   }, [prefs.hidden, updatePrefs]);
   const toggleGroup = useCallback((groupId: string) => {
@@ -379,7 +388,6 @@ function TaskDrawerContent({
 
       <SectionList
         sections={sections}
-        extraData={runtime.runtimes}
         keyExtractor={(item) => item.session.id}
         contentContainerStyle={[
           styles.listContent,
@@ -459,7 +467,7 @@ function TaskDrawerContent({
         }}
         renderItem={({ item }) => (
           <SessionRow
-            drawerWidth={drawerWidth}
+            drawerRowWidth={drawerRowWidth}
             item={item}
             running={Boolean(runtime.runtimes[item.session.id]?.running ?? sessionIsRunning(item.session))}
             selected={item.session.id === selectedSessionId}
@@ -710,8 +718,25 @@ function TaskListEmpty({
   );
 }
 
+/** Reuse summaries whose drawn fields did not change, so a task updating in
+ *  the background invalidates its own row rather than the whole list. */
+function useStableSessionSummaries(sessions: readonly AgentSession[] | undefined) {
+  const previous = useRef<SessionListSummary[]>([]);
+  const fresh = useMemo(
+    () => (sessions ?? []).map(sessionListSummary),
+    [sessions],
+  );
+  const stable = useMemo(
+    () => stabilizeSessionSummaries(previous.current, fresh),
+    [fresh],
+  );
+  useEffect(() => {
+    previous.current = stable;
+  }, [stable]);
+  return stable;
+}
 const SessionRow = memo(function SessionRow({
-  drawerWidth,
+  drawerRowWidth,
   item,
   running,
   selected,
@@ -719,16 +744,16 @@ const SessionRow = memo(function SessionRow({
   onRename,
   onSelect,
 }: {
-  drawerWidth: number;
+  drawerRowWidth: number;
   item: SessionListItem;
   running: boolean;
   selected: boolean;
-  onRemove: (session: AgentSession) => void;
-  onRename: (session: AgentSession) => void;
+  onRemove: (session: SessionListSummary) => void;
+  onRename: (session: SessionListSummary) => void;
   onSelect: (sessionId: string) => void;
 }) {
   const theme = useTheme();
-  const rowWidth = Math.max(0, drawerWidth - 24);
+  const rowWidth = Math.max(0, drawerRowWidth);
   const session = item.session;
   return (
     <TaskRowMenu

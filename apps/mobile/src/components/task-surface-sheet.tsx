@@ -30,7 +30,6 @@ import {
   StyleSheet,
   Text,
   View,
-  useColorScheme,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -39,6 +38,7 @@ import { AppSymbol } from "@/components/app-symbol";
 import { DiffView } from "@/components/diff-view";
 import { liquidGlass } from "@/components/glass-surface";
 import { MonoFont, NativeTint, Radius } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
 import { useTheme } from "@/hooks/use-theme";
 import {
   collectWorkspaceDiff,
@@ -565,6 +565,7 @@ function ReviewSurface({
 }) {
   const daemon = useDaemon();
   const theme = useTheme();
+  const scheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const profileId = daemon.activeProfile?.id ?? "disconnected";
   const lastTurn = useMemo(() => latestReviewTurnSource(session), [session]);
@@ -641,7 +642,7 @@ function ReviewSurface({
       >
         <MenuView
           actions={actions}
-          containerColor="#ffffff"
+          colorScheme={scheme}
           onPressAction={({ nativeEvent }) => {
             if (nativeEvent.event === "last-turn" && lastTurn) {
               setSource(lastTurn);

@@ -13,6 +13,7 @@ import type {
 import { turnAnswerStart, turnFoldLabel } from '@waku/client/transcript-presentation';
 
 import type { MarkdownBlock } from '../md/parse';
+import type { SessionListSummary } from './mobile-runtime';
 import { TranscriptMarkdownCache } from '../md/transcript-cache';
 
 export type SessionGroupId = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'more';
@@ -27,7 +28,8 @@ export interface SessionGroupOptions {
 }
 
 export interface SessionListItem {
-  session: AgentSession;
+  /** Summary, not the full session: a streamed delta must not reach the list. */
+  session: SessionListSummary;
   projectName: string;
   timestamp: number;
 }
@@ -136,18 +138,18 @@ const GROUPS: Array<{ id: SessionGroupId; title: string }> = [
   { id: 'more', title: 'More' },
 ];
 
-export function displaySessionTitle(session: AgentSession): string {
+export function displaySessionTitle(session: SessionListSummary): string {
   if (session.title !== 'New task' && session.title.trim()) return session.title.trim();
   return session.auto_title?.trim() || 'New Task';
 }
 
-export function sessionHasStarted(session: AgentSession): boolean {
-  return Boolean(
-    session.turns.length || session.messages.length || session.provider_cursor || session.last_reply_at,
-  );
+/** A summary carries no transcript, so recency is what marks a task started:
+ *  submitting a turn and settling one both stamp last_reply_at. */
+export function sessionHasStarted(session: SessionListSummary): boolean {
+  return session.last_reply_at != null;
 }
 
-export function sessionTimestamp(session: AgentSession): number {
+export function sessionTimestamp(session: SessionListSummary): number {
   // Match desktop: a submitted/replied turn promotes the task, while metadata
   // edits such as rename leave it in its existing date group.
   return session.last_reply_at ?? session.created_at;
@@ -155,7 +157,7 @@ export function sessionTimestamp(session: AgentSession): number {
 
 export function groupSessions(
   projects: Project[],
-  sessions: AgentSession[],
+  sessions: SessionListSummary[],
   now = new Date(),
   options: SessionGroupOptions = {},
 ): SessionGroup[] {
@@ -210,13 +212,49 @@ export function groupSessions(
   });
 }
 
+/**
+ * Reuse the previous render's summaries wherever nothing the list draws
+ * changed, so one task updating does not invalidate every memoized row.
+ * The projection is flat, so a field-wise compare is the whole check.
+ */
+export function stabilizeSessionSummaries(
+  previous: readonly SessionListSummary[],
+  next: readonly SessionListSummary[],
+): SessionListSummary[] {
+  if (!previous.length) return [...next];
+  const byId = new Map(previous.map((session) => [session.id, session]));
+  let changed = previous.length !== next.length;
+  const out = next.map((session, index) => {
+    const before = byId.get(session.id);
+    if (before && sameSummary(before, session)) {
+      if (previous[index] !== before) changed = true;
+      return before;
+    }
+    changed = true;
+    return session;
+  });
+  return changed ? out : (previous as SessionListSummary[]);
+}
+
+function sameSummary(a: SessionListSummary, b: SessionListSummary): boolean {
+  if (a === b) return true;
+  const left = a as unknown as Record<string, unknown>;
+  const right = b as unknown as Record<string, unknown>;
+  const keys = Object.keys(left);
+  if (keys.length !== Object.keys(right).length) return false;
+  for (const key of keys) {
+    if (left[key] !== right[key]) return false;
+  }
+  return true;
+}
+
 /** Sessions this phone has removed from its list. Removal is a local view
  *  filter, never a daemon delete: the task and its transcript stay intact for
  *  every other device, and clearing the stored list brings them back. */
 export function withoutHiddenSessions(
-  sessions: AgentSession[],
+  sessions: SessionListSummary[],
   hidden: ReadonlySet<string>,
-): AgentSession[] {
+): SessionListSummary[] {
   if (hidden.size === 0) return sessions;
   return sessions.filter((session) => !hidden.has(session.id));
 }

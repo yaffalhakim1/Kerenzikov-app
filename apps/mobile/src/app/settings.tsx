@@ -24,6 +24,8 @@ import {
   useUpdateDaemonSettings,
 } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
+import { useThemePreference } from '@/lib/theme-preference-context';
+import { THEME_PREFERENCES, themePreferenceLabel } from '@/lib/theme-preference';
 import {
   checkForUpdateCached,
   currentVersionCode,
@@ -135,6 +137,7 @@ function UpdateRow() {
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const { preference, setPreference } = useThemePreference();
   const settings = useDaemonSettings();
   const update = useUpdateDaemonSettings();
   const [localError, setLocalError] = useState<string | null>(null);
@@ -161,6 +164,36 @@ export default function SettingsScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.content}>
+        <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Appearance</Text>
+        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          {THEME_PREFERENCES.map((option, index) => (
+            <AppPressable
+              accessibilityLabel={`${themePreferenceLabel(option)} theme`}
+              accessibilityRole="button"
+              accessibilityState={{ selected: preference === option }}
+              key={option}
+              onPress={() => setPreference(option)}
+              style={({ pressed }) => [
+                styles.row,
+                index > 0
+                  ? { borderTopColor: theme.separator, borderTopWidth: StyleSheet.hairlineWidth }
+                  : null,
+                pressed ? { backgroundColor: theme.surfaceMuted } : null,
+              ]}>
+              <Text style={[styles.rowLabel, { color: theme.text }]}>
+                {themePreferenceLabel(option)}
+              </Text>
+              {preference === option && (
+                <AppSymbol
+                  name={{ ios: 'checkmark', android: 'check', web: 'check' }}
+                  size={15}
+                  tintColor={NativeTint}
+                />
+              )}
+            </AppPressable>
+          ))}
+        </View>
+
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Library</Text>
         <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           <AppPressable
