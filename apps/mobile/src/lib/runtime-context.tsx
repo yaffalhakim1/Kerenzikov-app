@@ -465,8 +465,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         const timer = persistTimers.current.get(session.id);
         if (timer) clearTimeout(timer);
         persistTimers.current.delete(session.id);
+        // No task-state refetch: the list reads a projection of the session the
+        // stream already updates locally, so a settle only has to persist.
         void persistOrdered(state.current)
-          .then(() => queryClient.invalidateQueries({ queryKey: daemonKeys.taskState(profileId) }))
           .then(() => drainQueue(session.id))
           .catch((cause) => {
             setErrors((values) => ({ ...values, [session.id]: errorMessage(cause) }));

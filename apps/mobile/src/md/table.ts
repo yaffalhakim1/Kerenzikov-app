@@ -42,13 +42,54 @@ function longestLines(
   return longest;
 }
 
-/** Each column's width in dp, shared by every row of the table. */
-export function columnWidthsFor(
+/** The width a column needs to hold its longest line on one line. */
+function naturalWidths(
   rows: readonly (readonly string[])[],
   columns: number,
 ): number[] {
-  if (columns <= 0) return [];
   return longestLines(rows, columns).map((chars) =>
     Math.max(MIN_COLUMN_WIDTH, chars * CHAR_WIDTH + CELL_CHROME),
   );
+}
+
+/**
+ * Each column's width in dp, shared by every row of the table.
+ *
+ * `available` is the width the table has to live in — the transcript column,
+ * not the viewport. A table that fits keeps every column at the width its
+ * content wants, which is what keeps the columns aligned and readable. A table
+ * that does not fit is **fitted**: the budget is shared out by water-filling —
+ * a column that needs less than its even share keeps its natural width and the
+ * leftover goes to the columns still over it — so the cells wrap and the whole
+ * table stays on screen instead of demanding a long horizontal pan.
+ *
+ * The readable floor still wins over the budget: a table with more columns
+ * than the phone can hold goes unreadable if every cell is squeezed to a
+ * sliver, so past that point the grid overflows and pans as it always did.
+ */
+export function columnWidthsFor(
+  rows: readonly (readonly string[])[],
+  columns: number,
+  available = Number.POSITIVE_INFINITY,
+): number[] {
+  if (columns <= 0) return [];
+  const widths = naturalWidths(rows, columns);
+  if (!Number.isFinite(available)) return widths;
+  const total = widths.reduce((sum, width) => sum + width, 0);
+  if (total <= available) return widths;
+
+  let remaining = available;
+  let pending = widths.map((_, index) => index);
+  while (pending.length > 0) {
+    const share = remaining / pending.length;
+    const satisfied = pending.filter((index) => widths[index]! <= share);
+    if (satisfied.length === 0) {
+      // Nobody fits its share, so the floor decides and the grid overflows.
+      for (const index of pending) widths[index] = Math.max(MIN_COLUMN_WIDTH, share);
+      break;
+    }
+    for (const index of satisfied) remaining -= widths[index]!;
+    pending = pending.filter((index) => !satisfied.includes(index));
+  }
+  return widths;
 }

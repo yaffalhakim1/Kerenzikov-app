@@ -59,6 +59,9 @@ import type { MarkdownStyles } from '@/md/render';
 import { TranscriptMarkdownCache } from '@/md/transcript-cache';
 
 /** Content column cap (iPad). */
+/** The transcript column's own cap. The table renderer budgets against this
+ *  same width (md/render.tsx), so a table is fitted to the column it sits in
+ *  rather than to the raw viewport. */
 const MAX_CONTENT_WIDTH = 736;
 
 /** Longer than UIScrollView's animated scroll (~0.3 s) plus a frame. */
@@ -474,6 +477,7 @@ export function TranscriptList({
                 keepRowTop={keepRowTop}
                 markdownStyles={markdownStyles}
                 md={md}
+                model={session.model ?? null}
                 row={row}
                 seeded={row.kind === 'md' && seeded.ids.has(row.messageId)}
                 veils={veils}
@@ -535,6 +539,7 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   veils,
   seeded,
   markdownStyles,
+  model,
   onToggleFold,
 }: {
   row: TranscriptRow;
@@ -543,6 +548,7 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   veils: VeilRegistry;
   seeded: boolean;
   markdownStyles: MarkdownStyles;
+  model: string | null;
   onToggleFold: (turnId: string) => void;
 }) {
   const keepTop = useCallback(
@@ -555,6 +561,7 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
         <TranscriptRowView
           markdownStyles={markdownStyles}
           md={md}
+          model={model}
           row={row}
           seeded={seeded}
           veils={veils}

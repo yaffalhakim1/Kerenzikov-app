@@ -34,6 +34,7 @@ export const TranscriptRowView = memo(function TranscriptRowView({
   veils,
   seeded,
   markdownStyles,
+  model,
   onToggleFold,
 }: {
   row: TranscriptRow;
@@ -41,6 +42,9 @@ export const TranscriptRowView = memo(function TranscriptRowView({
   veils: VeilRegistry;
   seeded: boolean;
   markdownStyles: MarkdownStyles;
+  /** The session's model id, shown beside the copy control on the terminal
+   *  answer so a transcript records what actually produced it. */
+  model: string | null;
   onToggleFold: (turnId: string) => void;
 }) {
   const theme = useTheme();
@@ -77,7 +81,16 @@ export const TranscriptRowView = memo(function TranscriptRowView({
           {(row.copyText != null || row.footerTimestamp != null) && (
             <View style={styles.messageFooterRow}>
               {row.copyText != null && row.copyText.trim() ? (
-                <CopyButton label="Copy response" text={row.copyText} />
+                <>
+                  <CopyButton label="Copy response" text={row.copyText} />
+                  {model ? (
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.messageFooter, styles.messageFooterModel, { color: theme.textGhost }]}>
+                      {model}
+                    </Text>
+                  ) : null}
+                </>
               ) : null}
               {row.footerTimestamp != null && (
                 <Text style={[styles.messageFooter, { color: theme.textGhost }]}>
@@ -383,6 +396,8 @@ const styles = StyleSheet.create({
     minHeight: 20,
   },
   messageFooter: { fontSize: 10.5 },
+  /** A long model id truncates rather than pushing the timestamp out. */
+  messageFooterModel: { flexShrink: 1, minWidth: 0 },
   /** Sits under the bubble on the user's side, mirroring the assistant row. */
   userFooterRow: {
     alignItems: 'center',

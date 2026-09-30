@@ -26,7 +26,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AgentPresetMenu } from './agent-preset-menu';
 import { AppSymbol } from './app-symbol';
 import { AttachmentChip } from './attachment-chip';
-import { ContextGaugeButton } from './context-gauge';
 import { ComposerAccessMenu } from './composer-access-menu';
 import {
   ComposerAttachmentMenu,
@@ -114,21 +113,8 @@ export function ComposerCard({
  * Shared by the session and new-task screens so the two composers cannot drift
  * apart in structure — the row's spacing lives here, not at each call site.
  */
-export function ComposerHeader({
-  children,
-  trailing,
-}: {
-  children: ReactNode;
-  /** Right-aligned, e.g. the context ring; the chips stay left. */
-  trailing?: ReactNode;
-}) {
-  return (
-    <View style={styles.headerRow}>
-      {children}
-      <View style={styles.toolbarSpacer} />
-      {trailing}
-    </View>
-  );
+export function ComposerHeader({ children }: { children: ReactNode }) {
+  return <View style={styles.headerRow}>{children}</View>;
 }
 
 /**
@@ -649,8 +635,7 @@ export function MobileComposer({
         ) : undefined}
         editable={!disconnected && !submitting}
         header={(
-          <ComposerHeader
-            trailing={<ContextGaugeButton usage={session.context_usage} />}>
+          <ComposerHeader>
             <ComposerTargetChip
               accessibilityLabel={`Model, ${selectedModelName}`}
               color={theme.text}

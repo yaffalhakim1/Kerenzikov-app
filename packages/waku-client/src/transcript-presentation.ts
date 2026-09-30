@@ -370,9 +370,16 @@ export function formatMessageTime(
   const date = new Date(timestamp * 1_000)
   if (Number.isNaN(date.getTime())) return ''
 
+  // 24-hour, always. A transcript reads as a log, and the log is compared down
+  // a column of timestamps: 13:05 sorts and scans where 1:05 PM does not, and it
+  // removes the locale's am/pm ambiguity between clients. Pinned rather than
+  // left to the locale so every surface agrees. hourCycle: 'h23' rather than
+  // hour12: false, which maps to the h24 cycle in some engines and renders
+  // midnight as 24:00.
   const time = new Intl.DateTimeFormat(locale, {
-    hour: 'numeric',
+    hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
   }).format(date)
   const dateOnly = localDateNumber(date)
   const today = localDateNumber(now)

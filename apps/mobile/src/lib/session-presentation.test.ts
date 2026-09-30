@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentSession, AgentTurn, Message, Project } from '@waku/client';
-import { activitiesForBlock } from '@waku/client/event-reducer';
+import { activitiesForBlock, reduceRuntimeEvent } from '@waku/client/event-reducer';
 
 import { TranscriptMarkdownCache } from '../md/transcript-cache';
+import { sessionListSummary } from './mobile-runtime';
 import {
   agentPresetAvailable,
   buildTranscriptPipeline,
@@ -16,11 +17,74 @@ import {
   messageSearchRows,
   relativeSessionTime,
   sessionDateGroup,
+  sessionHasStarted,
+  stabilizeSessionSummaries,
   stabilizeTranscriptRows,
   turnOptionsForSession,
   withoutHiddenSessions,
 } from './session-presentation';
 
+describe('task list projection', () => {
+  const clock = { nowSeconds: () => 1_000, nowMillis: () => 1_000_000, randomUUID: () => 'id' };
+  const stream = (session: AgentSession, delta: string) =>
+    reduceRuntimeEvent(session, {
+      sessionId: session.id,
+      runtimeId: 'runtime',
+      epoch: 'epoch',
+      sequence: 1,
+      event: { kind: 'textDelta', payload: delta },
+    }, clock).session;
+
+  test('a streamed delta does not change the summary the task list draws', () => {
+    const running = session({ status: 'working', turns: [runningTurn()] });
+    const before = sessionListSummary(running);
+    const after = sessionListSummary(stream(running, 'more text'));
+    // The regression: the reducer bumps updated_at and runtime_event_cursor on
+    // every event, so projecting the whole session invalidated every row at the
+    // stream commit rate.
+    expect(after).toEqual(before);
+  });
+
+  test('a settled turn still promotes the task through the summary', () => {
+    const running = session({ status: 'working', turns: [runningTurn()] });
+    const settled = reduceRuntimeEvent(running, {
+      sessionId: running.id,
+      runtimeId: 'runtime',
+      epoch: 'epoch',
+      sequence: 2,
+      event: { kind: 'turnFinished', payload: { success: true, summary: null } },
+    }, clock).session;
+    const summary = sessionListSummary(settled);
+    expect(summary.last_reply_at).toBe(1_000);
+    expect(summary.status).toBe('idle');
+    expect(sessionHasStarted(summary)).toBe(true);
+  });
+
+  test('stabilization keeps the row identity of every untouched task', () => {
+    const before = [sessionListSummary(session({ id: 'a' })), sessionListSummary(session({ id: 'b' }))];
+    const after = [sessionListSummary(session({ id: 'a' })), sessionListSummary(session({ id: 'b', title: 'Renamed' }))];
+    const stable = stabilizeSessionSummaries(before, after);
+    expect(stable[0]).toBe(before[0]);
+    expect(stable[1]).not.toBe(before[1]);
+    expect(stable[1]!.title).toBe('Renamed');
+    // Re-running over unchanged input must be a no-op, or the list re-renders
+    // on every commit regardless.
+    expect(stabilizeSessionSummaries(stable, stabilizeSessionSummaries(stable, after))).toBe(stable);
+  });
+});
+
+function runningTurn() {
+  return {
+    id: 'turn',
+    turn_count: 1,
+    status: 'running' as const,
+    provider_turn_started: true,
+    provider_resume_at: null,
+    started_at: 1,
+    completed_at: null,
+    checkpoint: null,
+  };
+}
 describe('mobile session presentation', () => {
   test('uses provider title for untouched tasks', () => {
     expect(displaySessionTitle(session({ title: 'New task', auto_title: 'Fix login' }))).toBe(

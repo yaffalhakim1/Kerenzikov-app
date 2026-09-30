@@ -565,6 +565,7 @@ function ReviewSurface({
 }) {
   const daemon = useDaemon();
   const theme = useTheme();
+  const scheme = useColorScheme();
   const insets = useSafeAreaInsets();
   const profileId = daemon.activeProfile?.id ?? "disconnected";
   const lastTurn = useMemo(() => latestReviewTurnSource(session), [session]);
@@ -641,7 +642,7 @@ function ReviewSurface({
       >
         <MenuView
           actions={actions}
-          containerColor="#ffffff"
+          colorScheme={scheme}
           onPressAction={({ nativeEvent }) => {
             if (nativeEvent.event === "last-turn" && lastTurn) {
               setSource(lastTurn);

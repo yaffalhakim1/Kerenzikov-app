@@ -3,6 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { AppSymbol } from './app-symbol';
 import { Radius } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 
 export type ComposerAttachmentSource = 'files' | 'camera' | 'photo';
@@ -21,6 +22,7 @@ export function ComposerAttachmentMenu({
   onChoose: (source: ComposerAttachmentSource) => void;
 }) {
   const theme = useTheme();
+  const scheme = useColorScheme();
   const trigger = (
     <View
       accessible
@@ -40,7 +42,7 @@ export function ComposerAttachmentMenu({
   return (
     <MenuView
       actions={AttachmentActions}
-      containerColor="#ffffff"
+      colorScheme={scheme}
       onPressAction={({ nativeEvent }) => {
         const source = nativeEvent.event as ComposerAttachmentSource;
         // Let the native menu finish dismissing before presenting a picker.

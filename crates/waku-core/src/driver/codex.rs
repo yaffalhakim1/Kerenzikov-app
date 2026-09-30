@@ -1411,8 +1411,10 @@ struct CodexStreamState {
     next_citation_number: usize,
     /// Item id and part index of the reasoning chunk currently streaming.
     reasoning_part: Option<(String, u64)>,
-    /// Every agent-message delta forwarded this turn, so `turn/completed` can
-    /// reconcile against the authoritative full text it carries.
+    /// Every agent-message delta exactly as the provider sent it, so
+    /// `turn/completed` can reconcile against the authoritative full text it
+    /// carries. This must stay the *raw* stream: the provider's final text is
+    /// raw too, and a rewritten stream can never match it.
     agent_text: String,
 }
 
@@ -1854,10 +1856,14 @@ fn handle_codex_message(
         }
         "item/agentMessage/delta" => {
             if let Some(delta) = params.get("delta").and_then(Value::as_str) {
-                let delta = stream_state.rewrite_citation_delta(delta);
-                if !delta.is_empty() {
-                    stream_state.agent_text.push_str(&delta);
-                    let _ = events.send(DriverEvent::TextDelta(delta));
+                // Reconciliation tracks the provider's own bytes; only the
+                // display copy goes through the citation rewrite. A delta that
+                // is pure citation marker rewrites to nothing, so the two must
+                // be accumulated separately.
+                stream_state.agent_text.push_str(delta);
+                let display = stream_state.rewrite_citation_delta(delta);
+                if !display.is_empty() {
+                    let _ = events.send(DriverEvent::TextDelta(display));
                 }
             }
         }
@@ -3571,6 +3577,93 @@ Stay in exploration mode.
             }
         }
         assert_eq!(text, "The fix is ready.");
+    }
+
+    #[test]
+    fn a_cited_reply_is_not_duplicated_at_turn_completion() {
+        // Regression: reconciliation compared the *rewritten* stream against the
+        // provider's *raw* final text. Once a citation marker had been replaced,
+        // the raw text no longer matched, so the whole reply was re-emitted as a
+        // "missing tail" and the assistant message rendered twice.
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-1".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-1".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (goal_commands, _goal_command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+
+        let feed = |value: Value, stream_state: &mut CodexStreamState| {
+            handle_codex_message(
+                value,
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &goal_commands,
+                &event_tx,
+                stream_state,
+            );
+        };
+
+        // `turn/started` is what resets the per-turn stream state, so the test
+        // drives the real sequence rather than poking the state directly.
+        feed(
+            json!({
+                "method": "turn/started",
+                "params": {"threadId": "thread-1", "turn": {"id": "turn-1", "status": "inProgress"}}
+            }),
+            &mut stream_state,
+        );
+        // The provider streams the raw reply, citation marker included.
+        let raw = "Claim.\u{e200}cite\u{e202}turn3view0\u{e201}";
+        feed(
+            json!({
+                "method": "item/started",
+                "params": {"threadId": "thread-1", "item": {
+                    "type": "webSearch",
+                    "results": [{"ref_id": "turn3view0", "url": "https://openai.com/model"}]
+                }}
+            }),
+            &mut stream_state,
+        );
+        feed(
+            json!({
+                "method": "item/agentMessage/delta",
+                "params": {"threadId": "thread-1", "turnId": "turn-1", "delta": raw}
+            }),
+            &mut stream_state,
+        );
+        // `turn/completed` echoes the same raw text, as the provider does.
+        feed(
+            json!({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [{"type": "agentMessage", "id": "msg-1", "text": raw}]
+                    }
+                }
+            }),
+            &mut stream_state,
+        );
+
+        let mut text = String::new();
+        while let Ok(event) = event_rx.try_recv() {
+            if let DriverEvent::TextDelta(delta) = event {
+                text.push_str(&delta);
+            }
+        }
+        // The citation renders once, with the separator the rewriter inserts.
+        assert_eq!(text, "Claim. [1](https://openai.com/model)");
     }
 
     #[test]

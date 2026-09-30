@@ -180,11 +180,52 @@ export function sessionBusy(session: Pick<AgentSession, 'status'>): boolean {
 /** A list projection has no turns, so its status is the best available
  * signal. Once hydrated, a settled latest turn wins over a lagging status. */
 export function sessionIsRunning(
-  session: Pick<AgentSession, 'status' | 'turns'>,
+  session: Pick<AgentSession, 'status'> & Partial<Pick<AgentSession, 'turns'>>,
 ): boolean {
   if (session.status !== 'connecting' && session.status !== 'working') return false;
-  const latestTurn = session.turns.at(-1);
+  const latestTurn = session.turns?.at(-1);
   return !latestTurn || latestTurn.status === 'running';
+}
+
+/** The fields the task list draws: identity, title, provider, model, status
+ *  and recency. Everything else — messages, transcript blocks, turns,
+ *  tool activity — is transcript detail the list never reads.
+ *
+ *  The sidebar keys its grouping, sorting and row identity off this shape,
+ *  so a streamed delta must not reach it: the reducer bumps `updated_at` and
+ *  `runtime_event_cursor` on every event, and passing those through would
+ *  rebuild every row at the stream commit rate. `created_at` rides along
+ *  because it is when a task was started, and `last_reply_at` because it is
+ *  what promotes a task to the top of the list. */
+export type SessionListSummary = Pick<
+  AgentSession,
+  | 'id'
+  | 'title'
+  | 'auto_title'
+  | 'project_id'
+  | 'provider'
+  | 'model'
+  | 'status'
+  | 'created_at'
+  | 'last_reply_at'
+  | 'archived_at'
+>;
+
+/** Project a session to the fields the task list reads, dropping transcript
+ *  detail so a stream commit cannot invalidate the list. */
+export function sessionListSummary(session: AgentSession): SessionListSummary {
+  return {
+    id: session.id,
+    title: session.title,
+    auto_title: session.auto_title,
+    project_id: session.project_id,
+    provider: session.provider,
+    model: session.model,
+    status: session.status,
+    created_at: session.created_at,
+    last_reply_at: session.last_reply_at,
+    archived_at: session.archived_at,
+  };
 }
 
 /** Mirror of the desktop's `session_has_active_provider_turn`

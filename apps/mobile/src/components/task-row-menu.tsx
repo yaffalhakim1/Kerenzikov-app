@@ -1,6 +1,7 @@
 import { MenuView, type MenuAction } from '@expo/ui/community/menu';
 
 import { AppPressable } from '@/components/app-pressable';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 
 import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
 
@@ -23,10 +24,11 @@ export function TaskRowMenu({
   selected,
   style,
 }: TaskRowMenuProps) {
+  const scheme = useColorScheme();
   return (
     <MenuView
       actions={Actions}
-      containerColor="#ffffff"
+      colorScheme={scheme}
       onPressAction={({ nativeEvent }) => {
         if (nativeEvent.event === 'rename') onRename();
         else if (nativeEvent.event === 'remove') onRemove();

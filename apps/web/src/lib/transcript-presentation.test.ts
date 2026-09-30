@@ -165,11 +165,11 @@ describe('desktop transcript language', () => {
 
   test('adds desktop calendar context to message times', () => {
     const now = new Date(2026, 7, 9, 16, 0)
-    expect(formatMessageTime(seconds(2026, 7, 9, 9, 5), now, 'en-US')).toBe('9:05 AM')
-    expect(formatMessageTime(seconds(2026, 7, 8, 17, 0), now, 'en-US')).toBe('Yesterday 5:00 PM')
-    expect(formatMessageTime(seconds(2026, 7, 7, 13, 12), now, 'en-US')).toBe('Friday 1:12 PM')
-    expect(formatMessageTime(seconds(2026, 4, 12, 23, 0), now, 'en-US')).toBe('May 12th, 11:00 PM')
-    expect(formatMessageTime(seconds(2024, 7, 4, 11, 0), now, 'en-US')).toBe('Aug 4th 2024, 11:00 AM')
+    expect(formatMessageTime(seconds(2026, 7, 9, 9, 5), now, 'en-US')).toBe('09:05')
+    expect(formatMessageTime(seconds(2026, 7, 8, 17, 0), now, 'en-US')).toBe('Yesterday 17:00')
+    expect(formatMessageTime(seconds(2026, 7, 7, 13, 12), now, 'en-US')).toBe('Friday 13:12')
+    expect(formatMessageTime(seconds(2026, 4, 12, 23, 0), now, 'en-US')).toBe('May 12th, 23:00')
+    expect(formatMessageTime(seconds(2024, 7, 4, 11, 0), now, 'en-US')).toBe('Aug 4th 2024, 11:00')
   })
 
   test('formats message times without Intl.Locale and Intl.RelativeTimeFormat (Hermes)', () => {
@@ -180,8 +180,8 @@ describe('desktop transcript language', () => {
     globalIntl.RelativeTimeFormat = undefined
     try {
       const now = new Date(2026, 7, 9, 16, 0)
-      expect(formatMessageTime(seconds(2026, 7, 8, 17, 0), now, 'en-US')).toBe('Yesterday 5:00 PM')
-      expect(formatMessageTime(seconds(2026, 4, 12, 23, 0), now, 'en-US')).toBe('May 12th, 11:00 PM')
+      expect(formatMessageTime(seconds(2026, 7, 8, 17, 0), now, 'en-US')).toBe('Yesterday 17:00')
+      expect(formatMessageTime(seconds(2026, 4, 12, 23, 0), now, 'en-US')).toBe('May 12th, 23:00')
     } finally {
       globalIntl.Locale = savedLocale
       globalIntl.RelativeTimeFormat = savedRelative

@@ -21,6 +21,7 @@ import * as Haptics from 'expo-haptics';
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
+  Dimensions,
   Easing,
   Image,
   Linking,
@@ -405,6 +406,21 @@ const scrollContentStyle = { minWidth: '100%' } as const;
  *  reading as a table, so the grid keeps this width and pans. */
 const TABLE_MIN_WIDTH = 260;
 
+/** The transcript column's cap, mirroring MAX_CONTENT_WIDTH in
+ *  components/transcript-list.tsx. Duplicated rather than imported because
+ *  the list already imports this module and the cycle would be circular. */
+const TRANSCRIPT_MAX_WIDTH = 736;
+/** The list's horizontal padding (Spacing.three), taken out of the budget. */
+const TRANSCRIPT_GUTTER = 32;
+
+/** The width a table may occupy before it starts panning. A phone's transcript
+ *  column is narrower than most tables, and a fitted table reads far better
+ *  than one that demands a long horizontal drag. */
+function tableBudget(): number {
+  const viewport = Dimensions.get('window').width;
+  return Math.max(TABLE_MIN_WIDTH, Math.min(viewport, TRANSCRIPT_MAX_WIDTH) - TRANSCRIPT_GUTTER);
+}
+
 /**
  * Copy control for a fenced block, mounted in the block's header.
  *
@@ -545,12 +561,12 @@ function renderTable(
   const cells = [...(head ? [head] : []), ...rows].map((row) =>
     Array.from({ length: columns }, (_, index) => flattenInline(row.children[index]?.children ?? '')),
   );
-  // Every column gets the width its own longest line needs, and the grid is
-  // their sum. Sizing the grid this way is what lets it exceed the phone and
-  // scroll: a phone cannot fit a wide table, and wrapping every cell to reach
-  // an arbitrary width reads far worse than panning a table that kept its
-  // shape. The readable floor keeps a narrow table from looking cramped.
-  const columnWidths = columnWidthsFor(cells, columns);
+  // Every column asks for the width its own longest line needs, and the grid is
+  // the sum of those — but only up to the transcript column's own width. A table
+  // that fits keeps its natural columns; a wider one is fitted to the budget so
+  // the cells wrap instead of demanding a long horizontal drag. Past the readable
+  // floor (more columns than the width can hold) it still overflows and pans.
+  const columnWidths = columnWidthsFor(cells, columns, tableBudget());
   const gridWidth = Math.max(TABLE_MIN_WIDTH, columnWidths.reduce((sum, w) => sum + w, 0));
   const renderRow = (
     row: (typeof node.children)[number],
