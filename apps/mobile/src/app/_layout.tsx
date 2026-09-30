@@ -10,10 +10,11 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
-import { Platform, StyleSheet, useColorScheme } from "react-native";
+import { Platform, StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { Colors } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
 import {
   HeaderAction,
   HeaderActionGroup,
@@ -24,6 +25,7 @@ import { TaskDrawerHost, useTaskDrawer } from "@/components/task-drawer";
 import { DaemonProvider, useDaemon } from "@/lib/daemon-context";
 import { RuntimeProvider } from "@/lib/runtime-context";
 import { KeyboardOffsetProvider } from "@/lib/keyboard-offset";
+import { ThemePreferenceProvider } from "@/lib/theme-preference-context";
 
 /** Deep links and state restores keep the new-task home as the stack anchor. */
 export const unstable_settings = { anchor: "index" };
@@ -55,6 +57,24 @@ const floatingHeader = {
 } satisfies NativeStackNavigationOptions;
 
 export default function RootLayout() {
+  return (
+    <GestureHandlerRootView style={styles.root}>
+      <ThemePreferenceProvider>
+        <ThemedApp />
+      </ThemePreferenceProvider>
+    </GestureHandlerRootView>
+  );
+}
+
+/**
+ * Everything the theme reaches, rendered *inside* the preference provider.
+ *
+ * The split is load-bearing: this component reads the resolved scheme to build
+ * the navigation theme, and a provider cannot be read by the component that
+ * renders it — doing it in one component threw "must be used inside
+ * ThemePreferenceProvider" on launch.
+ */
+function ThemedApp() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme === "dark" ? "dark" : "light"];
   const navigationTheme =
@@ -76,9 +96,8 @@ export default function RootLayout() {
           },
         };
   return (
-    <GestureHandlerRootView style={styles.root}>
-      <KeyboardOffsetProvider>
-        <QueryClientProvider client={queryClient}>
+    <KeyboardOffsetProvider>
+      <QueryClientProvider client={queryClient}>
         <DaemonProvider>
           <RuntimeProvider>
             <ThemeProvider value={navigationTheme}>
@@ -90,8 +109,7 @@ export default function RootLayout() {
           </RuntimeProvider>
         </DaemonProvider>
       </QueryClientProvider>
-      </KeyboardOffsetProvider>
-    </GestureHandlerRootView>
+    </KeyboardOffsetProvider>
   );
 }
 
