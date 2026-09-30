@@ -30,6 +30,16 @@ const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(25);
 /// not reading. Keeping the connection would let its event queue grow without
 /// bound, so it is dropped; clients reconnect and resume from their cursors.
 const SOCKET_WRITE_STALL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The daemon pings every connected client at this interval so an idle
+/// connection keeps producing traffic. Without it, a session sitting between
+/// turns sends nothing for minutes, NAT gateways and Wi-Fi power management
+/// silently reap the mapping, and the next real exchange fails with a drop
+/// the client has to detect and recover from. Clients answer at the transport
+/// layer (tungstenite auto-pongs; browsers and React Native do the same), so
+/// this needs no client-side change. It also turns dead-peer detection from
+/// "whenever the next write happens" into one ping cycle.
+pub const DEFAULT_CLIENT_KEEPALIVE_PING_INTERVAL: Duration = Duration::from_secs(25);
 const MAX_HANDSHAKE_MESSAGE_BYTES: usize = 64 * 1024;
 const MAX_CONNECTIONS: usize = 64;
 const MAX_REPLAY_EVENTS_PER_SESSION: usize = 2048;
@@ -49,7 +59,7 @@ const MAX_CACHED_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const NATIVE_CLIENT_HEADER: &str = "x-waku-client";
 const NATIVE_CLIENT_HEADER_VALUE: &str = "native";
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ServerOptions {
     /// Browser WebSocket handshakes carry an Origin header. Most native clients
     /// do not; React Native does and identifies itself with `x-waku-client`.
@@ -59,6 +69,19 @@ pub struct ServerOptions {
     /// shutdown control message. Service-managed daemons keep running when an
     /// authenticated client disconnects.
     pub allow_shutdown: bool,
+    /// How often an idle connection is pinged. Tests shrink it; production
+    /// uses [DEFAULT_CLIENT_KEEPALIVE_PING_INTERVAL].
+    pub client_keepalive_interval: Duration,
+}
+
+impl Default for ServerOptions {
+    fn default() -> Self {
+        Self {
+            allowed_origins: HashSet::new(),
+            allow_shutdown: false,
+            client_keepalive_interval: DEFAULT_CLIENT_KEEPALIVE_PING_INTERVAL,
+        }
+    }
 }
 
 struct ConnectionPermit(Arc<AtomicUsize>);
@@ -685,14 +708,30 @@ fn handle_connection(
     let (subscriber, kicked) = Subscriber::new(outgoing.clone());
     let subscriber_id = hub.subscribe(&resume_from, subscriber);
 
+    // Any successful write counts as liveness, so queued events reset the
+    // cadence just as a ping does.
+    let mut last_keepalive_write = std::time::Instant::now();
+
     'connection: while !shutdown.load(Ordering::Acquire) {
         if kicked.try_recv().is_ok() {
             break;
         }
+        let mut wrote = false;
         while let Ok(message) = outgoing_rx.try_recv() {
             if write_json(&mut socket, &message).is_err() {
                 break 'connection;
             }
+            wrote = true;
+        }
+        if wrote {
+            last_keepalive_write = std::time::Instant::now();
+        } else if last_keepalive_write.elapsed() >= options.client_keepalive_interval {
+            // An idle connection still needs traffic: see the constant's notes.
+            if socket.send(Message::Ping(tungstenite::Bytes::new())).is_err() {
+                break 'connection;
+            }
+            let _ = socket.flush();
+            last_keepalive_write = std::time::Instant::now();
         }
         match socket.read() {
             Ok(Message::Text(text)) => match serde_json::from_str(text.as_ref()) {
@@ -1370,6 +1409,76 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+
+    #[test]
+    fn idle_connections_receive_keepalive_pings() {
+        // An idle connection must keep producing traffic, or NAT gateways and
+        // Wi-Fi power management silently reap it and the client sees a drop
+        // out of nowhere. The daemon pings on a cadence; the transport-level
+        // pong is the client's job (tungstenite, browsers, React Native).
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(TestBackend::default()),
+                server_shutdown,
+                ServerOptions {
+                    client_keepalive_interval: Duration::from_millis(500),
+                    ..ServerOptions::default()
+                },
+            )
+            .unwrap()
+        });
+
+        use tungstenite::client::IntoClientRequest;
+        let request = format!("ws://{address}/v1")
+            .into_client_request()
+            .unwrap();
+        let stream = std::net::TcpStream::connect(address).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let (mut socket, _response) = tungstenite::client(request, stream).unwrap();
+
+        let hello = serde_json::to_string(&ClientMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            token: "secret".into(),
+            client_id: Uuid::new_v4(),
+            resume_from: Vec::new(),
+        })
+        .unwrap();
+        socket
+            .send(Message::Text(hello.into()))
+            .expect("send hello");
+
+        // Read until a ping arrives; everything else in between is fine.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut pinged = false;
+        while std::time::Instant::now() < deadline {
+            match socket.read() {
+                Ok(Message::Ping(_)) => {
+                    pinged = true;
+                    break;
+                }
+                Ok(Message::Text(_)) => continue,
+                Ok(Message::Pong(_)) => continue,
+                Ok(_) => continue,
+                Err(tungstenite::Error::Io(error))
+                    if error.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    continue
+                }
+                Err(error) => panic!("unexpected read error: {error}"),
+            }
+        }
+        assert!(pinged, "the daemon must ping an idle connection");
+
+        let _ = socket.send(Message::Close(None));
+        shutdown.store(true, Ordering::Release);
+        server.join().unwrap();
+    }
     #[test]
     fn websocket_round_trip_sequences_provider_events() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
