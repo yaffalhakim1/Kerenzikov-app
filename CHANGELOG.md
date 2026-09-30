@@ -12,6 +12,29 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.39]
+
+- The phone's task list no longer stutters while an agent is working. The list
+  and the open transcript were sharing one cache, so every streamed token
+  re-sorted the list and rebuilt every row about eight times a second — even
+  with the drawer closed. The list now tracks only what it draws.
+- Codex replies are no longer printed twice. A reply containing a citation was
+  compared against the wrong copy of its own text at the end of the turn, so
+  the whole answer was appended a second time.
+- Wide tables in a reply now fit the screen. Cells wrap to the column width
+  instead of pushing the table into a long sideways scroll; a table with more
+  columns than the phone can hold still pans, because squeezing those to
+  slivers reads worse than scrolling.
+- Choose your theme on the phone. Settings has an Appearance section with
+  System, Light and Dark. System follows your phone; an explicit choice applies
+  everywhere, including the native menus, which no longer stay white in dark
+  mode.
+- The composer no longer shows the context ring twice — it stays in the task
+  header only.
+- The assistant's footer now names the model that wrote the reply, beside the
+  copy button.
+- Message times are 24-hour, on the phone and in the browser client alike.
+
 ## [0.1.38]
 
 - The phone app starts much faster. It used to hold the splash screen until it
