@@ -2181,7 +2181,15 @@ fn codex_plan_usage(snapshot: Option<&Value>) -> Option<crate::usage::PlanUsage>
 /// The reply is streamed through deltas, but `turn/completed` carries the
 /// authoritative final `agentMessage` text. Return the suffix the deltas never
 /// delivered so the caller can append it: `None` means the stream already
-/// matches, and a prefix mismatch falls back to the provider's full text.
+/// matches.
+///
+/// A replayed `turn/completed` after the journal evicted the turn's earliest
+/// deltas leaves the buffer holding only the reply's tail — the buffer is
+/// then a suffix of the final text, and emitting the provider's full text
+/// there re-streamed whole replies on top of what was already on screen. The
+/// repair covers the head the stream is actually missing; a buffer that is
+/// neither a prefix nor a suffix has lost its relationship to the final text
+/// entirely and is left alone rather than guessed at.
 fn missing_agent_text(params: &Value, streamed: &str) -> Option<String> {
     let final_text = params
         .pointer("/turn/items")
@@ -2197,7 +2205,17 @@ fn missing_agent_text(params: &Value, streamed: &str) -> Option<String> {
     if let Some(remainder) = final_text.strip_prefix(streamed) {
         return Some(remainder.to_owned());
     }
-    Some(final_text)
+    // A replayed completion after the journal evicted the turn's earliest
+    // deltas leaves only the reply's tail in the buffer: the final text is
+    // that tail preceded by the head the stream never delivered. Emit the
+    // head. A buffer that is neither a prefix nor a suffix has lost its
+    // relationship to the final text entirely; re-emitting the full text
+    // there re-streamed whole replies on top of what was on screen, so it
+    // is left alone instead.
+    if let Some(head) = final_text.strip_suffix(streamed) {
+        return (!head.is_empty()).then(|| head.to_owned());
+    }
+    None
 }
 
 fn codex_activity_kind(item: &Value) -> Option<ActivityKind> {
@@ -3730,6 +3748,77 @@ Stay in exploration mode.
         }
         // The citation renders once, with the separator the rewriter inserts.
         assert_eq!(text, "Claim. [1](https://openai.com/model)");
+    }
+
+    #[test]
+    fn a_replayed_completion_after_lost_head_deltas_repairs_only_the_gap() {
+        // Regression: after a daemon restart the replay journal can hold only
+        // the tail of a reply — its earliest deltas were evicted. The streamed
+        // buffer is then neither empty, a prefix, nor a match of the final
+        // text, and the old fallback re-emitted the *entire* reply on top of
+        // what was already on screen. What did arrive is a trusted tail; the
+        // repair must cover only the gap before it.
+        let thread_id = Mutex::new(Some("thread-1".to_owned()));
+        let turn_id = Mutex::new(Some("turn-1".to_owned()));
+        let turn_ids = Mutex::new(vec!["turn-1".to_owned()]);
+        let pending_rollbacks = Mutex::new(HashMap::new());
+        let pending_steers = Mutex::new(HashMap::new());
+        let background_rpcs = Mutex::new(BackgroundRpcState::default());
+        let goal_rpcs = Mutex::new(GoalRpcState::default());
+        let (goal_commands, _goal_command_rx) = unbounded();
+        let (event_tx, event_rx) = unbounded();
+        let mut stream_state = CodexStreamState::default();
+
+        let feed = |value: Value, stream_state: &mut CodexStreamState| {
+            handle_codex_message(
+                value,
+                &thread_id,
+                &turn_id,
+                &turn_ids,
+                &pending_rollbacks,
+                &pending_steers,
+                &background_rpcs,
+                &goal_rpcs,
+                &goal_commands,
+                &event_tx,
+                stream_state,
+            );
+        };
+
+        // The journal's surviving tail: the reply's opening deltas are gone.
+        feed(
+            json!({
+                "method": "item/agentMessage/delta",
+                "params": {"threadId": "thread-1", "turnId": "turn-1", "delta": "ready. Ship it."}
+            }),
+            &mut stream_state,
+        );
+        // The replayed `turn/completed` carries the authoritative full text.
+        feed(
+            json!({
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {
+                        "id": "turn-1",
+                        "status": "completed",
+                        "items": [
+                            {"type": "agentMessage", "id": "msg-1", "text": "The fix is ready. Ship it."}
+                        ]
+                    }
+                }
+            }),
+            &mut stream_state,
+        );
+
+        let mut text = String::new();
+        while let Ok(event) = event_rx.try_recv() {
+            if let DriverEvent::TextDelta(delta) = event {
+                text.push_str(&delta);
+            }
+        }
+        // Only the head the stream never delivered; not the whole reply again.
+        assert_eq!(text, "ready. Ship it.The fix is ");
     }
 
     #[test]
