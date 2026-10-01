@@ -437,13 +437,10 @@ impl CodexDriver {
                                 approval_policy,
                                 approvals_reviewer,
                                 sandbox,
+                                mode,
+                                model.as_deref(),
+                                reasoning_effort.as_deref(),
                             );
-                            if let Some(model) = model.as_deref() {
-                                params["model"] = json!(model);
-                            }
-                            if let Some(reasoning_effort) = reasoning_effort.as_deref() {
-                                params["effort"] = json!(reasoning_effort);
-                            }
                             if let Some(service_tier) = service_tier.as_deref() {
                                 params["serviceTier"] = json!(service_tier);
                             }
@@ -897,8 +894,11 @@ fn turn_start_params(
     approval_policy: &str,
     approvals_reviewer: &str,
     sandbox: &str,
+    mode: RuntimeMode,
+    model: Option<&str>,
+    reasoning_effort: Option<&str>,
 ) -> Value {
-    json!({
+    let mut params = json!({
         "threadId": thread_id,
         "input": [{"type": "text", "text": text}],
         "approvalPolicy": approval_policy,
@@ -907,7 +907,24 @@ fn turn_start_params(
         // Some current models default reasoning summaries to `none`. Waku has
         // a native reasoning disclosure, so explicitly request readable text.
         "summary": "auto"
-    })
+    });
+    // Codex's own Plan mode is a collaboration mode, not a sandbox: it swaps
+    // in planning instructions and gates the write tools. The read-only
+    // sandbox above is still the enforcement backstop, but without this the
+    // session runs in Default mode and plan-only behaviour never activates.
+    // The settings mirror what the TUI sends: the session's own model and
+    // effort, so selecting Plan does not silently change either.
+    if mode == RuntimeMode::Plan {
+        params["collaborationMode"] = json!({
+            "mode": "plan",
+            "settings": {
+                "model": model.unwrap_or(""),
+                "reasoningEffort": reasoning_effort,
+                "developerInstructions": null,
+            },
+        });
+    }
+    params
 }
 
 fn toml_string(value: &str) -> String {
@@ -3067,11 +3084,60 @@ Stay in exploration mode.
             "never",
             "user",
             "danger-full-access",
+            RuntimeMode::FullAccess,
+            None,
+            None,
         );
 
         assert_eq!(params["summary"], "auto");
         assert_eq!(params["threadId"], "thread-1");
         assert_eq!(params["input"][0]["text"], "Inspect the failure");
+        // Only Plan carries a collaboration mode; other modes stay bare.
+        assert!(params.get("collaborationMode").is_none());
+    }
+
+    #[test]
+    fn plan_mode_sends_the_collaboration_mode() {
+        let params = turn_start_params(
+            "thread-1",
+            "Plan the migration".into(),
+            "untrusted",
+            "user",
+            "read-only",
+            RuntimeMode::Plan,
+            Some("deepseek-v4.1-flash"),
+            Some("medium"),
+        );
+
+        let mode = &params["collaborationMode"];
+        assert_eq!(mode["mode"], "plan");
+        // The session's own selection rides along, so choosing Plan never
+        // silently changes the model or effort.
+        assert_eq!(mode["settings"]["model"], "deepseek-v4.1-flash");
+        assert_eq!(mode["settings"]["reasoningEffort"], "medium");
+        assert!(mode["settings"]["developerInstructions"].is_null());
+        // The read-only sandbox remains the enforcement backstop.
+        assert_eq!(params["sandboxPolicy"], codex_sandbox_policy("read-only"));
+    }
+
+    #[test]
+    fn plan_mode_without_a_session_model_still_sends_the_mode() {
+        // A session that never picked a model must not lose Plan just because
+        // there is nothing to echo into settings.
+        let params = turn_start_params(
+            "thread-1",
+            "Plan the migration".into(),
+            "untrusted",
+            "user",
+            "read-only",
+            RuntimeMode::Plan,
+            None,
+            None,
+        );
+
+        assert_eq!(params["collaborationMode"]["mode"], "plan");
+        assert_eq!(params["collaborationMode"]["settings"]["model"], "");
+        assert!(params["collaborationMode"]["settings"]["reasoningEffort"].is_null());
     }
 
     #[test]
