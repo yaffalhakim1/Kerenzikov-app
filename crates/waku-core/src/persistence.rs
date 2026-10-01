@@ -1685,6 +1685,26 @@ fn write_messages(
             params![session_id, session.messages.len() as i64],
         )
         .map_err(to_io_error)?;
+    // This projection is the authority for the session: drop rows another
+    // client's save left behind. Two attached clients mint their own message
+    // ids for the same streamed text, and the tail delete above only clears
+    // rows past the end — rows interleaved at occupied positions survived as
+    // duplicates, resurrecting older turns mid-transcript after a reconnect.
+    // An empty transcript needs no pass; the tail delete already cleared it.
+    if !session.messages.is_empty() {
+        let keep = session
+            .messages
+            .iter()
+            .map(|message| format!("'{}'", message.id))
+            .collect::<Vec<_>>()
+            .join(",");
+        transaction
+            .execute(
+                &format!("DELETE FROM messages WHERE session_id = ?1 AND id NOT IN ({keep})"),
+                params![session_id],
+            )
+            .map_err(to_io_error)?;
+    }
     Ok(current)
 }
 
@@ -3183,6 +3203,71 @@ mod tests {
                 .messages
                 .len(),
             1
+        );
+        fs::remove_dir_all(directory).ok();
+    }
+
+    #[test]
+    fn a_save_converges_away_another_clients_duplicate_message_rows() {
+        // Regression: two attached clients mint their own ids for the same
+        // streamed text, and both save. The tail delete only clears rows past
+        // the end, so a foreign projection's rows interleaved at occupied
+        // positions survived — resurrecting older turns mid-transcript after
+        // a reconnect (turn 1's rows reappearing under turn 25's). This save
+        // is the authority for the session: rows it did not write must go.
+        let directory = temporary_directory();
+        let store = store_in(&directory);
+        let mut state = PersistedState::fresh(PathBuf::from("/tmp/project"));
+        state.sessions[0].begin_turn("First");
+        state.sessions[0].push_message(MessageRole::User, "one");
+        state.sessions[0].push_message(MessageRole::Assistant, "two");
+        state.sessions[0].finish_active_turn(crate::model::TurnStatus::Completed);
+        store.save(&mut state).unwrap();
+
+        // Simulate the other client's save: same positions, different ids.
+        let session_id = state.sessions[0].id;
+        let foreign = Uuid::new_v4();
+        let connection = Connection::open(directory.join("app.db")).unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages(
+                     id, session_id, position, role, content, attachments,
+                     created_at, streaming
+                 ) VALUES(?1, ?2, 1, 'assistant', 'two', '[]', strftime('%s','now'), 0)",
+                params![foreign.to_string(), session_id.to_string()],
+            )
+            .unwrap();
+        drop(connection);
+
+        // The next save sees the session only when something marked it dirty —
+        // as every stream commit does — so mirror that before saving again.
+        state.mark_session_dirty(session_id);
+        store.save(&mut state).unwrap();
+
+        let connection = Connection::open(directory.join("app.db")).unwrap();
+        let foreign_rows: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE id = ?1",
+                params![foreign.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_id = ?1",
+                params![session_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        drop(connection);
+        assert_eq!(foreign_rows, 0, "the foreign row is gone");
+        assert_eq!(count, 3, "this save's own rows stay");
+
+        assert_eq!(
+            load_hydrated(&store_in(&directory)).sessions[0]
+                .messages
+                .len(),
+            3
         );
         fs::remove_dir_all(directory).ok();
     }
