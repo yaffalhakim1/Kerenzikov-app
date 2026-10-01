@@ -58,6 +58,7 @@ fn main() -> anyhow::Result<()> {
         waku_core::ServerOptions {
             allowed_origins: arguments.allowed_origins.into_iter().collect(),
             allow_shutdown: arguments.parent_pid.is_some(),
+            client_keepalive_interval: waku_core::DEFAULT_CLIENT_KEEPALIVE_PING_INTERVAL,
         },
     )
 }

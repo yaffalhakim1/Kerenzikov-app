@@ -400,15 +400,41 @@ const UNPRICEABLE_MODELS: [&str; 6] = [
     "fable",
 ];
 
-/// Canonicalises a model name for lookup: strips a `provider/` prefix
-/// (LiteLLM publishes both `claude-opus-5` and `anthropic/claude-opus-5`) and
-/// lowercases, since transcripts are inconsistent about casing.
+/// Canonicalises a model name for lookup.
+///
+/// - Strips a `provider/` prefix: LiteLLM publishes both `claude-opus-5` and
+///   `anthropic/claude-opus-5`.
+/// - Lowercases: transcripts are inconsistent about casing.
+/// - Collapses a version separator between digits to a dot: LiteLLM writes
+///   `deepseek-v4.1-flash` and `glm-5.3-flash`, while the CLIs record the same
+///   models with dashes (`deepseek-v4-1-flash`). Without this, every session
+///   on such a model prices as unpriced and contributes 0.0 to the cost page.
+///   Only a single character between two digits is rewritten, so an internal
+///   name like `gpt-oss-120b` (dashes that are not version separators) is
+///   untouched where the table agrees with it.
 fn normalize_model_name(model: &str) -> String {
     let trimmed = model.trim().to_ascii_lowercase();
-    match trimmed.rfind('/') {
-        Some(slash) => trimmed[slash + 1..].to_owned(),
-        None => trimmed,
+    let base = match trimmed.rfind('/') {
+        Some(slash) => &trimmed[slash + 1..],
+        None => trimmed.as_str(),
+    };
+    // Collapse `-` between digits to the dot the rate table uses. Compared as
+    // chars rather than bytes: indexing bytes would corrupt multi-byte UTF-8.
+    let chars: Vec<char> = base.chars().collect();
+    let mut out = String::with_capacity(base.len());
+    for (index, &current) in chars.iter().enumerate() {
+        if current == '-'
+            && index > 0
+            && index + 1 < chars.len()
+            && chars[index - 1].is_ascii_digit()
+            && chars[index + 1].is_ascii_digit()
+        {
+            out.push('.');
+        } else {
+            out.push(current);
+        }
     }
+    out
 }
 
 fn lookup_rate<'a>(table: &'a RateTable, model: &str) -> Option<&'a ModelRate> {
@@ -1910,9 +1936,41 @@ mod tests {
         );
         assert!(lookup_rate(&rates, "<synthetic>").is_none());
         assert!(lookup_rate(&rates, "anthropic/claude-fable-5").is_some());
+        // Version separators: LiteLLM publishes dots, the CLIs record dashes.
+        assert_eq!(
+            normalize_model_name("kenari/deepseek-v4-1-flash"),
+            "deepseek-v4.1-flash"
+        );
+        assert_eq!(normalize_model_name("glm-5-3-flash"), "glm-5.3-flash");
+        // A dash that is not a version separator must survive, so a table entry
+        // that itself uses dashes still matches.
+        assert_eq!(
+            normalize_model_name("gpt-oss-120b"),
+            "gpt-oss-120b"
+        );
     }
 
     #[test]
+    fn dashed_version_names_find_their_dotted_rate_table_entry() {
+        // The regression: Codex records `deepseek-v4-1-flash` while LiteLLM
+        // publishes `deepseek-v4.1-flash`, so every session on such a model
+        // priced as unpriced and the cost page stayed empty for it.
+        let rates = rate_table(
+            &[
+                ("deepseek-v4.1-flash", FLAT_RATE),
+                ("glm-5.3-flash", FLAT_RATE),
+                ("muse-spark-1.3-contributor", FLAT_RATE),
+            ],
+        );
+        assert!(lookup_rate(&rates, "deepseek-v4-1-flash").is_some());
+        assert!(lookup_rate(&rates, "kenari/deepseek-v4-1-flash").is_some());
+        assert!(lookup_rate(&rates, "glm-5-3-flash").is_some());
+        assert!(lookup_rate(&rates, "muse-spark-1-3-contributor").is_some());
+        // Free/experimental variants the table genuinely lacks stay unpriced
+        // rather than borrowing a neighbour generation's price.
+        assert!(lookup_rate(&rates, "agnes-3-0-flash:free").is_none());
+    }
+
     fn rate_tables_parse_and_round_trip_through_the_disk_cache() {
         let document: Value = serde_json::from_str(
             r#"{

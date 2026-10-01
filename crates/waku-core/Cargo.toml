@@ -45,3 +45,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+tungstenite = { version = "0.30", default-features = false, features = [
+	"handshake",
+	"rustls-tls-native-roots",
+] }
