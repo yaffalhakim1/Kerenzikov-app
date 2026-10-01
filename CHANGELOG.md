@@ -12,6 +12,17 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.41]
+
+- Codex Plan mode now actually plans. Plan previously only enforced a
+  read-only sandbox; Codex has its own plan mode on top of that, and the app
+  never asked for it, so the model could not write but also never produced a
+  plan. Selecting Plan now turns on Codex's planning behaviour, keeping the
+  model and reasoning effort you already picked.
+- The phone's Usage page now says how much of the cost total no published
+  model price could cover — the desktop and web already did, and without it a
+  partial total read as a bug rather than a coverage gap.
+
 ## [0.1.40]
 
 - Task costs are no longer blank. The Usage page prices a session by looking
