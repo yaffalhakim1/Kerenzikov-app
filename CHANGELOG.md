@@ -12,6 +12,20 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.42]
+
+- Transcripts no longer duplicate themselves. With more than one client
+  attached — the phone and the desktop watching the same task — each client
+  saved its own copy of every streamed message, and old turns could
+  reappear in the middle of the transcript after a reconnect. Saving now
+  removes message rows a session's save did not write, so copies converge
+  and already-duplicated transcripts clean themselves up.
+- Codex replies are no longer appended twice. When a reconnect replayed
+  only the tail of a reply, the app mistook the missing head for the whole
+  message and streamed the reply again on top of itself — visibly, the
+  second copy starting inside the first one's code fence. The repair now
+  fills in only what the stream actually missed.
+
 ## [0.1.41]
 
 - Codex Plan mode now actually plans. Plan previously only enforced a
