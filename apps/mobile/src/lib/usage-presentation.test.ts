@@ -11,6 +11,7 @@ import {
   planResetLabel,
   scanSummary,
   sortedProviders,
+  unpricedCostNotice,
   topModels,
   usageProviderLabel,
   usageWindowKey,
@@ -170,6 +171,26 @@ describe('usage breakdowns', () => {
 
   test('summarizes what the scan read', () => {
     expect(scanSummary(history())).toBe('1,500 files scanned · 4,200 records · 1.3s');
+  });
+});
+
+describe('unpriced cost notice', () => {
+  test('silent when every record priced', () => {
+    expect(unpricedCostNotice(history({ quality: { ...quality, unpricedShare: 0 } }))).toBeNull();
+  });
+
+  test('speaks up when part of the spend is unpriced', () => {
+    const notice = unpricedCostNotice(history({ quality: { ...quality, unpricedShare: 0.1 } }));
+    expect(notice).toBe('10% of this usage has no published model price, so the total understates real spend.');
+  });
+
+  test('covers the fully-unpriced case separately', () => {
+    const notice = unpricedCostNotice(history({ quality: { ...quality, unpricedShare: 1 } }));
+    expect(notice).toBe('None of this usage matched a known model price, so no cost total is shown.');
+  });
+
+  test('silent when rates are unavailable entirely — that case has its own banner', () => {
+    expect(unpricedCostNotice(history({ pricing: 'unavailable' }))).toBeNull();
   });
 });
 

@@ -120,6 +120,24 @@ export function scanSummary(history: UsageHistory): string {
   ].join(' · ');
 }
 
+/**
+ * Warning for the slice of usage the cost total cannot see, or null when
+ * every record priced. The desktop and web clients show this row in the
+ * quality table; the phone has room for one line, so it only speaks up when
+ * the share is worth an explanation — the rate table genuinely lacks prices
+ * for free and experimental model variants, so a small unpriced share is
+ * normal and not worth alarming anyone about.
+ */
+export function unpricedCostNotice(history: UsageHistory): string | null {
+  if (history.pricing === 'unavailable') return null;
+  const share = history.quality.unpricedShare;
+  if (share <= 0) return null;
+  if (share >= 0.99) {
+    return 'None of this usage matched a known model price, so no cost total is shown.';
+  }
+  return `${formatPercent(share)} of this usage has no published model price, so the total understates real spend.`;
+}
+
 function parseDay(day: string): Date {
   return new Date(`${day}T00:00:00Z`);
 }

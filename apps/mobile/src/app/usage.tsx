@@ -33,6 +33,7 @@ import {
   planResetLabel,
   scanSummary,
   sortedProviders,
+  unpricedCostNotice,
   topModels,
   usageProviderLabel,
   usageWindowKey,
@@ -170,6 +171,12 @@ export default function UsageScreen() {
                 Model rates are unavailable, so costs are incomplete.
               </Text>
             )}
+            {(() => {
+              const notice = unpricedCostNotice(history);
+              return notice ? (
+                <Text style={[styles.notice, { color: theme.warning }]}>{notice}</Text>
+              ) : null;
+            })}
 
             <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Providers</Text>
             <View
