@@ -12,6 +12,20 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.40]
+
+- Task costs are no longer blank. The Usage page prices a session by looking
+  the model up in a public rate table, and models whose version the agent CLI
+  writes with dashes (deepseek-v4-1-flash) never matched the table's dotted
+  form (deepseek-v4.1-flash) — so most sessions contributed nothing. Those
+  sessions are now priced; free and experimental variants with no published
+  rate still show as unpriced rather than guessing.
+- The app no longer drops its connection to the desktop after sitting idle.
+  Neither side of the link used to send any traffic between turns, and home
+  routers and Wi-Fi power management quietly forget connections like that; the
+  desktop now keeps the link warm, so the "reconnecting" banner after leaving
+  the app alone is gone.
+
 ## [0.1.39]
 
 - The phone's task list no longer stutters while an agent is working. The list
