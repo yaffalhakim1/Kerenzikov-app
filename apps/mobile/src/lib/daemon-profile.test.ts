@@ -4,6 +4,8 @@ import {
   displayHost,
   isDaemonPairingLink,
   isPrivateDaemonAddress,
+  isTailscaleAddress,
+  isTailscaleDaemonAddress,
   normalizeDaemonAddress,
   normalizeDaemonProfile,
   parseDaemonPairingLink,
@@ -49,6 +51,23 @@ describe('daemon profiles', () => {
     expect(isPrivateDaemonAddress('ws://[::1]:34123')).toBe(true);
     expect(isPrivateDaemonAddress('ws://[2001:db8::8]:34123')).toBe(false);
     expect(isPrivateDaemonAddress('wss://waku.example.com')).toBe(false);
+  });
+
+  test('recognises a tailnet address and nothing adjacent to it', () => {
+    // The CGNAT block Tailscale assigns from, checked at both edges.
+    expect(isTailscaleAddress('100.64.0.1')).toBe(true);
+    expect(isTailscaleAddress('100.100.12.8')).toBe(true);
+    expect(isTailscaleAddress('100.127.255.254')).toBe(true);
+    // Neighbouring public ranges and a plain LAN address are not tailnet.
+    expect(isTailscaleAddress('100.63.0.1')).toBe(false);
+    expect(isTailscaleAddress('100.128.0.1')).toBe(false);
+    expect(isTailscaleAddress('192.168.1.8')).toBe(false);
+
+    // The editor runs this on keystrokes, so an unparseable value is false,
+    // never a throw.
+    expect(isTailscaleDaemonAddress('ws://100.100.12.8:34123')).toBe(true);
+    expect(isTailscaleDaemonAddress('ws://192.168.1.8:34123')).toBe(false);
+    expect(isTailscaleDaemonAddress('not an address')).toBe(false);
   });
 
   test('creates compact initials', () => {

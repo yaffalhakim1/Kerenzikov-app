@@ -236,6 +236,9 @@ common.undo: 撤销
 session.archive: 归档
 session.unarchive: 取消归档
 session.archived_toast: "已归档“%{title}”"
+session.delete: 删除
+session.delete_confirm_title: 删除此任务？
+session.delete_confirm_body: 该任务及其对话记录将从所有设备的守护进程中移除，且无法撤销。
 sidebar.show_archived: 显示已归档
 session.new_task: 新任务
 sidebar.today: 今天

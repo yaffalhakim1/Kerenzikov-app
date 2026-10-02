@@ -17,6 +17,7 @@ import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ProviderIcon } from '@/components/provider-icon';
+import { Sheet, SheetRow } from '@/components/sheet';
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import {
   PROVIDERS,
@@ -37,6 +38,8 @@ import {
   withComputerUse,
   withProviderDisabled,
 } from '@/lib/daemon-settings';
+import { tapHaptic } from '@/lib/haptics';
+import { useDaemon } from '@/lib/daemon-context';
 import { providerLabel } from '@/lib/session-presentation';
 
 function UpdateRow() {
@@ -137,10 +140,12 @@ function UpdateRow() {
 
 export default function SettingsScreen() {
   const theme = useTheme();
+  const daemon = useDaemon();
   const { preference, setPreference } = useThemePreference();
   const settings = useDaemonSettings();
   const update = useUpdateDaemonSettings();
   const [localError, setLocalError] = useState<string | null>(null);
+  const [colorModeOpen, setColorModeOpen] = useState(false);
   const toggles = orderedProviderToggles(settings.data, PROVIDERS);
   const pending = update.isPending;
 
@@ -166,32 +171,74 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.content}>
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Appearance</Text>
         <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          {THEME_PREFERENCES.map((option, index) => (
-            <AppPressable
-              accessibilityLabel={`${themePreferenceLabel(option)} theme`}
-              accessibilityRole="button"
-              accessibilityState={{ selected: preference === option }}
-              key={option}
-              onPress={() => setPreference(option)}
-              style={({ pressed }) => [
-                styles.row,
-                index > 0
-                  ? { borderTopColor: theme.separator, borderTopWidth: StyleSheet.hairlineWidth }
-                  : null,
-                pressed ? { backgroundColor: theme.surfaceMuted } : null,
-              ]}>
-              <Text style={[styles.rowLabel, { color: theme.text }]}>
-                {themePreferenceLabel(option)}
-              </Text>
-              {preference === option && (
-                <AppSymbol
-                  name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-                  size={15}
-                  tintColor={NativeTint}
-                />
-              )}
-            </AppPressable>
-          ))}
+          {/* One row that opens a sheet, rather than three inline rows: the
+              setting is a single choice, and the current value is what the row
+              is for — the alternatives only matter while choosing. */}
+          <AppPressable
+            accessibilityLabel={`Color mode, ${themePreferenceLabel(preference)}`}
+            accessibilityRole="button"
+            onPress={() => setColorModeOpen(true)}
+            style={({ pressed }) => [
+              styles.row,
+              pressed ? { backgroundColor: theme.surfaceMuted } : null,
+            ]}>
+            <Text style={[styles.rowLabel, { color: theme.text }]}>Color mode</Text>
+            <Text style={[styles.rowValue, { color: theme.textTertiary }]}>
+              {themePreferenceLabel(preference)}
+            </Text>
+            <AppSymbol
+              name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+              size={13}
+              tintColor={theme.textTertiary}
+            />
+          </AppPressable>
+        </View>
+
+        <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Daemon</Text>
+        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          {/* Switching and adding both live on the Daemons screen, so this row
+              only reports which daemon is connected and opens it. The current
+              name is the value: a bare "Daemons" row hides the one fact that
+              matters here. */}
+          <AppPressable
+            accessibilityLabel={`Daemon, ${daemon.activeProfile?.name ?? 'none'}`}
+            accessibilityRole="button"
+            onPress={() => router.push('/daemons')}
+            style={({ pressed }) => [
+              styles.row,
+              pressed ? { backgroundColor: theme.surfaceMuted } : null,
+            ]}>
+            <Text style={[styles.rowLabel, { color: theme.text }]}>Daemon</Text>
+            <Text style={[styles.rowValue, { color: theme.textTertiary }]}>
+              {daemon.activeProfile?.name ?? 'None'}
+            </Text>
+            <AppSymbol
+              name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+              size={13}
+              tintColor={theme.textTertiary}
+            />
+          </AppPressable>
+          <AppPressable
+            accessibilityLabel="Add daemon"
+            accessibilityRole="button"
+            onPress={() => router.push('/daemon-editor')}
+            style={({ pressed }) => [
+              styles.row,
+              { borderTopColor: theme.separator, borderTopWidth: StyleSheet.hairlineWidth },
+              pressed ? { backgroundColor: theme.surfaceMuted } : null,
+            ]}>
+            <AppSymbol
+              name={{ ios: 'plus', android: 'add', web: 'add' }}
+              size={16}
+              tintColor={theme.accent}
+            />
+            <Text style={[styles.rowLabel, { color: theme.text }]}>Add daemon</Text>
+            <AppSymbol
+              name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+              size={13}
+              tintColor={theme.textTertiary}
+            />
+          </AppPressable>
         </View>
 
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Library</Text>
@@ -303,6 +350,24 @@ export default function SettingsScreen() {
           Settings are stored on the daemon and shared by every connected device.
         </Text>
       </ScrollView>
+
+      <Sheet
+        onDismiss={() => setColorModeOpen(false)}
+        title="Color mode"
+        visible={colorModeOpen}>
+        {THEME_PREFERENCES.map((option) => (
+          <SheetRow
+            key={option}
+            label={themePreferenceLabel(option)}
+            onPress={() => {
+              tapHaptic();
+              setPreference(option);
+              setColorModeOpen(false);
+            }}
+            selected={preference === option}
+          />
+        ))}
+      </Sheet>
     </View>
   );
 }

@@ -5,6 +5,7 @@ import { navigateBack } from "@/components/screen-header";
 import { useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Linking,
   Platform,
   PlatformColor,
   ScrollView,
@@ -21,9 +22,11 @@ import { Blocks } from "@/components/blocks";
 import { NativeTint, Radius } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { useDaemon } from "@/lib/daemon-context";
+import { tapHaptic } from "@/lib/haptics";
 import {
   isDaemonPairingLink,
   isPrivateDaemonAddress,
+  isTailscaleDaemonAddress,
   normalizeDaemonAddress,
   parseDaemonPairingLink,
 } from "@/lib/daemon-profile";
@@ -192,7 +195,7 @@ export default function DaemonEditorScreen() {
                     const pairing = parseDaemonPairingLink(value);
                     setAddress(pairing.address);
                     setToken(pairing.token);
-                    void Haptics.selectionAsync();
+                    tapHaptic();
                     return;
                   } catch (cause) {
                     setLocalError(
@@ -275,6 +278,8 @@ export default function DaemonEditorScreen() {
         </View>
 
         <ConnectionFootnote profile={Boolean(profile)} security={security} />
+
+        <TailscaleNote address={address} />
 
         {localError && (
           <View accessibilityLiveRegion="polite" style={styles.messageRow}>
@@ -377,6 +382,50 @@ export default function DaemonEditorScreen() {
 }
 
 type ConnectionSecurity = "secure" | "private" | "insecure" | "invalid" | null;
+
+/**
+ * Always-visible Tailscale guidance. The footnote above only explains the
+ * address once one is typed, so someone who has never heard of Tailscale — the
+ * person who most needs this — never learns it exists. This states the option
+ * up front, and flips to a confirmation once the address is a tailnet one.
+ */
+function TailscaleNote({ address }: { address: string }) {
+  const theme = useTheme();
+  const onTailnet = isTailscaleDaemonAddress(address);
+  return (
+    <View style={[styles.tailscaleCard, { backgroundColor: theme.surface }]}>
+      <View style={styles.tailscaleHeading}>
+        <AppSymbol
+          name={{ ios: "network", android: "lan", web: "lan" }}
+          size={15}
+          tintColor={onTailnet ? theme.success : theme.textTertiary}
+        />
+        <Text style={[styles.tailscaleTitle, { color: theme.text }]}>
+          {onTailnet ? "Tailnet address" : "Reach it from anywhere"}
+        </Text>
+      </View>
+      <Text style={[styles.tailscaleBody, { color: theme.textSecondary }]}>
+        {onTailnet
+          ? "This is a Tailscale address, so it works from any network, not just your home Wi-Fi."
+          : "Install Tailscale on your phone and the machine running Kerenzikov, sign in to the same account, then paste the address it shows for that machine. It reaches the daemon from any network, with no port forwarding."}
+      </Text>
+      {!onTailnet && (
+        <AppPressable
+          accessibilityLabel="Get Tailscale"
+          accessibilityRole="button"
+          onPress={() => {
+            void Linking.openURL("https://tailscale.com/download").catch(() => {});
+          }}
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+        >
+          <Text style={[styles.tailscaleLink, { color: theme.accent }]}>
+            Get Tailscale
+          </Text>
+        </AppPressable>
+      )}
+    </View>
+  );
+}
 
 function ConnectionFootnote({
   profile,
@@ -526,6 +575,22 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   messageText: { flex: 1, fontSize: 13, lineHeight: 18 },
+  tailscaleCard: {
+    borderRadius: Platform.select({ ios: 12, default: Radius.medium }),
+    gap: 6,
+    marginHorizontal: 16,
+    marginTop: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  tailscaleHeading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: 7,
+  },
+  tailscaleTitle: { fontSize: 14, fontWeight: "600" },
+  tailscaleBody: { fontSize: 13, lineHeight: 18 },
+  tailscaleLink: { fontSize: 13, fontWeight: "600", marginTop: 2 },
   formActions: {
     gap: 10,
     marginHorizontal: 16,

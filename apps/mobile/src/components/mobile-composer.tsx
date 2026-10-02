@@ -53,6 +53,7 @@ import {
   type LocalAttachmentFile,
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
+import { tapHaptic } from '@/lib/haptics';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
 import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { agentPresetAvailable } from '@/lib/session-presentation';
@@ -310,7 +311,7 @@ export function MobileComposer({
     if (!trigger) return;
     draftSync.markEdited();
     setDraft(replaceComposerTrigger(draft, trigger, command).text);
-    void Haptics.selectionAsync();
+    tapHaptic();
   }
 
   useEffect(() => setLocalError(null), [session.id]);
@@ -363,7 +364,7 @@ export function MobileComposer({
     attachmentImportTail.current = operation;
     try {
       await operation;
-      await Haptics.selectionAsync();
+      tapHaptic();
     } finally {
       pendingAttachmentImports.current -= 1;
       if (mounted.current && pendingAttachmentImports.current === 0) {
@@ -447,7 +448,7 @@ export function MobileComposer({
       draftSync.removeSubmittedDraft();
       setDraft('');
       setAttachments([]);
-      await Haptics.selectionAsync();
+      tapHaptic();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -791,7 +792,7 @@ function PermissionPanel({
             onPress={() => {
               setResponding(option.id);
               setError(null);
-              void Haptics.selectionAsync();
+              tapHaptic();
               void onRespond(option.id).catch((cause) => {
                 setError(cause instanceof Error ? cause.message : String(cause));
                 setResponding(null);
@@ -848,7 +849,7 @@ function UserInputPanel({
   const last = index === input.questions.length - 1;
 
   function toggle(label: string) {
-    void Haptics.selectionAsync();
+    tapHaptic();
     setCustomAnswers((values) => ({ ...values, [question.id]: '' }));
     setSelections((values) => {
       const previous = values[question.id] ?? [];

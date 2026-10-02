@@ -11,6 +11,7 @@ import {
   contextPercent,
   displaySessionTitle,
   expandTranscriptRows,
+  filterArchivedSessions,
   findActivityBlock,
   foldGroups,
   groupSessions,
@@ -21,7 +22,6 @@ import {
   stabilizeSessionSummaries,
   stabilizeTranscriptRows,
   turnOptionsForSession,
-  withoutHiddenSessions,
 } from './session-presentation';
 
 describe('task list projection', () => {
@@ -159,13 +159,19 @@ describe('mobile session presentation', () => {
     ]);
   });
 
-  test('drops removed sessions and returns the same array when none are marked', () => {
-    const sessions = [session({ id: 'a' }), session({ id: 'b' })];
-    // Identity matters: the drawer re-renders on every stream tick, so an
-    // unmarked list must not produce a new array.
-    expect(withoutHiddenSessions(sessions, new Set())).toBe(sessions);
-    expect(withoutHiddenSessions(sessions, new Set(['a'])).map((item) => item.id)).toEqual(['b']);
-    expect(withoutHiddenSessions(sessions, new Set(['a', 'b']))).toEqual([]);
+  test('hides archived tasks unless the toggle asks for them', () => {
+    const sessions = [
+      session({ id: 'a' }),
+      session({ id: 'b', archived_at: 1_000 }),
+    ];
+    expect(filterArchivedSessions(sessions, false).map((item) => item.id)).toEqual(['a']);
+    // Asking for archived tasks returns the list untouched.
+    expect(filterArchivedSessions(sessions, true)).toBe(sessions);
+
+    // The drawer re-renders on every stream tick, so a list with nothing
+    // archived must not produce a new array and invalidate every row.
+    const active = [session({ id: 'a' }), session({ id: 'c' })];
+    expect(filterArchivedSessions(active, false)).toBe(active);
   });
 
   test('folds a group to an empty section that keeps its header', () => {

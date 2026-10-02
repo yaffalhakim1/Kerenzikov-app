@@ -74,6 +74,7 @@ import {
   saveNewTaskExtras,
 } from '@/lib/composer-preferences-store';
 import { useDaemon } from '@/lib/daemon-context';
+import { tapHaptic } from '@/lib/haptics';
 import {
   modelHasConfigurableTraits,
   type ModelTraitSelection,
@@ -301,7 +302,7 @@ export default function NewTaskScreen() {
 
   function pick(apply: () => void) {
     return () => {
-      void Haptics.selectionAsync();
+      tapHaptic();
       apply();
       setOpenSheet(null);
     };
@@ -334,7 +335,7 @@ export default function NewTaskScreen() {
     attachmentImportTail.current = operation;
     try {
       await operation;
-      await Haptics.selectionAsync();
+      tapHaptic();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -532,7 +533,7 @@ export default function NewTaskScreen() {
               accessibilityRole="button"
               key={template.title}
               onPress={() => {
-                void Haptics.selectionAsync();
+                tapHaptic();
                 setPrompt(template.prompt);
               }}
               style={({ pressed }) => [
@@ -595,7 +596,7 @@ export default function NewTaskScreen() {
             label="Resume external session"
             value="Resume from CLI"
             onPress={() => {
-              void Haptics.selectionAsync();
+              tapHaptic();
               setResumeOpen(true);
             }}
           />
@@ -665,7 +666,7 @@ export default function NewTaskScreen() {
                 <AgentPresetMenu
                   agentPreset={agentPreset}
                   onApply={(selection) => {
-                    void Haptics.selectionAsync();
+                    tapHaptic();
                     setAgentPreset(selection.agentPreset);
                   }}
                   provider={provider}

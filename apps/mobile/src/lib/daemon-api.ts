@@ -473,6 +473,20 @@ export async function removeDaemonSession(
   expectResponse(await client.request({ type: 'removeSession' }, sessionId), 'ack');
 }
 
+/** Hide a task from the lists without destroying it, or bring it back. The
+ * recoverable counterpart to [removeDaemonSession]: the row, transcript and
+ * checkpoints all survive. */
+export async function setDaemonSessionArchived(
+  client: WakuClient,
+  sessionId: string,
+  archived: boolean,
+): Promise<void> {
+  expectResponse(
+    await client.request({ type: 'setSessionArchived', archived }, sessionId),
+    'ack',
+  );
+}
+
 export async function persistSession(
   client: WakuClient,
   session: AgentSession,

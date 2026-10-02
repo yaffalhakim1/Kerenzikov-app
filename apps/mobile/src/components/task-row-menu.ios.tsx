@@ -14,7 +14,9 @@ import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
  */
 export function TaskRowMenu({
   accessibilityLabel: label,
-  onRemove,
+  archived,
+  onArchive,
+  onDelete,
   onRename,
   onSelect,
   renderTrigger,
@@ -33,11 +35,11 @@ export function TaskRowMenu({
         onPrimaryAction={onSelect}>
         <Button label="Rename task" systemImage="pencil" onPress={onRename} />
         <Button
-          label="Remove from list"
-          role="destructive"
-          systemImage="eye.slash"
-          onPress={onRemove}
+          label={archived ? 'Unarchive' : 'Archive'}
+          systemImage={archived ? 'tray.and.arrow.up' : 'archivebox'}
+          onPress={onArchive}
         />
+        <Button label="Delete" role="destructive" systemImage="trash" onPress={onDelete} />
       </Menu>
     </Host>
   );

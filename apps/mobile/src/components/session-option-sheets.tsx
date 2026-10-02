@@ -6,7 +6,6 @@ import type {
   ProviderSessionSummary,
   RuntimeMode,
 } from '@waku/client';
-import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useState } from 'react';
 import {
   StyleSheet,
@@ -43,6 +42,7 @@ import {
 } from '@/lib/session-presentation';
 import { listProviderSessions, providerSessionNativeId } from '@/lib/daemon-api';
 import { useDaemon } from '@/lib/daemon-context';
+import { tapHaptic } from '@/lib/haptics';
 import { useRuntime } from '@/lib/runtime-context';
 
 export interface ModelSelection {
@@ -77,7 +77,7 @@ export function TurnSheet({
   const theme = useTheme();
 
   function pick(turnCount: number) {
-    void Haptics.selectionAsync();
+    tapHaptic();
     onPick(turnCount);
     onDismiss();
   }
@@ -134,7 +134,7 @@ export function ModelSheet({
   const efforts = selected?.reasoning_efforts ?? [];
 
   function pickModel(next: ProviderModel) {
-    void Haptics.selectionAsync();
+    tapHaptic();
     onApply({
       model: next.id,
       reasoningEffort: next.default_reasoning_effort ?? null,
@@ -179,7 +179,7 @@ export function ModelSheet({
                   key={effort.id}
                   label={effort.label}
                   onPress={() => {
-                    void Haptics.selectionAsync();
+                    tapHaptic();
                     onApply({ model: selected?.id ?? model, reasoningEffort: effort.id });
                     onDismiss();
                   }}
@@ -214,7 +214,7 @@ export function ModelTraitsSheet({
   const resolved = resolveModelTraitSelection(model, selection);
 
   function pick(changes: Partial<ModelTraitSelection>) {
-    void Haptics.selectionAsync();
+    tapHaptic();
     onApply(changes);
   }
 
@@ -364,7 +364,7 @@ export function ModelPickerSheet({
 
   function pickModel(next: ProviderModel) {
     if (!browsing) return;
-    void Haptics.selectionAsync();
+    tapHaptic();
     onApply({
       provider: browsing,
       model: next.id,
@@ -393,7 +393,7 @@ export function ModelPickerSheet({
                   label={providerLabel(id)}
                   leading={<ProviderIcon provider={id} size={20} />}
                   onPress={() => {
-                    void Haptics.selectionAsync();
+                    tapHaptic();
                     setBrowsing(id);
                     setSearch('');
                     slideTo(1);
@@ -541,7 +541,7 @@ export function AgentPresetSheet({
               key={preset.id}
               label={preset.name}
               onPress={() => {
-                void Haptics.selectionAsync();
+                tapHaptic();
                 onApply({ agentPreset: preset.id });
                 onDismiss();
               }}
@@ -579,7 +579,7 @@ export function AccessSheet({
           key={item.id}
           label={runtimeModeLabel(item.id)}
           onPress={() => {
-            void Haptics.selectionAsync();
+            tapHaptic();
             onApply(item.id);
             onDismiss();
           }}

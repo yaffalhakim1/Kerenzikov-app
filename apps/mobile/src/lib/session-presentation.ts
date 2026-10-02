@@ -248,15 +248,19 @@ function sameSummary(a: SessionListSummary, b: SessionListSummary): boolean {
   return true;
 }
 
-/** Sessions this phone has removed from its list. Removal is a local view
- *  filter, never a daemon delete: the task and its transcript stay intact for
- *  every other device, and clearing the stored list brings them back. */
-export function withoutHiddenSessions(
+/** Hide archived tasks unless the user asked to see them. Archiving is a
+ *  daemon-side flag, so this is a view filter over synced state, not a local
+ *  list of ids: it holds on every device, which is what makes archiving the
+ *  recoverable counterpart to deletion. */
+export function filterArchivedSessions(
   sessions: SessionListSummary[],
-  hidden: ReadonlySet<string>,
+  showArchived: boolean,
 ): SessionListSummary[] {
-  if (hidden.size === 0) return sessions;
-  return sessions.filter((session) => !hidden.has(session.id));
+  if (showArchived) return sessions;
+  // The drawer re-renders on every stream tick; an unmarked list must not
+  // produce a new array or every memoized row is invalidated.
+  if (!sessions.some((session) => session.archived_at != null)) return sessions;
+  return sessions.filter((session) => session.archived_at == null);
 }
 
 /** Collapse folded groups to their header. SectionList renders a header for a

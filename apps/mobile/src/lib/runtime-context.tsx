@@ -41,6 +41,7 @@ import {
   rewindSessionToMessage,
   sameProviderSession,
   refreshTrackedSession,
+  setDaemonSessionArchived,
   type TaskState,
 } from './daemon-api';
 import { persistentStorageSync } from './composer-preferences-store';
@@ -133,6 +134,7 @@ interface RuntimeContextValue {
   updateSessionOptions: (sessionId: string, changes: SessionOptionChanges) => Promise<void>;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
+  archiveSession: (sessionId: string, archived: boolean) => Promise<void>;
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
   rewindSession: (
     sessionId: string,
@@ -841,6 +843,37 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     setErrors((values) => removeKey(values, sessionId));
   }, [daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient, removeRuntime]);
 
+  const archiveSession = useCallback(async (sessionId: string, archived: boolean) => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId || daemon.phase !== 'connected') {
+      throw new Error('Kerenzikov daemon is disconnected');
+    }
+    // The daemon is the single writer of the archive stamp, so this is a
+    // request, not a local save: awaiting it means the flag the daemon
+    // recorded is what the cache then reflects. A failed send leaves the
+    // session untouched rather than believing something the daemon never got.
+    await setDaemonSessionArchived(client, sessionId, archived);
+    queryClient.setQueryData<TaskState>(daemonKeys.taskState(profileId), (current) => (
+      current
+        ? {
+            ...current,
+            sessions: current.sessions.map((item) => (
+              item.id === sessionId
+                ? { ...item, archived_at: archived ? clock.nowSeconds() : null }
+                : item
+            )),
+          }
+        : current
+    ));
+    queryClient.setQueryData<AgentSession>(
+      daemonKeys.session(profileId, sessionId),
+      (current) => (current
+        ? { ...current, archived_at: archived ? clock.nowSeconds() : null }
+        : current),
+    );
+  }, [daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient]);
+
   const removeQueuedMessage = useCallback(async (sessionId: string, messageId: string) => {
     const profileId = daemon.activeProfile?.id;
     if (!profileId) throw new Error('Kerenzikov daemon is disconnected');
@@ -1060,6 +1093,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       updateSessionOptions,
       renameSession,
       deleteSession,
+      archiveSession,
       removeQueuedMessage,
       rewindSession,
       forkSession,

@@ -246,6 +246,9 @@ common.undo: 取り消す
 session.archive: アーカイブ
 session.unarchive: アーカイブを解除
 session.archived_toast: "「%{title}」をアーカイブしました"
+session.delete: 削除
+session.delete_confirm_title: このタスクを削除しますか？
+session.delete_confirm_body: タスクと会話履歴がすべてのデバイスのデーモンから削除されます。元に戻せません。
 sidebar.show_archived: アーカイブを表示
 
 session.new_task: 新規タスク
