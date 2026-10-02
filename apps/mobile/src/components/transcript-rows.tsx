@@ -20,6 +20,7 @@ import {
 import { useRowAnchor } from '@/components/transcript-anchor';
 import { MonoFont, Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { mentionSegments } from '@/lib/composer-commands';
 import type { TranscriptRow } from '@/lib/session-presentation';
 import type { MarkdownStyles } from '@/md/render';
 import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
@@ -219,7 +220,19 @@ function UserBubbleInner({ message }: { message: Message }) {
         }}
         style={[styles.userBubble, { backgroundColor: theme.raised }]}>
         {content ? (
-          <Text selectable style={[styles.userText, { color: theme.text }]}>{content}</Text>
+          <Text selectable style={[styles.userText, { color: theme.text }]}>
+            {mentionSegments(content).map((segment, index) => (
+              segment.kind === 'mention' ? (
+                <Text
+                  key={index}
+                  style={{ color: theme.accent, fontWeight: '600' }}>
+                  {segment.value}
+                </Text>
+              ) : (
+                <Text key={index}>{segment.value}</Text>
+              )
+            ))}
+          </Text>
         ) : null}
         {message.attachments?.length ? (
           <View style={styles.attachments}>

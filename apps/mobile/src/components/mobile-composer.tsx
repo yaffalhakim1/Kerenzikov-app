@@ -1,5 +1,6 @@
 import type {
   AgentSession,
+  FileEntry,
   MessageAttachment,
   PendingPermission,
   PendingUserInput,
@@ -39,11 +40,13 @@ import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option
 import { GlassSurface } from './glass-surface';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
-import { useComposerCommands, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
+import { useComposerCommands, useProjectFiles, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
 import {
   detectComposerTrigger,
   filterComposerCommands,
+  filterComposerFiles,
   mergeComposerCommands,
+  replaceComposerFileTrigger,
   replaceComposerTrigger,
   resolvedComposerSubmission,
 } from '@/lib/composer-commands';
@@ -248,6 +251,10 @@ export function MobileComposer({
   const [localError, setLocalError] = useState<string | null>(null);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
   const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
+  // Set while the draft holds a queued message being reworked, so the composer
+  // can say so and offer a way out. The message is already dequeued at that
+  // point (matching the desktop), so Cancel just clears the draft.
+  const [editingQueued, setEditingQueued] = useState(false);
   const busy = sessionBusy(session);
   const supportsAgentPreset = agentPresetAvailable(session, busy);
   // One probe feeds both halves of the header — the model's name and whether a
@@ -301,14 +308,26 @@ export function MobileComposer({
   // input, and the trigger dies at the first whitespace either way.
   const trigger = useMemo(() => detectComposerTrigger(draft, draft.length), [draft]);
   const suggestions = useMemo(
-    () => trigger ? filterComposerCommands(commands, trigger.query) : [],
+    () => trigger?.kind === 'command' ? filterComposerCommands(commands, trigger.query) : [],
     [commands, trigger],
+  );
+  const projectFiles = useProjectFiles(projectPath, trigger?.kind === 'file');
+  const fileSuggestions = useMemo(
+    () => trigger?.kind === 'file' ? filterComposerFiles(projectFiles.data ?? [], trigger.query) : [],
+    [projectFiles.data, trigger],
   );
 
   function applyCommand(command: SlashCommand) {
-    if (!trigger) return;
+    if (trigger?.kind !== 'command') return;
     draftSync.markEdited();
     setDraft(replaceComposerTrigger(draft, trigger, command).text);
+    tapHaptic();
+  }
+
+  function applyFile(file: FileEntry) {
+    if (trigger?.kind !== 'file') return;
+    draftSync.markEdited();
+    setDraft(replaceComposerFileTrigger(draft, trigger, file).text);
     tapHaptic();
   }
 
@@ -448,6 +467,7 @@ export function MobileComposer({
       draftSync.removeSubmittedDraft();
       setDraft('');
       setAttachments([]);
+      setEditingQueued(false);
       tapHaptic();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
@@ -541,15 +561,38 @@ export function MobileComposer({
             draftSync.markEdited();
             setDraft(message.display_content ?? message.content);
             setAttachments(message.attachments ?? []);
+            setEditingQueued(true);
           }}
           onRemove={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
           onSendNow={() => void runtime.steerQueuedMessage(session.id, message.id).catch(() => {})}
         />
       ))}
 
+      {editingQueued && (
+        <View style={[styles.editingRow, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
+          <Text style={[styles.editingText, { color: theme.textSecondary }]}>
+            Editing queued message
+          </Text>
+          <AppPressable
+            accessibilityLabel="Cancel editing queued message"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={() => {
+              setEditingQueued(false);
+              draftSync.markEdited();
+              setDraft('');
+              setAttachments([]);
+            }}
+            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+            <Text style={[styles.editingCancel, { color: theme.accent }]}>Cancel</Text>
+          </AppPressable>
+        </View>
+      )}
+
       <ComposerCard
         accessibilityLabel="Message agent"
-        beforeInput={attachments.length || importingAttachments || suggestions.length ? (
+        beforeInput={
+          attachments.length || importingAttachments || suggestions.length || fileSuggestions.length ? (
           <>
           {suggestions.length ? (
             <View style={styles.commandList}>
@@ -579,6 +622,39 @@ export function MobileComposer({
                         {command.description}
                       </Text>
                     ) : null}
+                  </AppPressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+          {fileSuggestions.length ? (
+            <View style={styles.commandList}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+                style={styles.commandListScroll}
+                contentContainerStyle={styles.commandListContent}>
+                {fileSuggestions.map((file) => (
+                  <AppPressable
+                    accessibilityLabel={`Mention ${file.path}`}
+                    accessibilityRole="button"
+                    key={file.path}
+                    onPress={() => applyFile(file)}
+                    style={({ pressed }) => [
+                      styles.commandRow,
+                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
+                    ]}>
+                    <AppSymbol
+                      name={file.is_dir
+                        ? { ios: 'folder', android: 'folder', web: 'folder' }
+                        : { ios: 'doc.text', android: 'description', web: 'description' }}
+                      size={14}
+                      tintColor={theme.textSecondary}
+                    />
+                    <Text numberOfLines={1} style={[styles.fileName, { color: theme.text }]}>
+                      {file.path}
+                    </Text>
                   </AppPressable>
                 ))}
               </ScrollView>
@@ -1025,9 +1101,29 @@ const styles = StyleSheet.create({
   commandList: { marginHorizontal: 4, marginTop: 4 },
   commandListScroll: { maxHeight: 220 },
   commandListContent: { gap: 4, paddingVertical: 4 },
-  commandRow: { borderRadius: Radius.small, paddingHorizontal: 11, paddingVertical: 7 },
+  commandRow: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
   commandName: { fontSize: 14, fontWeight: '600' },
   commandHint: { fontSize: 11.5, marginTop: 1 },
+  fileName: { flex: 1, fontSize: 13.5 },
+  editingRow: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  editingText: { fontSize: 12.5, fontWeight: '600' },
+  editingCancel: { fontSize: 12.5, fontWeight: '600' },
   attachmentChip: {
     alignItems: 'center',
     borderRadius: Radius.small,

@@ -3,6 +3,7 @@ import type {
   BranchSnapshot,
   ComposerDraftChange,
   DaemonSettings,
+  FileEntry,
   PlanUsage,
   Project,
   ProviderKind,
@@ -73,6 +74,12 @@ export const daemonKeys = {
     provider,
     cwd,
     binaryOverride,
+  ] as const,
+  projectFiles: (profileId: string, root: string) => [
+    'daemon',
+    profileId,
+    'project-files',
+    root,
   ] as const,
   directory: (profileId: string, path: string | null) => [
     'daemon',
@@ -238,6 +245,25 @@ export async function discoverComposerCommands(
     throw new Error('The daemon returned an unexpected slash-command response');
   }
   return response.result.commands;
+}
+
+/** The project's files, indexed on the daemon host for `@` mentions. */
+export async function listProjectFiles(
+  client: WakuClient,
+  root: string,
+  cap = 50_000,
+): Promise<FileEntry[]> {
+  const response = expectResponse(
+    await client.request({
+      type: 'workspace',
+      operation: { type: 'listProjectFiles', root, cap },
+    }),
+    'workspace',
+  );
+  if (response.result.type !== 'projectFiles') {
+    throw new Error('The daemon returned an unexpected project-files response');
+  }
+  return response.result.entries;
 }
 
 /** Full-text search across every transcript the daemon has. Titles are
