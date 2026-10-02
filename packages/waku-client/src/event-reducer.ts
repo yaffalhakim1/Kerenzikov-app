@@ -315,13 +315,17 @@ export function reduceRuntimeEvent(
 /** Turn-progress events that can only follow a resolved control request.
  * Conversation meta (`usageUpdated`, `goalUpdated`, `backgroundWork`) is
  * deliberately absent: it applies regardless of turn state and can arrive
- * while a request is genuinely still pending. */
+ * while a request is genuinely still pending.
+ *
+ * `activity`/`richActivity` are also absent. The request's *own* tool row
+ * arrives as an activity while it is still pending — OpenCode surfaces
+ * `question.asked` and the `question` tool part as separate events — so
+ * clearing on activity wiped the panel a beat after it appeared. Only real
+ * model output proves the agent resumed past the request. */
 const RESOLVING_KINDS = new Set([
   'turnStarted',
   'textDelta',
   'reasoningDelta',
-  'activity',
-  'richActivity',
 ])
 
 function asUserInputQuestion(value: unknown): PendingUserInput['questions'][number] | null {
