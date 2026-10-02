@@ -554,6 +554,12 @@ impl Waku {
         let port = self.state.daemon_exposure.port;
         let websocket_url = format!("ws://{}:{port}", self.daemon_hostname);
         let token = self.state.daemon_exposure.token.clone();
+        // The machine name in `websocket_url` does not resolve on a phone; the
+        // tailnet address does, so show it whenever Tailscale is running.
+        let tailscale_url = self
+            .daemon_tailscale_address
+            .as_ref()
+            .map(|address| format!("ws://{address}:{port}"));
 
         let exposure_toggle = toggle_switch(
             "daemon-exposure-toggle",
@@ -1110,6 +1116,111 @@ impl Waku {
                         ),
                 )
             })
+            .children(if enabled {
+                tailscale_url
+                    .as_deref()
+                    .map(|url| self.render_tailscale_hint(url, cx))
+            } else {
+                None
+            })
+            .into_any_element()
+    }
+
+    /// Tailscale reachability card. The LAN hostname shown elsewhere only
+    /// resolves inside the local network; the tailnet address resolves from
+    /// any device on the same tailnet, so it is the address a phone should
+    /// actually save.
+    fn render_tailscale_hint(&self, url: &str, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let feedback_id = "daemon-tailscale-url";
+        let copied = self.control_was_copied(feedback_id);
+        let click_url = url.to_owned();
+        let key_url = url.to_owned();
+        let copy_button = div()
+            .id("copy-daemon-tailscale-url")
+            .tab_index(0)
+            .h(px(27.0))
+            .px(px(9.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .child(icon(
+                if copied {
+                    "icons/check.svg"
+                } else {
+                    "icons/copy.svg"
+                },
+                11.0,
+                theme.text_tertiary,
+            ))
+            .child(if copied {
+                tr!("common.copied")
+            } else {
+                tr!("common.copy")
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(click_url.clone()));
+                this.show_control_copied(feedback_id, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(key_url.clone()));
+                    this.show_control_copied(feedback_id, cx);
+                    cx.stop_propagation();
+                }
+            }));
+
+        div()
+            .px(px(20.0))
+            .py(px(15.0))
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .child(
+                div()
+                    .text_size(sp(13.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("daemon.tailscale_title")),
+            )
+            .child(
+                div()
+                    .mt(px(4.0))
+                    .min_w_0()
+                    .whitespace_normal()
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("daemon.tailscale_description")),
+            )
+            .child(
+                div()
+                    .mt(px(13.0))
+                    .py(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .font_family(".SystemUIFontMonospaced")
+                            .text_size(sp(12.5))
+                            .text_color(theme.text)
+                            .child(SharedString::from(url.to_owned())),
+                    )
+                    .child(copy_button),
+            )
             .into_any_element()
     }
 
