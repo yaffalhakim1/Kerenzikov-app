@@ -796,7 +796,7 @@ fn render_commit_action_row(
         theme.text_ghost
     };
     let indicator = if active {
-        motion::spin(icon("icons/loader-circle.svg", 15.0, theme.text_secondary))
+        motion::blocks(15.0, theme.accent)
     } else {
         icon(icon_path, 15.0, foreground).into_any_element()
     };

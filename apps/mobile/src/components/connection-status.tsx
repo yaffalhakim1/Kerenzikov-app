@@ -1,5 +1,6 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { Blocks } from './blocks';
 import { useTheme } from '@/hooks/use-theme';
 import type { ConnectionPhase } from '@/lib/daemon-context';
 
@@ -15,7 +16,7 @@ export function ConnectionStatus({
   return (
     <View style={styles.container}>
       {presentation.busy ? (
-        <ActivityIndicator color={presentation.color} size="small" style={styles.spinner} />
+        <Blocks color={presentation.color} size={12} />
       ) : (
         <View style={[styles.dot, { backgroundColor: presentation.color }]} />
       )}
@@ -75,11 +76,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     height: 8,
     width: 8,
-  },
-  spinner: {
-    height: 12,
-    transform: [{ scale: 0.66 }],
-    width: 12,
   },
   label: {
     fontSize: 12,

@@ -14,8 +14,8 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, EntityId, Global, IntoElement, RenderOnce, Svg, Transformation, Window,
-    ease_out_quint, percentage,
+    AnyElement, App, EntityId, Global, Hsla, IntoElement, ParentElement, RenderOnce, Styled,
+    Window, div, ease_out_quint, px,
 };
 
 /// Repeat-tick interval, rounded up so spinner ticks never exceed 60 fps.
@@ -29,8 +29,15 @@ const PULSE_STRIDE: u32 = 2;
 /// its view drops off, letting the clock park.
 const PULSE_LEASE: Duration = Duration::from_millis(300);
 
-/// The rotating `loader-circle` spinners' period.
-const SPINNER_PERIOD: Duration = Duration::from_millis(900);
+/// The blocks loader's cycle, matching loading.dev's `blocks` spinner.
+const BLOCKS_PERIOD: Duration = Duration::from_millis(1300);
+
+/// Side length of the blocks grid.
+const BLOCKS_SIDE: usize = 3;
+
+/// Diagonal sweep positions for a 3x3 grid: `side * 2 - 1`, the number of
+/// anti-diagonals a block's `row + col` can land on.
+const BLOCKS_SWEEP: usize = BLOCKS_SIDE * 2 - 1;
 
 struct Lease {
     until: Instant,
@@ -215,26 +222,79 @@ pub fn pulse(period: Duration, render: impl FnOnce(f32) -> AnyElement + 'static)
     }
 }
 
-/// A rotating loader icon riding the shared clock at up to 60 fps.
-pub fn spin(icon: Svg) -> AnyElement {
-    spin_with_stride(icon, 1)
-}
-
-/// A rotating loader at every second tick (~30 fps).
-/// For loaders on expensive surfaces: the
-/// sidebar rebuilds its whole subtree per notify, and a session row's working
-/// spinner is not worth pricing that at full rate.
-pub fn spin_slow(icon: Svg) -> AnyElement {
-    spin_with_stride(icon, 2)
-}
-
-fn spin_with_stride(icon: Svg, stride: u32) -> AnyElement {
-    let mut pulse = pulse(SPINNER_PERIOD, move |phase| {
-        icon.with_transformation(Transformation::rotate(percentage(phase)))
-            .into_any_element()
+/// The house loading indicator: a 3x3 grid of squares that shrink to nothing
+/// and grow back in a diagonal sweep (loading.dev's `blocks`). It replaces the
+/// rotating `loader-circle` spinner everywhere a loader marks "working": a
+/// grid reads as progress at a glance, and every block's phase comes off the
+/// one shared clock, so the whole grid costs a single timer.
+///
+/// Runs at the full 60 Hz pulse cadence — a spinner is the one animation
+/// worth the display rate. A view whose whole subtree rebuilds per notify
+/// still rebuilds here; keep the loader on a surface that can afford it.
+pub fn blocks(size: f32, color: Hsla) -> AnyElement {
+    let gap = size * 0.1;
+    let cell = (size - gap * (BLOCKS_SIDE as f32 - 1.0)) / BLOCKS_SIDE as f32;
+    let radius = size * 0.0625;
+    let mut pulse = pulse(BLOCKS_PERIOD, move |phase| {
+        let mut grid = div()
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(gap))
+            .size(px(size));
+        for row in 0..BLOCKS_SIDE {
+            let mut line = div().flex_none().flex().gap(px(gap));
+            for col in 0..BLOCKS_SIDE {
+                // A negative CSS `animation-delay`, expressed as a phase lead:
+                // `duration * (step - count) / count`.
+                let step = (row + col) as f32;
+                let lead = (BLOCKS_SWEEP as f32 - step) / BLOCKS_SWEEP as f32;
+                let scale = blocks_scale((phase + lead).fract());
+                line = line.child(
+                    div()
+                        .size(px(cell))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            div()
+                                .size(px(cell * scale))
+                                .flex_none()
+                                .rounded(px(radius))
+                                .bg(color),
+                        ),
+                );
+            }
+            grid = grid.child(line);
+        }
+        grid.into_any_element()
     });
-    pulse.stride = stride;
+    // Every tick, not every second one: the loader is the one animation that
+    // earns the full 60 Hz cadence.
+    pulse.stride = 1;
     pulse.into_any_element()
+}
+
+/// The blocks keyframe curve: scale 1 to 0 by 35% of the cycle, back to 1 by
+/// 70%, then held at 1. `ease-in-out` is applied per segment, matching the
+/// CSS timing function the reference uses.
+fn blocks_scale(phase: f32) -> f32 {
+    let ease = |t: f32| {
+        if t < 0.5 {
+            4.0 * t * t * t
+        } else {
+            let u = -2.0 * t + 2.0;
+            1.0 - u * u * u / 2.0
+        }
+    };
+    if phase < 0.35 {
+        1.0 - ease(phase / 0.35)
+    } else if phase < 0.70 {
+        ease((phase - 0.35) / 0.35)
+    } else {
+        1.0
+    }
 }
 
 #[derive(IntoElement)]
@@ -372,5 +432,23 @@ mod tests {
             (reversed - interrupted).abs() < 0.01,
             "the reversed slide starts at the interrupted width"
         );
+    }
+
+    #[test]
+    fn blocks_shrink_to_nothing_and_hold_at_full() {
+        // The keyframe the CSS declares: full at the cycle's ends, fully
+        // shrunk at the midpoint, held at full after 70%.
+        assert!((blocks_scale(0.0) - 1.0).abs() < 0.001);
+        assert!(
+            blocks_scale(0.35).abs() < 0.001,
+            "the block vanishes at 35%"
+        );
+        assert!((blocks_scale(0.70) - 1.0).abs() < 0.001);
+        assert!(
+            (blocks_scale(0.9) - 1.0).abs() < 0.001,
+            "held after the sweep"
+        );
+        // Monotonic shrink into the midpoint, so the sweep reads as one motion.
+        assert!(blocks_scale(0.1) > blocks_scale(0.2));
     }
 }

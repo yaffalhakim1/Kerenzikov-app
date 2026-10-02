@@ -3,7 +3,6 @@ import Constants from 'expo-constants';
 import { router, Stack } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   Linking,
   Platform,
   ScrollView,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ProviderIcon } from '@/components/provider-icon';
@@ -102,7 +102,7 @@ function UpdateRow() {
               tap and flashed while it ran. A failed check still offers a retry,
               which is the one case the user has something to do about. */}
           {checking ? (
-            <ActivityIndicator color={theme.textTertiary} />
+            <Blocks color={theme.accent} size={18} />
           ) : update ? (
             <AppPressable
               accessibilityRole="button"
@@ -232,7 +232,7 @@ export default function SettingsScreen() {
 
         {!settings.data ? (
           <View style={styles.loading}>
-            <ActivityIndicator color={theme.textTertiary} />
+            <Blocks color={theme.accent} size={24} />
           </View>
         ) : (
           <>

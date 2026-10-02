@@ -850,7 +850,7 @@ impl Waku {
             });
 
         if !available {
-            let indicator = motion::spin_slow(icon("icons/loader-circle.svg", 14.0, foreground));
+            let indicator = motion::blocks(14.0, foreground);
             return Some(
                 button
                     .tooltip(Tooltip::text(tr!("updater.updating")))
@@ -1945,11 +1945,7 @@ impl Waku {
                     .line_height(sp(18.0))
                     .child(title)
                     .when(working, |element| {
-                        element.child(motion::spin_slow(icon(
-                            "icons/loader-circle.svg",
-                            12.0,
-                            status_color(&theme, session.status),
-                        )))
+                        element.child(motion::blocks(12.0, status_color(&theme, session.status)))
                     })
                     .when(session.status == SessionStatus::Background, |element| {
                         element.child(icon(

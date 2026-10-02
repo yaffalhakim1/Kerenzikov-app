@@ -25,7 +25,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  ActivityIndicator,
   Platform,
   StyleSheet,
   Text,
@@ -35,6 +34,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppPressable } from "@/components/app-pressable";
 import { AppSymbol } from "@/components/app-symbol";
+import { Blocks } from "@/components/blocks";
 import { DiffView } from "@/components/diff-view";
 import { liquidGlass } from "@/components/glass-surface";
 import { MonoFont, NativeTint, Radius } from "@/constants/theme";
@@ -784,7 +784,7 @@ function LoadingMessage() {
   const theme = useTheme();
   return (
     <View accessibilityLabel="Loading" style={styles.loading}>
-      <ActivityIndicator color={NativeTint} />
+      <Blocks color={theme.accent} size={24} />
       <Text style={[styles.loadingText, { color: theme.textTertiary }]}>
         Loading…
       </Text>

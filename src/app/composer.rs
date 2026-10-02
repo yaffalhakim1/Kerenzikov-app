@@ -2802,11 +2802,7 @@ impl Waku {
                                 .justify_center()
                                 .cursor_default()
                                 .bg(theme.overlay_strong)
-                                .child(motion::spin(icon(
-                                    "icons/loader-circle.svg",
-                                    15.0,
-                                    theme.text_secondary,
-                                )))
+                                .child(motion::blocks(15.0, theme.accent))
                                 .tooltip(Tooltip::text(tr!("composer.preparing_task"))),
                             ComposerSubmitAction::Stop => div()
                                 .id("working-actions")

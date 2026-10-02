@@ -9,7 +9,6 @@ import type {
 import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   StyleSheet,
   Text,
   TextInput,
@@ -25,6 +24,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { AppSymbol } from './app-symbol';
+import { Blocks } from './blocks';
 import { ProviderIcon } from './provider-icon';
 import { Sheet, SheetRow } from './sheet';
 import { AppPressable } from '@/components/app-pressable';
@@ -146,7 +146,7 @@ export function ModelSheet({
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} model`} visible={visible}>
       {probe.isPending ? (
         <View style={styles.loading}>
-          <ActivityIndicator color={theme.textTertiary} />
+          <Blocks color={theme.accent} size={20} />
         </View>
       ) : probe.error ? (
         <Text style={[styles.note, { color: theme.danger }]}>
@@ -460,7 +460,7 @@ export function ModelPickerSheet({
             </View>
             {entry?.isPending ? (
               <View style={[styles.loading, { height: listHeight }]}>
-                <ActivityIndicator color={theme.textTertiary} />
+                <Blocks color={theme.accent} size={20} />
               </View>
             ) : (
               <BottomSheetFlatList
@@ -527,7 +527,7 @@ export function AgentPresetSheet({
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} agent`} visible={visible}>
       {probe.isPending ? (
         <View style={styles.loading}>
-          <ActivityIndicator color={theme.textTertiary} />
+          <Blocks color={theme.accent} size={20} />
         </View>
       ) : probe.error ? (
         <Text style={[styles.note, { color: theme.danger }]}>
@@ -690,7 +690,7 @@ export function ResumeSessionSheet({
           />
           {pending ? (
             <View style={styles.loading}>
-              <ActivityIndicator color={theme.textTertiary} />
+              <Blocks color={theme.accent} size={20} />
             </View>
           ) : error ? (
             <Text style={[styles.note, { color: theme.danger }]}>{error}</Text>

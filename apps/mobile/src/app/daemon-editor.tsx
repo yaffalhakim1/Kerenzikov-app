@@ -4,7 +4,6 @@ import { router, Stack, useLocalSearchParams } from "expo-router";
 import { navigateBack } from "@/components/screen-header";
 import { useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   Platform,
   PlatformColor,
@@ -18,6 +17,7 @@ import {
 
 import { AppPressable } from "@/components/app-pressable";
 import { AppSymbol } from "@/components/app-symbol";
+import { Blocks } from "@/components/blocks";
 import { NativeTint, Radius } from "@/constants/theme";
 import { useTheme } from "@/hooks/use-theme";
 import { useDaemon } from "@/lib/daemon-context";
@@ -306,7 +306,7 @@ export default function DaemonEditorScreen() {
             ]}
           >
             {saving && (
-              <ActivityIndicator color="#ffffff" size="small" />
+              <Blocks color="#ffffff" size={16} />
             )}
             <Text style={styles.primaryLabel}>
               {saving ? "Saving…" : profile ? "Save" : "Add"}
@@ -356,7 +356,7 @@ export default function DaemonEditorScreen() {
                 ]}
               >
                 {removing && (
-                  <ActivityIndicator color={colors.danger} size="small" />
+                  <Blocks color={colors.danger} size={16} />
                 )}
                 <Text style={[styles.removeText, { color: colors.danger }]}>
                   {removing ? "Removing…" : "Remove Daemon"}

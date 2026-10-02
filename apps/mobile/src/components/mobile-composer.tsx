@@ -11,7 +11,6 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -213,7 +213,7 @@ export function SendButton({
         { opacity: pressed || busy ? 0.6 : 1 },
       ]}>
       {busy ? (
-        <ActivityIndicator color={theme.textSecondary} size="small" />
+        <Blocks color={theme.textSecondary} size={16} />
       ) : (
         <AppSymbol
           name={queueing
@@ -625,7 +625,7 @@ export function MobileComposer({
               ))}
               {importingAttachments && (
                 <View style={[styles.attachmentChip, { backgroundColor: theme.overlayStrong }]}>
-                  <ActivityIndicator color={theme.textSecondary} size="small" />
+                  <Blocks color={theme.textSecondary} size={14} />
                   <Text style={[styles.attachmentName, { color: theme.textSecondary }]}>Attaching…</Text>
                 </View>
               )}
@@ -805,10 +805,7 @@ function PermissionPanel({
               },
             ]}>
             {responding === option.id && (
-              <ActivityIndicator
-                color={option.allow ? theme.onInverse : theme.text}
-                size="small"
-              />
+              <Blocks color={option.allow ? theme.onInverse : theme.text} size={14} />
             )}
             <Text style={[
               styles.optionButtonText,
@@ -973,7 +970,7 @@ function UserInputPanel({
             styles.nextButton,
             { backgroundColor: theme.inverse, opacity: !canContinue || submitting || pressed ? 0.55 : 1 },
           ]}>
-          {submitting && <ActivityIndicator color={theme.onInverse} size="small" />}
+          {submitting && <Blocks color={theme.onInverse} size={16} />}
           <Text style={[styles.nextButtonText, { color: theme.onInverse }]}>
             {last ? 'Submit' : 'Next'}
           </Text>

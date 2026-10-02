@@ -275,7 +275,7 @@ pub(super) fn render_message_footer(
         if let Some(action) = assistant_message_action {
             let fork_waku = waku.clone();
             let fork_icon = if action.preparing {
-                motion::spin(icon("icons/loader-circle.svg", 14.0, footer_color))
+                motion::blocks(14.0, theme.accent)
             } else {
                 icon("icons/fork.svg", 14.0, footer_color).into_any_element()
             };

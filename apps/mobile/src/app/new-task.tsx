@@ -11,7 +11,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -22,6 +21,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { AttachmentChip } from '@/components/attachment-chip';
@@ -644,7 +644,7 @@ export default function NewTaskScreen() {
               ))}
               {importingAttachments && (
                 <View style={[styles.attachmentChipLoading, { backgroundColor: theme.overlayStrong }]}>
-                  <ActivityIndicator color={theme.textSecondary} size="small" />
+                  <Blocks color={theme.accent} size={14} />
                   <Text style={[styles.attachmentName, { color: theme.textSecondary }]}>
                     Attaching…
                   </Text>
@@ -782,7 +782,7 @@ export default function NewTaskScreen() {
       <Sheet onDismiss={() => setOpenSheet(null)} title="Base branch" visible={openSheet === 'branch'}>
         {branches.isPending ? (
           <View style={styles.sheetLoading}>
-            <ActivityIndicator color={theme.textTertiary} />
+            <Blocks color={theme.accent} size={20} />
           </View>
         ) : branches.error ? (
           <Text style={[styles.sheetNote, { color: theme.danger }]}>
@@ -852,7 +852,7 @@ function SelectorRow({
       style={[styles.row, { backgroundColor: theme.surface }]}>
       <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
       {loading ? (
-        <ActivityIndicator color={theme.textTertiary} size="small" />
+        <Blocks color={theme.accent} size={16} />
       ) : (
         <Text numberOfLines={1} style={[styles.rowValue, { color: theme.text }]}>
           {value}
