@@ -85,15 +85,19 @@ already be in memory.
 - Two SDKs live on `Y:`. `ANDROID_HOME` / `ANDROID_SDK_ROOT` are set user-wide
   to `Y:\Android\Sdk` (build-tools, platforms, ndk, cmake). The emulator and the
   `agent-avd` AVD (Pixel 6, Android 14 / API 34, Google APIs x86_64) live in a
-  separate install at `Y:\android-sdk`, with the AVD under `Y:\android-sdk\avd`.
-- The AVD is not under the default `%USERPROFILE%\.android\avd`, so the
-  emulator only finds it with `ANDROID_AVD_HOME` set — without it `-list-avds`
-  prints nothing and `-avd agent-avd` fails. Set it for the shell, then start
-  headless:
-  `$env:ANDROID_AVD_HOME = 'Y:\android-sdk\avd'; Y:\android-sdk\emulator\emulator.exe -avd agent-avd -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect`
+  separate install at `Y:\android-sdk`, with the AVD under `Y:\android-sdk\avd`
+  and the system image under `Y:\android-sdk\system-images`.
+- Both env vars must be overridden for the shell, not just `ANDROID_AVD_HOME`.
+  The emulator resolves the AVD's `image.sysdir.1` through `ANDROID_HOME`, which
+  takes precedence over `ANDROID_SDK_ROOT`, and the user-wide `Y:\Android\Sdk`
+  has no `system-images` — so the launch dies with "Broken AVD system path"
+  unless both point at `Y:\android-sdk`. The AVD is also outside the default
+  `%USERPROFILE%\.android\avd`, so `ANDROID_AVD_HOME` is needed too:
+  `$env:ANDROID_HOME = 'Y:\android-sdk'; $env:ANDROID_SDK_ROOT = 'Y:\android-sdk'; $env:ANDROID_AVD_HOME = 'Y:\android-sdk\avd'; Y:\android-sdk\emulator\emulator.exe -avd agent-avd -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect`
   A visible window is the same command without the `-no-window` flags. Boot
   takes about a minute; wait for `adb shell getprop sys.boot_completed` to print
-  `1` before interacting, rather than sleeping a fixed time.
+  `1` before interacting, rather than sleeping a fixed time. `expo run:android`
+  inherits these, so run it from the same shell.
 - `adb` is `Y:\android-sdk\platform-tools\adb.exe`; `sdkmanager` and
   `avdmanager` are under `Y:\android-sdk\cmdline-tools\latest\bin`. Kill the
   emulator process when finished — it does not exit on its own.
