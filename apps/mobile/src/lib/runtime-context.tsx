@@ -136,6 +136,7 @@ interface RuntimeContextValue {
   deleteSession: (sessionId: string) => Promise<void>;
   archiveSession: (sessionId: string, archived: boolean) => Promise<void>;
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
+  steerQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
   rewindSession: (
     sessionId: string,
     turnCount: number,
@@ -889,6 +890,27 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await persistOrdered(next);
   }, [cacheSession, daemon.activeProfile?.id, persistOrdered, queryClient]);
 
+  /** Deliver a queued follow-up into the running turn right away instead of
+   *  waiting for the turn to settle. The row is removed first so the provider
+   *  sees it as a steer, not a follow-up; a rejected steer re-queues it through
+   *  `steerPrompt`'s fallback. */
+  const steerQueuedMessage = useCallback(async (sessionId: string, messageId: string) => {
+    const profileId = daemon.activeProfile?.id;
+    if (!profileId) throw new Error('Kerenzikov daemon is disconnected');
+    const current = queryClient.getQueryData<AgentSession>(
+      daemonKeys.session(profileId, sessionId),
+    );
+    const message = current?.queued_messages?.find((item) => item.id === messageId);
+    if (!current || !message) return;
+    const next = {
+      ...current,
+      queued_messages: (current.queued_messages ?? []).filter((item) => item.id !== messageId),
+    };
+    cacheSession(next);
+    await persistOrdered(next);
+    await steerPrompt(next, message.display_content ?? message.content, message.attachments ?? [], message.content);
+  }, [cacheSession, daemon.activeProfile?.id, persistOrdered, queryClient, steerPrompt]);
+
   /** Rewinds a task to the end of `turnCount` turns.
    *
    * The daemon returns the truncated session, so the followed runtime — which
@@ -1095,6 +1117,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       deleteSession,
       archiveSession,
       removeQueuedMessage,
+      steerQueuedMessage,
       rewindSession,
       forkSession,
       resumeProviderSession,

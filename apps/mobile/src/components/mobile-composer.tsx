@@ -34,6 +34,7 @@ import {
 import { ComposerTextInput } from './composer-text-input';
 import type { ComposerTextInputProps } from './composer-text-input.types';
 import { ProviderIcon } from './provider-icon';
+import { QueuedMessageRow } from './queued-message-row';
 import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
 import { GlassSurface } from './glass-surface';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
@@ -190,14 +191,12 @@ export function SendButton({
   onPress,
   disabled,
   busy = false,
-  steering = false,
   queueing = false,
   label,
 }: {
   onPress: () => void;
   disabled: boolean;
   busy?: boolean;
-  steering?: boolean;
   queueing?: boolean;
   label: string;
 }) {
@@ -221,9 +220,7 @@ export function SendButton({
             ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
             : { ios: 'paperplane.fill', android: 'send', web: 'send' }}
           size={19}
-          tintColor={
-            disabled ? theme.textTertiary : steering ? theme.accent : theme.text
-          }
+          tintColor={disabled ? theme.textTertiary : theme.text}
         />
       )}
     </AppPressable>
@@ -283,9 +280,10 @@ export function MobileComposer({
   //   agentPresets.find((preset) => preset.is_default) ??
   //   agentPresets[0];
   const liveRuntime = runtime.runtimes[session.id];
-  // Mirrors desktop `session_can_steer`: an active provider turn AND a driver
-  // that takes a mid-turn message. Anything else queues through sendPrompt
-  // rather than being steered at a provider with no turn to fold it into.
+  // Whether a queued follow-up can be delivered into the live turn right now,
+  // which decides if its Send now action is offered. Mirrors desktop
+  // `session_can_steer`: an active provider turn AND a driver that takes a
+  // mid-turn message.
   const canSteer =
     sessionHasActiveProviderTurn(session) && Boolean(liveRuntime?.supportsSteer);
   const permission = runtime.permissions[session.id];
@@ -443,8 +441,10 @@ export function MobileComposer({
     setLocalError(null);
     onSubmitted?.();
     try {
-      if (canSteer) await runtime.steerPrompt(session, prompt, submittedAttachments);
-      else await runtime.sendPrompt(session, prompt, submittedAttachments);
+      // While the agent is working a new message queues; it is never steered
+      // implicitly. Steering a live turn is deliberate and lives on the queued
+      // row's Send now action, matching the desktop composer.
+      await runtime.sendPrompt(session, prompt, submittedAttachments);
       draftSync.removeSubmittedDraft();
       setDraft('');
       setAttachments([]);
@@ -486,11 +486,9 @@ export function MobileComposer({
       : daemon.phase === 'connecting' || daemon.phase === 'booting'
         ? 'Connecting…'
         : 'Reconnect to message this agent'
-    : canSteer
-      ? 'Message the working agent…'
-      : busy
-        ? 'Queue a follow-up…'
-        : 'Message agent';
+    : busy
+      ? 'Queue a follow-up…'
+      : 'Message agent';
 
   return (
     <View style={[styles.shell, { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 }]}>
@@ -531,32 +529,22 @@ export function MobileComposer({
         </View>
       )}
       {queued.map((message) => (
-        <View
+        <QueuedMessageRow
           key={message.id}
-          style={[styles.queuedRow, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
-          <AppSymbol
-            name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
-            size={12}
-            tintColor={theme.textTertiary}
-          />
-          <Text numberOfLines={1} style={[styles.queuedText, { color: theme.textSecondary }]}>
-            {message.display_content?.trim()
-              || message.attachments?.map((attachment) => attachment.name).join(', ')
-              || message.content}
-          </Text>
-          <AppPressable
-            accessibilityLabel="Remove queued message"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
-            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
-              size={11}
-              tintColor={theme.textTertiary}
-            />
-          </AppPressable>
-        </View>
+          canSteer={canSteer}
+          message={message}
+          onEdit={() => {
+            // Pop the message back into the composer so it can be changed,
+            // dropping it from the queue in the same step — matching the
+            // desktop's Edit.
+            runtime.removeQueuedMessage(session.id, message.id).catch(() => {});
+            draftSync.markEdited();
+            setDraft(message.display_content ?? message.content);
+            setAttachments(message.attachments ?? []);
+          }}
+          onRemove={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
+          onSendNow={() => void runtime.steerQueuedMessage(session.id, message.id).catch(() => {})}
+        />
       ))}
 
       <ComposerCard
@@ -702,10 +690,9 @@ export function MobileComposer({
                   || importingAttachments
                   || disconnected
                 }
-                label={canSteer ? 'Send to working agent' : busy ? 'Queue message' : 'Send message'}
+                label={busy ? 'Queue message' : 'Send message'}
                 onPress={() => void submit()}
-                queueing={busy && !canSteer}
-                steering={canSteer}
+                queueing={busy}
               />
             )}
           </>
@@ -1085,17 +1072,6 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   errorText: { flex: 1, fontSize: 12, fontWeight: '600', lineHeight: 17 },
-  queuedRow: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 6,
-    minHeight: 34,
-    paddingHorizontal: 10,
-  },
-  queuedText: { flex: 1, fontSize: 12.5 },
   requestPanel: {
     borderRadius: Radius.large,
     borderWidth: 1,
