@@ -80,6 +80,26 @@ already be in memory.
   short-lived cache rather than a re-fetch per screen mount
   (`apps/mobile/src/lib/app-update.ts`).
 
+## Android emulator
+
+- Two SDKs live on `Y:`. `ANDROID_HOME` / `ANDROID_SDK_ROOT` are set user-wide
+  to `Y:\Android\Sdk` (build-tools, platforms, ndk, cmake). The emulator and the
+  `agent-avd` AVD (Pixel 6, Android 14 / API 34, Google APIs x86_64) live in a
+  separate install at `Y:\android-sdk`, with the AVD under `Y:\android-sdk\avd`.
+- The AVD is not under the default `%USERPROFILE%\.android\avd`, so the
+  emulator only finds it with `ANDROID_AVD_HOME` set — without it `-list-avds`
+  prints nothing and `-avd agent-avd` fails. Set it for the shell, then start
+  headless:
+  `$env:ANDROID_AVD_HOME = 'Y:\android-sdk\avd'; Y:\android-sdk\emulator\emulator.exe -avd agent-avd -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect`
+  A visible window is the same command without the `-no-window` flags. Boot
+  takes about a minute; wait for `adb shell getprop sys.boot_completed` to print
+  `1` before interacting, rather than sleeping a fixed time.
+- `adb` is `Y:\android-sdk\platform-tools\adb.exe`; `sdkmanager` and
+  `avdmanager` are under `Y:\android-sdk\cmdline-tools\latest\bin`. Kill the
+  emulator process when finished — it does not exit on its own.
+- Use it to install and exercise `apps/mobile` builds when a task needs a real
+  device surface; a successful JS/Rust build alone is not validation.
+
 ## Accessibility
 
 - Treat accessibility as a product requirement too. GPUI does not yet expose a
