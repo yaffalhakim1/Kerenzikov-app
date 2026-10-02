@@ -330,11 +330,16 @@ export function ModelPickerSheet({
 
   useEffect(() => {
     if (!visible) return;
-    const initial = provider ?? providers[0] ?? null;
-    setBrowsing(initial);
+    const opening = provider ?? providers[0] ?? null;
+    setBrowsing(opening);
     setSearch('');
-    progress.value = initial ? 1 : 0;
-  }, [progress, provider, providers, visible]);
+    progress.value = opening ? 1 : 0;
+    // `providers` is a fresh array each render, so depending on it here would
+    // reset the sheet on every parent render — and a running task re-renders
+    // this screen several times a second, which snapped `browsing` back to the
+    // current provider mid-tap. The open transition is the only moment this
+    // should run.
+  }, [progress, visible]);
 
   function slideTo(target: 0 | 1) {
     progress.value = reduceMotion
