@@ -3,7 +3,6 @@ import * as Haptics from 'expo-haptics';
 import { Stack } from 'expo-router';
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import {
@@ -80,7 +80,7 @@ export default function SkillsScreen() {
         contentContainerStyle={styles.content}>
         {!skills.data ? (
           <View style={styles.loading}>
-            <ActivityIndicator color={theme.textTertiary} />
+            <Blocks color={theme.accent} size={24} />
             <Text style={[styles.loadingLabel, { color: theme.textTertiary }]}>
               {skills.isPending ? 'Reading skills…' : 'No skills yet'}
             </Text>

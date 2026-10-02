@@ -14,7 +14,6 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -29,6 +28,7 @@ import { Drawer } from 'react-native-drawer-layout';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionBanner, useConnectionNotice } from '@/components/connection-banner';
@@ -663,7 +663,7 @@ function TaskListEmpty({
   if (phase === 'booting' || phase === 'connecting' || phase === 'reconnecting') {
     return (
       <View style={styles.emptyState}>
-        <ActivityIndicator color={theme.textTertiary} />
+        <Blocks color={theme.accent} size={24} />
         <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
           {phase === 'reconnecting' ? 'Reconnecting…' : 'Connecting to daemon…'}
         </Text>
@@ -778,12 +778,12 @@ const SessionRow = memo(function SessionRow({
                 {displaySessionTitle(session)}
               </Text>
               {running && (
-                <ActivityIndicator
-                  accessibilityLabel="Running"
-                  color={theme.textTertiary}
-                  size="small"
-                  style={styles.sessionSpinner}
-                />
+                <View style={styles.sessionSpinner}>
+                  <Blocks
+                    color={theme.accent}
+                    size={14}
+                  />
+                </View>
               )}
             </View>
           </View>
@@ -950,7 +950,7 @@ const styles = StyleSheet.create({
   },
   sessionContent: { flex: 1 },
   sessionHeading: { alignItems: 'center', flexDirection: 'row', gap: 8 },
-  sessionSpinner: { height: 14, transform: [{ scale: 0.72 }], width: 14 },
+  sessionSpinner: { alignItems: 'center', height: 14, justifyContent: 'center', width: 14 },
   sessionTitle: {
     flex: 1,
     fontSize: 16.5,

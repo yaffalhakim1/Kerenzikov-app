@@ -4,7 +4,6 @@ import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -18,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppSymbol } from './app-symbol';
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -147,7 +147,7 @@ export function RemoteProjectPicker({
               onPress={() => void addFolder()}
               style={({ pressed }) => [styles.headerButton, styles.headerButtonTrailing, { opacity: pressed ? 0.5 : 1 }]}>
               {submitting === 'folder'
-                ? <ActivityIndicator color={theme.accent} size="small" />
+                ? <Blocks color={theme.accent} size={16} />
                 : <Text style={[styles.headerButtonText, { color: directory.data?.path ? theme.accent : theme.textTertiary }]}>Add</Text>}
             </AppPressable>
           </View>
@@ -235,7 +235,7 @@ export function RemoteProjectPicker({
               disabled={Boolean(submitting)}
               onPress={() => void addEmptyWorkspace()}
               style={({ pressed }) => [styles.emptyWorkspaceButton, { opacity: pressed ? 0.5 : 1 }]}>
-              {submitting === 'empty' && <ActivityIndicator color={theme.textSecondary} size="small" />}
+              {submitting === 'empty' && <Blocks color={theme.textSecondary} size={16} />}
               <Text style={[styles.emptyWorkspaceText, { color: theme.textSecondary }]}>New empty workspace</Text>
             </AppPressable>
             <Text numberOfLines={1} style={[styles.footerPath, { color: theme.textTertiary }]}>
@@ -307,7 +307,7 @@ function DirectoryEmpty({ loading }: { loading: boolean }) {
   const theme = useTheme();
   return (
     <View style={styles.empty}>
-      {loading ? <ActivityIndicator color={theme.textTertiary} /> : (
+      {loading ? <Blocks color={theme.textTertiary} size={20} /> : (
         <View style={[styles.emptyIcon, { backgroundColor: theme.surfaceMuted }]}>
           <AppSymbol
             name={{ ios: 'folder', android: 'folder_open', web: 'folder_open' }}

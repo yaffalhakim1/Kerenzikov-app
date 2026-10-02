@@ -1091,6 +1091,10 @@ pub struct Waku {
     /// Cached once at construction for the Daemon settings connection URL;
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
+    /// The machine's Tailscale IPv4 address, cached alongside the hostname.
+    /// `None` when Tailscale is not running, so settings can omit the hint
+    /// rather than show a stale or wrong address.
+    daemon_tailscale_address: Option<String>,
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
     session_hydrations: HashSet<Uuid>,
@@ -2058,6 +2062,7 @@ impl Waku {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let store = StateStore::remote(daemon.clone());
         let daemon_hostname = crate::daemon::local_hostname().unwrap_or_else(|| "this-mac".into());
+        let daemon_tailscale_address = crate::daemon::tailscale_address();
         let composer_draft_store = ComposerDraftStore::remote(daemon.clone());
         let composer_drafts = composer_draft_store.load().unwrap_or_default();
         let mut state = store.load_or_fresh(cwd);
@@ -2858,6 +2863,7 @@ impl Waku {
             Self {
                 daemon,
                 daemon_hostname,
+                daemon_tailscale_address,
                 session_hydrations: HashSet::new(),
                 pending_session_activation: None,
                 state,

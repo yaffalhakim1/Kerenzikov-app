@@ -74,9 +74,9 @@ a phase from a shared epoch, leases expire 300 ms after the loader last
 painted, and the clock parks when no leases remain. Never use
 `with_animation(...).repeat()` — it re-arms `request_animation_frame` every
 display frame. A view's whole subtree rebuilds per tick, so cadence is priced
-per *view*, not per animation: spinners use the full 60 Hz rate, while
-`spin_slow` uses every second tick (≈ 30 Hz). Non-spinning pulses and
-`pulse_lease` retain ≈ 30 Hz; `pulse_lease_slow` and `Pulse::every(2)` use
+per *view*, not per animation: loaders (`motion::blocks`) use the full 60 Hz
+rate. Non-spinning pulses and `pulse_lease` retain ≈ 30 Hz;
+`pulse_lease_slow` and `Pulse::every(2)` use
 ≈ 15 Hz for loaders mounted on expensive surfaces — the working dots set the
 transcript pane's tick floor for the entire turn. Strides re-establish on
 every tick (a lease's stride resets after it fires); an earlier version kept

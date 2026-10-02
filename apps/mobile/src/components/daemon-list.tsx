@@ -1,6 +1,7 @@
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionStatus, connectionPhaseLabel } from '@/components/connection-status';
@@ -58,7 +59,7 @@ export function DaemonList({
                   </Text>
                 </View>
                 {selecting ? (
-                  <ActivityIndicator color={NativeTint} size="small" />
+                  <Blocks color={NativeTint} size={16} />
                 ) : active ? (
                   <AppSymbol
                     name={{ ios: 'checkmark', android: 'check', web: 'check' }}

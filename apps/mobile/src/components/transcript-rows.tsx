@@ -3,9 +3,10 @@ import { formatMessageTime } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { memo, useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { ActivityGroup } from '@/components/activity-group';
 import { AppSymbol } from '@/components/app-symbol';
@@ -330,7 +331,7 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
     : `${FLAVOUR_WORDS[(flavourSeed(session.id) + Math.floor(elapsed / 7)) % FLAVOUR_WORDS.length]}…`;
   return (
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
-      <ActivityIndicator color={theme.textTertiary} size="small" />
+      <Blocks color={theme.accent} size={14} />
       <Text style={[styles.workingText, { color: theme.textTertiary }]}>{word}</Text>
       {startedAt != null && session.status !== 'waiting' && (
         <Text style={[styles.workingElapsed, { color: theme.textGhost }]}>
@@ -347,7 +348,7 @@ export function EarlierIndicator() {
   const theme = useTheme();
   return (
     <View accessibilityLabel="Loading earlier messages" style={styles.earlier}>
-      <ActivityIndicator color={theme.textGhost} size="small" />
+      <Blocks color={theme.accent} size={14} />
     </View>
   );
 }
@@ -362,7 +363,7 @@ export function SessionEmpty({
   missing: boolean;
 }) {
   const theme = useTheme();
-  if (loading) return <ActivityIndicator color={theme.textTertiary} />;
+  if (loading) return <Blocks color={theme.accent} size={24} />;
   return (
     <View style={styles.empty}>
       <Text style={[styles.emptyTitle, { color: theme.text }]}>

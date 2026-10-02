@@ -9,7 +9,6 @@ import type {
 import * as Haptics from 'expo-haptics';
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   StyleSheet,
   Text,
   TextInput,
@@ -25,6 +24,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { AppSymbol } from './app-symbol';
+import { Blocks } from './blocks';
 import { ProviderIcon } from './provider-icon';
 import { Sheet, SheetRow } from './sheet';
 import { AppPressable } from '@/components/app-pressable';
@@ -146,7 +146,7 @@ export function ModelSheet({
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} model`} visible={visible}>
       {probe.isPending ? (
         <View style={styles.loading}>
-          <ActivityIndicator color={theme.textTertiary} />
+          <Blocks color={theme.accent} size={20} />
         </View>
       ) : probe.error ? (
         <Text style={[styles.note, { color: theme.danger }]}>
@@ -330,11 +330,16 @@ export function ModelPickerSheet({
 
   useEffect(() => {
     if (!visible) return;
-    const initial = provider ?? providers[0] ?? null;
-    setBrowsing(initial);
+    const opening = provider ?? providers[0] ?? null;
+    setBrowsing(opening);
     setSearch('');
-    progress.value = initial ? 1 : 0;
-  }, [progress, provider, providers, visible]);
+    progress.value = opening ? 1 : 0;
+    // `providers` is a fresh array each render, so depending on it here would
+    // reset the sheet on every parent render — and a running task re-renders
+    // this screen several times a second, which snapped `browsing` back to the
+    // current provider mid-tap. The open transition is the only moment this
+    // should run.
+  }, [progress, visible]);
 
   function slideTo(target: 0 | 1) {
     progress.value = reduceMotion
@@ -455,7 +460,7 @@ export function ModelPickerSheet({
             </View>
             {entry?.isPending ? (
               <View style={[styles.loading, { height: listHeight }]}>
-                <ActivityIndicator color={theme.textTertiary} />
+                <Blocks color={theme.accent} size={20} />
               </View>
             ) : (
               <BottomSheetFlatList
@@ -522,7 +527,7 @@ export function AgentPresetSheet({
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} agent`} visible={visible}>
       {probe.isPending ? (
         <View style={styles.loading}>
-          <ActivityIndicator color={theme.textTertiary} />
+          <Blocks color={theme.accent} size={20} />
         </View>
       ) : probe.error ? (
         <Text style={[styles.note, { color: theme.danger }]}>
@@ -685,7 +690,7 @@ export function ResumeSessionSheet({
           />
           {pending ? (
             <View style={styles.loading}>
-              <ActivityIndicator color={theme.textTertiary} />
+              <Blocks color={theme.accent} size={20} />
             </View>
           ) : error ? (
             <Text style={[styles.note, { color: theme.danger }]}>{error}</Text>

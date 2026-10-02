@@ -234,9 +234,24 @@ describe('pending control requests', () => {
       clock,
     )
     expect(askedPermission.permission).toMatchObject({ requestId: 'perm-1' })
-    const resumed = reduceRuntimeEvent(askedPermission.session, event('activity', { title: 'Bash' }), clock)
+    const resumed = reduceRuntimeEvent(askedPermission.session, event('textDelta', 'Proceeding.'), clock)
     expect(resumed.permission).toBeNull()
     expect(resumed.userInput).toBeNull()
+  })
+
+  test('the request’s own tool activity does not clear the panel', () => {
+    // OpenCode surfaces `question.asked` and the `question` tool part as
+    // separate events, so an activity lands while the question is still
+    // pending. Treating it as progress wiped the panel a beat after it armed.
+    const waiting = reduceRuntimeEvent(runningSession(), event('userInputRequested', asked), clock)
+    const withToolRow = reduceRuntimeEvent(
+      waiting.session,
+      event('richActivity', { id: 'call-1', kind: 'tool', title: 'AskUserQuestion', complete: false }),
+      clock,
+    )
+    // `undefined` means "leave the panel as it is"; only `null` clears it.
+    expect(withToolRow.userInput).toBeUndefined()
+    expect(withToolRow.session.status).toBe('waiting')
   })
 
   test('a request arriving after progress still arms the panel', () => {

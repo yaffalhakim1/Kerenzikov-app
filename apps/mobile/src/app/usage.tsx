@@ -2,7 +2,6 @@ import type { PlanUsage, ProviderKind, UsageWindow } from '@waku/client';
 import { Stack } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   Platform,
   ScrollView,
   StyleSheet,
@@ -11,6 +10,7 @@ import {
 } from 'react-native';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionBanner } from '@/components/connection-banner';
@@ -131,7 +131,7 @@ export default function UsageScreen() {
 
         {!history ? (
           <View style={styles.loading}>
-            <ActivityIndicator color={theme.textTertiary} />
+            <Blocks color={theme.accent} size={24} />
             <Text style={[styles.loadingLabel, { color: theme.textTertiary }]}>
               Scanning provider transcripts…
             </Text>
@@ -318,7 +318,7 @@ function PlanCard({
         <Text numberOfLines={1} style={[styles.providerName, { color: theme.text }]}>
           {plan?.planLabel ?? 'Plan'}
         </Text>
-        {isFetching && <ActivityIndicator color={theme.textTertiary} size="small" />}
+        {isFetching && <Blocks color={theme.accent} size={14} />}
       </View>
       {error ? (
         <Text style={[styles.detail, { color: theme.danger }]}>

@@ -1,7 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Animated,
   StyleSheet,
   Text,
@@ -9,6 +8,7 @@ import {
 } from 'react-native';
 
 import { AppPressable } from '@/components/app-pressable';
+import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
@@ -166,7 +166,7 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
       ]}>
       <View style={styles.icon}>
         {notice.kind === 'reconnecting' && notice.attempting ? (
-          <ActivityIndicator color={tint} size="small" style={styles.spinner} />
+          <Blocks color={tint} size={18} />
         ) : (
           <AppSymbol name={noticeIcon(notice)} size={18} tintColor={tint} />
         )}
@@ -261,7 +261,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   icon: { alignItems: 'center', justifyContent: 'center', width: 18 },
-  spinner: { height: 18, transform: [{ scale: 0.8 }], width: 18 },
   copy: { flex: 1 },
   title: { fontSize: 14, fontWeight: '700' },
   body: { fontSize: 12, lineHeight: 17, marginTop: 2 },
