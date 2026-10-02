@@ -12,6 +12,23 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.43]
+
+- Settings → Daemon now shows the machine's Tailscale address when Tailscale
+  is running, with a one-line setup hint. The address it showed before was the
+  computer name, which does not resolve from a phone on another network — the
+  tailnet address is the one a mobile client can actually save. Copy it from
+  the new card instead of the hostname.
+- The loading spinner is gone. A small grid of squares that shrink and grow in
+  a sweep now marks every working state on desktop and mobile, tinted with the
+  brand colour.
+- Answering an agent's question no longer makes the question panel vanish. The
+  panel could clear itself a moment after it appeared, before you could pick an
+  answer, whenever the agent was running its question tool.
+- The model picker no longer jumps back to the running task's provider. While a
+  task ran, choosing a different agent for a new task could snap back to the
+  one already running.
+
 ## [0.1.42]
 
 - Transcripts no longer duplicate themselves. With more than one client
