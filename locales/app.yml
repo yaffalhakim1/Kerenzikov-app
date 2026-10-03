@@ -262,6 +262,12 @@ daemon.tailscale_title:
   en: Reach it from anywhere with Tailscale
 daemon.tailscale_description:
   en: Install Tailscale on this machine and your phone, sign in to the same tailnet, then save this address in the mobile app instead of the machine name above. It works over any network, with no port forwarding.
+daemon.tailscale_setup_description:
+  en: Tailscale lets your phone reach this machine from any network, with no port forwarding. Install it here and on your phone, sign in to the same account, then come back and check again — this card will show the address to save in the mobile app.
+daemon.tailscale_get:
+  en: Get Tailscale
+daemon.tailscale_recheck:
+  en: Check again
 daemon.external_title:
   en: External daemon
 daemon.external_description:

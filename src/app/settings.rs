@@ -555,7 +555,8 @@ impl Waku {
         let websocket_url = format!("ws://{}:{port}", self.daemon_hostname);
         let token = self.state.daemon_exposure.token.clone();
         // The machine name in `websocket_url` does not resolve on a phone; the
-        // tailnet address does, so show it whenever Tailscale is running.
+        // tailnet address does. The card shows either way, so someone who has
+        // never installed Tailscale still gets the setup steps.
         let tailscale_url = self
             .daemon_tailscale_address
             .as_ref()
@@ -1116,71 +1117,33 @@ impl Waku {
                         ),
                 )
             })
-            .children(if enabled {
-                tailscale_url
-                    .as_deref()
-                    .map(|url| self.render_tailscale_hint(url, cx))
-            } else {
-                None
+            .when(enabled, |column| {
+                column.child(self.render_tailscale_card(tailscale_url.as_deref(), cx))
             })
             .into_any_element()
     }
 
-    /// Tailscale reachability card. The LAN hostname shown elsewhere only
-    /// resolves inside the local network; the tailnet address resolves from
-    /// any device on the same tailnet, so it is the address a phone should
-    /// actually save.
-    fn render_tailscale_hint(&self, url: &str, cx: &mut Context<Self>) -> AnyElement {
-        let theme = Theme::current(cx);
-        let feedback_id = "daemon-tailscale-url";
-        let copied = self.control_was_copied(feedback_id);
-        let click_url = url.to_owned();
-        let key_url = url.to_owned();
-        let copy_button = div()
-            .id("copy-daemon-tailscale-url")
-            .tab_index(0)
-            .h(px(27.0))
-            .px(px(9.0))
-            .rounded(px(6.0))
-            .border_1()
-            .border_color(theme.border_strong)
-            .flex()
-            .items_center()
-            .gap(px(5.0))
-            .cursor_default()
-            .text_size(sp(12.5))
-            .text_color(theme.text_secondary)
-            .focus_visible(|style| style.border_color(theme.accent))
-            .hover(|element| element.bg(theme.overlay))
-            .child(icon(
-                if copied {
-                    "icons/check.svg"
-                } else {
-                    "icons/copy.svg"
-                },
-                11.0,
-                theme.text_tertiary,
-            ))
-            .child(if copied {
-                tr!("common.copied")
-            } else {
-                tr!("common.copy")
-            })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(click_url.clone()));
-                this.show_control_copied(feedback_id, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if !event.keystroke.modifiers.modified()
-                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
-                {
-                    cx.write_to_clipboard(ClipboardItem::new_string(key_url.clone()));
-                    this.show_control_copied(feedback_id, cx);
-                    cx.stop_propagation();
-                }
-            }));
+    /// Re-probe for the tailnet address. The probe is a UDP `connect` to a
+    /// Tailscale-owned IP — no packet is sent and no name is resolved — so it
+    /// is safe to run inline; there is nothing to wait on.
+    fn recheck_tailscale(&mut self, cx: &mut Context<Self>) {
+        self.daemon_tailscale_address = crate::daemon::tailscale_address();
+        cx.notify();
+    }
 
-        div()
+    /// Tailscale reachability card. The LAN hostname shown above only resolves
+    /// inside the local network; the tailnet address resolves from any device
+    /// on the same tailnet, so it is the address a phone should actually save.
+    ///
+    /// The card always renders. Hiding it when Tailscale is absent would leave
+    /// someone who has never heard of Tailscale — or who forgot to start it —
+    /// with no way to learn the feature exists, which is exactly when the
+    /// guidance is worth the most.
+    fn render_tailscale_card(&self, url: Option<&str>, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let connected = url.is_some();
+
+        let mut card = div()
             .px(px(20.0))
             .py(px(15.0))
             .rounded(px(13.0))
@@ -1200,9 +1163,62 @@ impl Waku {
                     .text_size(sp(12.5))
                     .line_height(sp(16.0))
                     .text_color(theme.text_secondary)
-                    .child(tr!("daemon.tailscale_description")),
-            )
-            .child(
+                    .child(tr!(if connected {
+                        "daemon.tailscale_description"
+                    } else {
+                        "daemon.tailscale_setup_description"
+                    })),
+            );
+
+        if let Some(url) = url {
+            let feedback_id = "daemon-tailscale-url";
+            let copied = self.control_was_copied(feedback_id);
+            let click_url = url.to_owned();
+            let key_url = url.to_owned();
+            let copy_button = div()
+                .id("copy-daemon-tailscale-url")
+                .tab_index(0)
+                .h(px(27.0))
+                .px(px(9.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(theme.border_strong)
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .text_size(sp(12.5))
+                .text_color(theme.text_secondary)
+                .focus_visible(|style| style.border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay))
+                .child(icon(
+                    if copied {
+                        "icons/check.svg"
+                    } else {
+                        "icons/copy.svg"
+                    },
+                    11.0,
+                    theme.text_tertiary,
+                ))
+                .child(if copied {
+                    tr!("common.copied")
+                } else {
+                    tr!("common.copy")
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(click_url.clone()));
+                    this.show_control_copied(feedback_id, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    if !event.keystroke.modifiers.modified()
+                        && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                    {
+                        cx.write_to_clipboard(ClipboardItem::new_string(key_url.clone()));
+                        this.show_control_copied(feedback_id, cx);
+                        cx.stop_propagation();
+                    }
+                }));
+            card = card.child(
                 div()
                     .mt(px(13.0))
                     .py(px(8.0))
@@ -1220,8 +1236,43 @@ impl Waku {
                             .child(SharedString::from(url.to_owned())),
                     )
                     .child(copy_button),
-            )
-            .into_any_element()
+            );
+        } else {
+            let action = |id: &'static str, label: String| {
+                div()
+                    .id(id)
+                    .tab_index(0)
+                    .h(px(27.0))
+                    .px(px(11.0))
+                    .rounded(px(6.0))
+                    .border_1()
+                    .border_color(theme.border_strong)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .cursor_default()
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .focus_visible(|style| style.border_color(theme.accent))
+                    .hover(|element| element.bg(theme.overlay))
+                    .child(label)
+            };
+            let get_button = action("tailscale-get", tr!("daemon.tailscale_get"))
+                .on_click(cx.listener(|_, _, _, cx| cx.open_url("https://tailscale.com/download")));
+            let recheck_button = action("tailscale-recheck", tr!("daemon.tailscale_recheck"))
+                .on_click(cx.listener(|this, _, _, cx| this.recheck_tailscale(cx)));
+            card = card.child(
+                div()
+                    .mt(px(13.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(get_button)
+                    .child(recheck_button),
+            );
+        }
+
+        card.into_any_element()
     }
 
     fn daemon_exposure_from_fields(

@@ -1093,8 +1093,8 @@ pub struct Waku {
     /// rendering must not query account or network configuration.
     daemon_hostname: String,
     /// The machine's Tailscale IPv4 address, cached alongside the hostname.
-    /// `None` when Tailscale is not running, so settings can omit the hint
-    /// rather than show a stale or wrong address.
+    /// `None` when Tailscale is not running; the Daemon settings card then
+    /// shows the setup steps instead of an address, and re-probes on demand.
     daemon_tailscale_address: Option<String>,
     /// Session details currently being fetched from the daemon. Sidebar rows
     /// stay usable while the selected transcript hydrates asynchronously.
