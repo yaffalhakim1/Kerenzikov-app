@@ -296,6 +296,57 @@ export function shouldApplyRuntimeEvent(
   return !runtimeEventAlreadyApplied(session, event);
 }
 
+/**
+ * Event kinds that reach `reduceRuntimeEvent`'s `default: break`.
+ *
+ * The mobile app has no background-work, todo or plan-usage surface, so these
+ * carry no projection this client draws. Cloning the session for them is pure
+ * waste — measured at 4ms per clone on a 1.3MB transcript — and `backgroundWork`
+ * arrives as often as the model streams (a 15s sample of one live turn: 2026
+ * reasoningDelta + 90 backgroundWork events, 137/sec).
+ */
+const UNPROJECTED_RUNTIME_EVENTS = new Set(['todoUpdated', 'planUsageUpdated', 'backgroundWork']);
+
+/** Whether folding this event can change the session the transcript draws. */
+export function runtimeEventTouchesSession(event: SequencedEvent): boolean {
+  return !UNPROJECTED_RUNTIME_EVENTS.has(event.event.kind);
+}
+
+/** Stream-rate kinds that wait for the commit tick instead of flushing the
+ * buffer. `backgroundWork` belongs here because it is conversation meta with no
+ * consumer in this app: flushing per event cost one deep clone and one
+ * task-state cache write each, and it arrives at stream cadence. */
+export function runtimeEventIsDeferrable(event: SequencedEvent): boolean {
+  const kind = event.event.kind;
+  return kind === 'textDelta'
+    || kind === 'reasoningDelta'
+    || kind === 'usageUpdated'
+    || kind === 'backgroundWork';
+}
+
+/**
+ * Move the replay cursor over an event the reducer ignores.
+ *
+ * The cursor is the client's "already folded in" marker, so it has to advance
+ * even when nothing was projected — otherwise a reconnect replays the event.
+ * Everything else is left by reference, so no row is invalidated and no cache
+ * write happens.
+ */
+export function advanceRuntimeEventCursor(
+  session: AgentSession,
+  event: SequencedEvent,
+): AgentSession {
+  if (runtimeEventAlreadyApplied(session, event)) return session;
+  return {
+    ...session,
+    runtime_event_cursor: {
+      runtime_id: event.runtimeId,
+      epoch: event.epoch,
+      sequence: event.sequence,
+    },
+  };
+}
+
 function promptTitle(prompt: string): string | null {
   let title = prompt.split(/\s+/u).filter(Boolean).slice(0, 7).join(' ');
   if (!title) return null;
