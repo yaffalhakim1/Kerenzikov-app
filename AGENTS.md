@@ -116,6 +116,31 @@ already be in memory.
 - Use it to install and exercise `apps/mobile` builds when a task needs a real
   device surface; a successful JS/Rust build alone is not validation.
 
+### Running the mobile app end to end
+
+The debug APK has no embedded JS bundle, so an emulator alone is not enough —
+without a reachable Metro server the app boots to a red "Unable to load
+script" screen. Run all four steps:
+
+1. Emulator, headless: run `emu.cmd` (or the command above), then wait for
+   `adb shell getprop sys.boot_completed` to print `1`.
+2. Metro, from `apps/mobile`: `bun x expo start --port 8081`. It is ready when
+   `Test-NetConnection 127.0.0.1 -Port 8081` is `True`; the log prints
+   `Waiting on http://localhost:8081`. Logs land in `%TEMP%\waku-metro.log`
+   when started detached.
+3. Bridge the emulator to Metro: `adb reverse tcp:8081 tcp:8081`. The app's
+   debug build loads `index.android.bundle` from `localhost:8081`, and without
+   the reverse it cannot see the host's Metro.
+4. Launch: `adb shell am force-stop sh.waku.mobile` then
+   `adb shell monkey -p sh.waku.mobile -c android.intent.category.LAUNCHER 1`.
+   First bundle takes ~1s; verify with `adb exec-out screencap -p` (the New Task
+   screen) and `adb shell dumpsys window | findstr mCurrentFocus`.
+   `bun --filter @waku/mobile android` (`expo run:android`) does steps 2-4 in
+   one shot and handles `adb reverse` itself, so prefer it when a rebuild is
+   also needed.
+- `adb shell am force-stop` + relaunch is enough to pick up JS changes; a full
+  `expo run:android` is only needed after native/config changes.
+
 ## Accessibility
 
 - Treat accessibility as a product requirement too. GPUI does not yet expose a
