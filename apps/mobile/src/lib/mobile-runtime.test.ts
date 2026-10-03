@@ -2,11 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentSession, MessageAttachment, Project, SequencedEvent } from '@waku/client';
 
 import {
+  advanceRuntimeEventCursor,
   applySessionOptions,
   beginTurn,
   createSession,
   queueSubmission,
   runtimeEventAlreadyApplied,
+  runtimeEventIsDeferrable,
+  runtimeEventTouchesSession,
   sessionBusy,
   sessionCwd,
   sessionHasActiveProviderTurn,
@@ -307,3 +310,69 @@ const attachment: MessageAttachment = {
   is_image: true,
   blob_reference: 'waku-attachment:file',
 };
+
+describe('runtime event pump classification', () => {
+  test('conversation meta the reducer does not project never touches the session', () => {
+    // These kinds reach the reducer's `default: break`. Mobile has no
+    // background-work, todo or plan-usage surface, so re-cloning the whole
+    // session (and rewriting the task-state cache) for them is pure waste —
+    // measured at 4ms per clone on a 1.3MB transcript.
+    for (const kind of ['todoUpdated', 'planUsageUpdated', 'backgroundWork']) {
+      expect(runtimeEventTouchesSession(event(kind))).toBe(false);
+    }
+  });
+
+  test('every kind the reducer projects still reaches the session', () => {
+    for (const kind of [
+      'connected', 'agentPresetSelected', 'autoTitleUpdated', 'availableCommands',
+      'promptSubmitted', 'turnStarted', 'turnParked', 'textDelta', 'reasoningDelta',
+      'activity', 'richActivity', 'permission', 'userInputRequested', 'usageUpdated',
+      'goalUpdated', 'turnFinished', 'error', 'processExited',
+    ]) {
+      expect(runtimeEventTouchesSession(event(kind))).toBe(true);
+    }
+  });
+
+  test('the high-frequency stream defers, interactive events flush now', () => {
+    for (const kind of ['textDelta', 'reasoningDelta', 'usageUpdated', 'backgroundWork']) {
+      expect(runtimeEventIsDeferrable(event(kind))).toBe(true);
+    }
+    for (const kind of ['turnStarted', 'turnFinished', 'permission', 'userInputRequested']) {
+      expect(runtimeEventIsDeferrable(event(kind))).toBe(false);
+    }
+  });
+
+  test('advancing the cursor over an ignored event keeps the transcript identity', () => {
+    const current = session({
+      status: 'working',
+      messages: [{ id: 'm', turn_id: null, role: 'user', content: 'hi', created_at: 1, streaming: false }],
+      transcript_blocks: [{ after_message: 1, turn_id: null, content: { kind: 'activities', data: [] } }],
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 4 },
+    });
+    const next = advanceRuntimeEventCursor(current, event('backgroundWork', 5));
+    expect(next.runtime_event_cursor).toEqual({
+      runtime_id: 'runtime', epoch: 'epoch', sequence: 5,
+    });
+    // Same arrays: nothing deep-cloned, so no row is invalidated.
+    expect(next.messages).toBe(current.messages);
+    expect(next.transcript_blocks).toBe(current.transcript_blocks);
+  });
+
+  test('advancing an already-applied cursor returns the same object', () => {
+    const current = session({
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 9 },
+    });
+    expect(advanceRuntimeEventCursor(current, event('textDelta', 9))).toBe(current);
+    expect(advanceRuntimeEventCursor(current, event('textDelta', 4))).toBe(current);
+  });
+});
+
+function event(kind: string, sequence = 1): SequencedEvent {
+  return {
+    sessionId: 'session',
+    runtimeId: 'runtime',
+    epoch: 'epoch',
+    sequence,
+    event: { kind, payload: null },
+  };
+}
