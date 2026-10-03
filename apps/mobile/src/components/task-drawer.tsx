@@ -119,13 +119,21 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
   const params = useGlobalSearchParams<{ id?: string | string[] }>();
   const { width } = useWindowDimensions();
   const [open, setOpen] = useState(false);
+  // The drawer library renders its content even while closed, so mounting the
+  // task list at launch builds every row (and its provider icon) before the
+  // user asks for it — measured as multi-second frames on first paint. Build it
+  // on first open, then keep it mounted so search/scroll state survives close.
+  const [contentMounted, setContentMounted] = useState(false);
   // Full-bleed: the drawer replaces the screen rather than leaving a strip of
   // the chat showing, so the task list is not squeezed into a phone-width
   // column with a permanently visible sliver behind it.
   const drawerWidth = width;
   const drawerEnabled = daemon.phase === 'booting' || daemon.profiles.length > 0;
   const openTaskDrawer = useCallback(() => {
-    if (drawerEnabled) setOpen(true);
+    if (drawerEnabled) {
+      setContentMounted(true);
+      setOpen(true);
+    }
   }, [drawerEnabled]);
   const closeTaskDrawer = useCallback(() => setOpen(false), []);
   const controls = useMemo(
@@ -156,11 +164,13 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
             overlayAccessibilityLabel="Close task history"
             overlayStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.18)' }}
             renderDrawerContent={() => (
-              <TaskDrawerContent
-                drawerRowWidth={drawerWidth - 24}
-                selectedSessionId={selectedSessionId}
-                onClose={closeTaskDrawer}
-              />
+              contentMounted ? (
+                <TaskDrawerContent
+                  drawerRowWidth={drawerWidth - 24}
+                  selectedSessionId={selectedSessionId}
+                  onClose={closeTaskDrawer}
+                />
+              ) : null
             )}
             // Narrow edge so wide code/tables can pan horizontally without
             // opening the drawer; the button still opens it anywhere.
