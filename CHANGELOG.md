@@ -12,6 +12,14 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.45]
+
+- The app no longer freezes for a few seconds right after it opens and
+  connects to the daemon. The task-history drawer was being built in the
+  background at launch — every task row and its agent mark — before you opened
+  it, which stalled the first frames. It is now built the first time you open
+  it, so the app is interactive immediately.
+
 ## [0.1.44]
 
 - Tasks can be pinned to the top of the list. Pin or unpin from a task's
