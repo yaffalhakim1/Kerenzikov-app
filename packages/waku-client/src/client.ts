@@ -122,6 +122,7 @@ export class WakuClient {
   private rejectConnect?: (error: Error) => void;
   private receivedAt = 0;
   private disconnectReason: string | null = null;
+  private peerVersion: string | null = null;
 
   constructor(options: WakuClientOptions) {
     this.address = options.address;
@@ -164,6 +165,12 @@ export class WakuClient {
   /** The close reason of the last established connection that ended remotely, when the peer gave one. */
   get lastDisconnectReason(): string | null {
     return this.disconnectReason;
+  }
+
+  /** The daemon's own version string, from its handshake; null before the
+   *  first connection. Shown in Settings so a stale host is visible. */
+  get daemonVersion(): string | null {
+    return this.peerVersion;
   }
 
   /** `host:port` of the configured daemon, for user-facing error copy. */
@@ -258,6 +265,7 @@ export class WakuClient {
             }
             handshakeSettled = true;
             established = true;
+            this.peerVersion = message.daemonVersion;
             clearTimeout(connectTimer);
             if (this.rejectConnect === failHandshake) this.rejectConnect = undefined;
             this.setConnectionState("connected");

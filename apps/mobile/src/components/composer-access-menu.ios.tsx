@@ -1,5 +1,5 @@
 import type { RuntimeMode } from '@waku/client';
-import * as Haptics from 'expo-haptics';
+import { tapHaptic } from '@/lib/haptics';
 import {
   Host,
   Label,
@@ -79,7 +79,7 @@ export function ComposerAccessMenu({ mode, onApply }: ComposerAccessMenuProps) {
               isOn={item.id === mode}
               key={item.id}
               onIsOnChange={() => {
-                void Haptics.selectionAsync();
+                tapHaptic();
                 onApply(item.id);
               }}>
               <Label systemImage={item.icon}>

@@ -1,5 +1,6 @@
 import type {
   AgentSession,
+  FileEntry,
   MessageAttachment,
   PendingPermission,
   PendingUserInput,
@@ -25,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AgentPresetMenu } from './agent-preset-menu';
 import { AppSymbol } from './app-symbol';
-import { AttachmentChip } from './attachment-chip';
+import { AttachmentChip, UploadRing } from './attachment-chip';
 import { ComposerAccessMenu } from './composer-access-menu';
 import {
   ComposerAttachmentMenu,
@@ -34,15 +35,18 @@ import {
 import { ComposerTextInput } from './composer-text-input';
 import type { ComposerTextInputProps } from './composer-text-input.types';
 import { ProviderIcon } from './provider-icon';
+import { QueuedMessageRow } from './queued-message-row';
 import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
 import { GlassSurface } from './glass-surface';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
-import { useComposerCommands, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
+import { useComposerCommands, useProjectFiles, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
 import {
   detectComposerTrigger,
   filterComposerCommands,
+  filterComposerFiles,
   mergeComposerCommands,
+  replaceComposerFileTrigger,
   replaceComposerTrigger,
   resolvedComposerSubmission,
 } from '@/lib/composer-commands';
@@ -53,6 +57,7 @@ import {
   type LocalAttachmentFile,
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
+import { tapHaptic } from '@/lib/haptics';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
 import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { agentPresetAvailable } from '@/lib/session-presentation';
@@ -189,14 +194,12 @@ export function SendButton({
   onPress,
   disabled,
   busy = false,
-  steering = false,
   queueing = false,
   label,
 }: {
   onPress: () => void;
   disabled: boolean;
   busy?: boolean;
-  steering?: boolean;
   queueing?: boolean;
   label: string;
 }) {
@@ -220,9 +223,7 @@ export function SendButton({
             ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
             : { ios: 'paperplane.fill', android: 'send', web: 'send' }}
           size={19}
-          tintColor={
-            disabled ? theme.textTertiary : steering ? theme.accent : theme.text
-          }
+          tintColor={disabled ? theme.textTertiary : theme.text}
         />
       )}
     </AppPressable>
@@ -250,6 +251,10 @@ export function MobileComposer({
   const [localError, setLocalError] = useState<string | null>(null);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
   const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
+  // Set while the draft holds a queued message being reworked, so the composer
+  // can say so and offer a way out. The message is already dequeued at that
+  // point (matching the desktop), so Cancel just clears the draft.
+  const [editingQueued, setEditingQueued] = useState(false);
   const busy = sessionBusy(session);
   const supportsAgentPreset = agentPresetAvailable(session, busy);
   // One probe feeds both halves of the header — the model's name and whether a
@@ -282,9 +287,10 @@ export function MobileComposer({
   //   agentPresets.find((preset) => preset.is_default) ??
   //   agentPresets[0];
   const liveRuntime = runtime.runtimes[session.id];
-  // Mirrors desktop `session_can_steer`: an active provider turn AND a driver
-  // that takes a mid-turn message. Anything else queues through sendPrompt
-  // rather than being steered at a provider with no turn to fold it into.
+  // Whether a queued follow-up can be delivered into the live turn right now,
+  // which decides if its Send now action is offered. Mirrors desktop
+  // `session_can_steer`: an active provider turn AND a driver that takes a
+  // mid-turn message.
   const canSteer =
     sessionHasActiveProviderTurn(session) && Boolean(liveRuntime?.supportsSteer);
   const permission = runtime.permissions[session.id];
@@ -302,15 +308,27 @@ export function MobileComposer({
   // input, and the trigger dies at the first whitespace either way.
   const trigger = useMemo(() => detectComposerTrigger(draft, draft.length), [draft]);
   const suggestions = useMemo(
-    () => trigger ? filterComposerCommands(commands, trigger.query) : [],
+    () => trigger?.kind === 'command' ? filterComposerCommands(commands, trigger.query) : [],
     [commands, trigger],
+  );
+  const projectFiles = useProjectFiles(projectPath, trigger?.kind === 'file');
+  const fileSuggestions = useMemo(
+    () => trigger?.kind === 'file' ? filterComposerFiles(projectFiles.data ?? [], trigger.query) : [],
+    [projectFiles.data, trigger],
   );
 
   function applyCommand(command: SlashCommand) {
-    if (!trigger) return;
+    if (trigger?.kind !== 'command') return;
     draftSync.markEdited();
     setDraft(replaceComposerTrigger(draft, trigger, command).text);
-    void Haptics.selectionAsync();
+    tapHaptic();
+  }
+
+  function applyFile(file: FileEntry) {
+    if (trigger?.kind !== 'file') return;
+    draftSync.markEdited();
+    setDraft(replaceComposerFileTrigger(draft, trigger, file).text);
+    tapHaptic();
   }
 
   useEffect(() => setLocalError(null), [session.id]);
@@ -340,6 +358,10 @@ export function MobileComposer({
 
   const attachmentImportTail = useRef<Promise<void>>(Promise.resolve());
   const pendingAttachmentImports = useRef(0);
+  // Each file gets its own pending tile with a spinner, so a multi-file drop
+  // shows what is still in flight rather than one opaque "Attaching…" chip.
+  const pendingId = useRef(0);
+  const [pendingFiles, setPendingFiles] = useState<{ id: number; name: string }[]>([]);
 
   async function addLocalFiles(files: LocalAttachmentFile[]) {
     if (!files.length) return;
@@ -347,27 +369,32 @@ export function MobileComposer({
     pendingAttachmentImports.current += 1;
     setImportingAttachments(true);
     setLocalError(null);
+    const staged = files.map((file) => ({ id: ++pendingId.current, name: file.name }));
+    setPendingFiles((current) => [...current, ...staged]);
     const operation = attachmentImportTail.current.catch(() => {}).then(async () => {
       const client = daemon.client;
       if (!client || daemon.phase !== 'connected') {
         throw new Error('Kerenzikov daemon is disconnected');
       }
-      for (const file of files) {
-        const imported = await importLocalAttachment(client, file);
+      for (let index = 0; index < files.length; index += 1) {
+        const imported = await importLocalAttachment(client, files[index]!);
         if (mounted.current && activeSessionId.current === targetSessionId) {
           draftSync.markEdited();
           setAttachments((current) => [...current, imported]);
+          const id = staged[index]!.id;
+          setPendingFiles((current) => current.filter((item) => item.id !== id));
         }
       }
     });
     attachmentImportTail.current = operation;
     try {
       await operation;
-      await Haptics.selectionAsync();
+      tapHaptic();
     } finally {
       pendingAttachmentImports.current -= 1;
       if (mounted.current && pendingAttachmentImports.current === 0) {
         setImportingAttachments(false);
+        setPendingFiles([]);
       }
     }
   }
@@ -442,12 +469,15 @@ export function MobileComposer({
     setLocalError(null);
     onSubmitted?.();
     try {
-      if (canSteer) await runtime.steerPrompt(session, prompt, submittedAttachments);
-      else await runtime.sendPrompt(session, prompt, submittedAttachments);
+      // While the agent is working a new message queues; it is never steered
+      // implicitly. Steering a live turn is deliberate and lives on the queued
+      // row's Send now action, matching the desktop composer.
+      await runtime.sendPrompt(session, prompt, submittedAttachments);
       draftSync.removeSubmittedDraft();
       setDraft('');
       setAttachments([]);
-      await Haptics.selectionAsync();
+      setEditingQueued(false);
+      tapHaptic();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -485,11 +515,9 @@ export function MobileComposer({
       : daemon.phase === 'connecting' || daemon.phase === 'booting'
         ? 'Connecting…'
         : 'Reconnect to message this agent'
-    : canSteer
-      ? 'Message the working agent…'
-      : busy
-        ? 'Queue a follow-up…'
-        : 'Message agent';
+    : busy
+      ? 'Queue a follow-up…'
+      : 'Message agent';
 
   return (
     <View style={[styles.shell, { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 }]}>
@@ -530,37 +558,50 @@ export function MobileComposer({
         </View>
       )}
       {queued.map((message) => (
-        <View
+        <QueuedMessageRow
           key={message.id}
-          style={[styles.queuedRow, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
-          <AppSymbol
-            name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
-            size={12}
-            tintColor={theme.textTertiary}
-          />
-          <Text numberOfLines={1} style={[styles.queuedText, { color: theme.textSecondary }]}>
-            {message.display_content?.trim()
-              || message.attachments?.map((attachment) => attachment.name).join(', ')
-              || message.content}
+          canSteer={canSteer}
+          message={message}
+          onEdit={() => {
+            // Pop the message back into the composer so it can be changed,
+            // dropping it from the queue in the same step — matching the
+            // desktop's Edit.
+            runtime.removeQueuedMessage(session.id, message.id).catch(() => {});
+            draftSync.markEdited();
+            setDraft(message.display_content ?? message.content);
+            setAttachments(message.attachments ?? []);
+            setEditingQueued(true);
+          }}
+          onRemove={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
+          onSendNow={() => void runtime.steerQueuedMessage(session.id, message.id).catch(() => {})}
+        />
+      ))}
+
+      {editingQueued && (
+        <View style={[styles.editingRow, { backgroundColor: theme.overlay, borderColor: theme.border }]}>
+          <Text style={[styles.editingText, { color: theme.textSecondary }]}>
+            Editing queued message
           </Text>
           <AppPressable
-            accessibilityLabel="Remove queued message"
+            accessibilityLabel="Cancel editing queued message"
             accessibilityRole="button"
             hitSlop={8}
-            onPress={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
+            onPress={() => {
+              setEditingQueued(false);
+              draftSync.markEdited();
+              setDraft('');
+              setAttachments([]);
+            }}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
-              size={11}
-              tintColor={theme.textTertiary}
-            />
+            <Text style={[styles.editingCancel, { color: theme.accent }]}>Cancel</Text>
           </AppPressable>
         </View>
-      ))}
+      )}
 
       <ComposerCard
         accessibilityLabel="Message agent"
-        beforeInput={attachments.length || importingAttachments || suggestions.length ? (
+        beforeInput={
+          attachments.length || importingAttachments || suggestions.length || fileSuggestions.length ? (
           <>
           {suggestions.length ? (
             <View style={styles.commandList}>
@@ -595,7 +636,40 @@ export function MobileComposer({
               </ScrollView>
             </View>
           ) : null}
-          {attachments.length || importingAttachments ? (
+          {fileSuggestions.length ? (
+            <View style={styles.commandList}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+                style={styles.commandListScroll}
+                contentContainerStyle={styles.commandListContent}>
+                {fileSuggestions.map((file) => (
+                  <AppPressable
+                    accessibilityLabel={`Mention ${file.path}`}
+                    accessibilityRole="button"
+                    key={file.path}
+                    onPress={() => applyFile(file)}
+                    style={({ pressed }) => [
+                      styles.commandRow,
+                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
+                    ]}>
+                    <AppSymbol
+                      name={file.is_dir
+                        ? { ios: 'folder', android: 'folder', web: 'folder' }
+                        : { ios: 'doc.text', android: 'description', web: 'description' }}
+                      size={14}
+                      tintColor={theme.textSecondary}
+                    />
+                    <Text numberOfLines={1} style={[styles.fileName, { color: theme.text }]}>
+                      {file.path}
+                    </Text>
+                  </AppPressable>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
+          {attachments.length || pendingFiles.length ? (
             <View style={styles.attachmentStack}>
               {attachments.map((attachment, index) => (
                 <View
@@ -623,12 +697,14 @@ export function MobileComposer({
                   </AppPressable>
                 </View>
               ))}
-              {importingAttachments && (
-                <View style={[styles.attachmentChip, { backgroundColor: theme.overlayStrong }]}>
-                  <Blocks color={theme.textSecondary} size={14} />
-                  <Text style={[styles.attachmentName, { color: theme.textSecondary }]}>Attaching…</Text>
+              {pendingFiles.map((file) => (
+                <View key={file.id} style={[styles.attachmentChip, { backgroundColor: theme.overlayStrong }]}>
+                  <UploadRing size={14} />
+                  <Text numberOfLines={1} style={[styles.attachmentName, { color: theme.textSecondary }]}>
+                    {file.name}
+                  </Text>
                 </View>
-              )}
+              ))}
             </View>
           ) : null}
           </>
@@ -701,10 +777,9 @@ export function MobileComposer({
                   || importingAttachments
                   || disconnected
                 }
-                label={canSteer ? 'Send to working agent' : busy ? 'Queue message' : 'Send message'}
+                label={busy ? 'Queue message' : 'Send message'}
                 onPress={() => void submit()}
-                queueing={busy && !canSteer}
-                steering={canSteer}
+                queueing={busy}
               />
             )}
           </>
@@ -791,7 +866,7 @@ function PermissionPanel({
             onPress={() => {
               setResponding(option.id);
               setError(null);
-              void Haptics.selectionAsync();
+              tapHaptic();
               void onRespond(option.id).catch((cause) => {
                 setError(cause instanceof Error ? cause.message : String(cause));
                 setResponding(null);
@@ -848,7 +923,7 @@ function UserInputPanel({
   const last = index === input.questions.length - 1;
 
   function toggle(label: string) {
-    void Haptics.selectionAsync();
+    tapHaptic();
     setCustomAnswers((values) => ({ ...values, [question.id]: '' }));
     setSelections((values) => {
       const previous = values[question.id] ?? [];
@@ -1037,9 +1112,29 @@ const styles = StyleSheet.create({
   commandList: { marginHorizontal: 4, marginTop: 4 },
   commandListScroll: { maxHeight: 220 },
   commandListContent: { gap: 4, paddingVertical: 4 },
-  commandRow: { borderRadius: Radius.small, paddingHorizontal: 11, paddingVertical: 7 },
+  commandRow: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
   commandName: { fontSize: 14, fontWeight: '600' },
   commandHint: { fontSize: 11.5, marginTop: 1 },
+  fileName: { flex: 1, fontSize: 13.5 },
+  editingRow: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+    minHeight: 34,
+    paddingHorizontal: 10,
+  },
+  editingText: { fontSize: 12.5, fontWeight: '600' },
+  editingCancel: { fontSize: 12.5, fontWeight: '600' },
   attachmentChip: {
     alignItems: 'center',
     borderRadius: Radius.small,
@@ -1084,17 +1179,6 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   errorText: { flex: 1, fontSize: 12, fontWeight: '600', lineHeight: 17 },
-  queuedRow: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 6,
-    minHeight: 34,
-    paddingHorizontal: 10,
-  },
-  queuedText: { flex: 1, fontSize: 12.5 },
   requestPanel: {
     borderRadius: Radius.large,
     borderWidth: 1,

@@ -8,6 +8,7 @@ import { Sheet, SheetRow } from '@/components/sheet';
 import { NativeTint } from '@/constants/theme';
 import { useDaemon } from '@/lib/daemon-context';
 import type { DaemonProfile } from '@/lib/daemon-profile';
+import { tapHaptic } from '@/lib/haptics';
 
 /**
  * Daemon switcher. A picker only — every add/edit flow routes to the
@@ -28,7 +29,7 @@ export function DaemonPickerSheet({
   function select(profileToSelect: DaemonProfile) {
     onDismiss();
     if (profileToSelect.id === daemon.activeProfile?.id) return;
-    void Haptics.selectionAsync();
+    tapHaptic();
     void daemon.selectProfile(profileToSelect.id).then((connected) => {
       if (!connected) {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

@@ -1,4 +1,4 @@
-import * as Haptics from 'expo-haptics';
+import { tapHaptic } from '@/lib/haptics';
 import {
   Host,
   Label,
@@ -79,7 +79,7 @@ export function AgentPresetMenu({
               isOn={agentPreset === preset.id || (!agentPreset && preset.id === selected?.id)}
               key={preset.id}
               onIsOnChange={() => {
-                void Haptics.selectionAsync();
+                tapHaptic();
                 onApply({ agentPreset: preset.id });
               }}>
               <Label systemImage={preset.is_default ? 'star' : 'person'}>

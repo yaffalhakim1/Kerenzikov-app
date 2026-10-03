@@ -2024,6 +2024,7 @@ impl Waku {
                 move |_| {
                     let rename_waku = waku.clone();
                     let archive_waku = waku.clone();
+                    let delete_waku = waku.clone();
                     let mut items = vec![
                         MenuItem::new(tr!("common.rename"), move |window, cx| {
                             let _ = rename_waku.update(cx, |waku, cx| {
@@ -2033,10 +2034,10 @@ impl Waku {
                         MenuItem::Separator,
                     ];
                     // Archiving is the default removal because it is the only
-                    // reversible one. A permanently destructive action is not
-                    // offered from the common row menu at all — it lives in the
-                    // archive view, where the user has already chosen to look at
-                    // what they are about to destroy.
+                    // reversible one, so it leads. Deleting is offered too, but
+                    // last and behind a confirmation: the row, transcript and
+                    // Git checkpoints are gone for every device and there is no
+                    // undo to fall back on.
                     if archived {
                         let unarchive_waku = waku.clone();
                         items.push(MenuItem::new(tr!("session.unarchive"), move |_, cx| {
@@ -2049,6 +2050,30 @@ impl Waku {
                                 .update(cx, |waku, cx| waku.archive_session(session_id, cx));
                         }));
                     }
+                    items.push(MenuItem::Separator);
+                    items.push(MenuItem::new(tr!("session.delete"), move |window, cx| {
+                        let answer = window.prompt(
+                            PromptLevel::Critical,
+                            &tr!("session.delete_confirm_title"),
+                            Some(&tr!("session.delete_confirm_body")),
+                            &[
+                                PromptButton::cancel(tr!("common.cancel")),
+                                PromptButton::new(tr!("session.delete")),
+                            ],
+                            cx,
+                        );
+                        let delete_waku = delete_waku.clone();
+                        cx.spawn(async move |cx| {
+                            // Only the destructive button (index 1) removes the
+                            // task; cancelling or dismissing is a no-op.
+                            if answer.await == Ok(1) {
+                                let _ = delete_waku.update(cx, |waku, cx| {
+                                    waku.remove_session(session_id, cx);
+                                });
+                            }
+                        })
+                        .detach();
+                    }));
                     items
                 },
             )

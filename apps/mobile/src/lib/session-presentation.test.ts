@@ -11,6 +11,7 @@ import {
   contextPercent,
   displaySessionTitle,
   expandTranscriptRows,
+  filterArchivedSessions,
   findActivityBlock,
   foldGroups,
   groupSessions,
@@ -18,10 +19,10 @@ import {
   relativeSessionTime,
   sessionDateGroup,
   sessionHasStarted,
+  sessionStatusBadge,
   stabilizeSessionSummaries,
   stabilizeTranscriptRows,
   turnOptionsForSession,
-  withoutHiddenSessions,
 } from './session-presentation';
 
 describe('task list projection', () => {
@@ -159,13 +160,49 @@ describe('mobile session presentation', () => {
     ]);
   });
 
-  test('drops removed sessions and returns the same array when none are marked', () => {
-    const sessions = [session({ id: 'a' }), session({ id: 'b' })];
-    // Identity matters: the drawer re-renders on every stream tick, so an
-    // unmarked list must not produce a new array.
-    expect(withoutHiddenSessions(sessions, new Set())).toBe(sessions);
-    expect(withoutHiddenSessions(sessions, new Set(['a'])).map((item) => item.id)).toEqual(['b']);
-    expect(withoutHiddenSessions(sessions, new Set(['a', 'b']))).toEqual([]);
+  test('leads with a pinned section and drops pinned tasks from the groups below', () => {
+    const now = new Date(2026, 7, 31, 12);
+    const projects: Project[] = [{ id: 'project', name: 'Waku', path: '/waku', created_at: 1 }];
+    const a = session({ id: 'a', last_reply_at: epoch(2026, 7, 31, 11) });
+    const b = session({ id: 'b', last_reply_at: epoch(2026, 7, 31, 10) });
+    const c = session({ id: 'c', last_reply_at: epoch(2026, 7, 20, 10) });
+    // Pin order, not recency, decides the pinned rows; `a` is newer but pinned
+    // second, so it must still come after `b`.
+    const groups = groupSessions(projects, [a, b, c], now, { pinned: ['b', 'a'] });
+    expect(groups.map((group) => ({
+      id: group.id,
+      sessions: group.data.map((item) => item.session.id),
+    }))).toEqual([
+      { id: '__pinned__', sessions: ['b', 'a'] },
+      { id: 'month', sessions: ['c'] },
+    ]);
+    // A pin that resolves to no live task is simply absent.
+    expect(groupSessions(projects, [a], now, { pinned: ['ghost'] }).map((group) => group.id))
+      .toEqual(['today']);
+  });
+
+  test('names the settled state a task row should show, and none while running', () => {
+    expect(sessionStatusBadge({ status: 'waiting' })).toEqual({ label: 'Input', tone: 'warning' });
+    expect(sessionStatusBadge({ status: 'failed' })).toEqual({ label: 'Failed', tone: 'danger' });
+    expect(sessionStatusBadge({ status: 'idle' })).toEqual({ label: 'Done', tone: 'ghost' });
+    // Connecting/working are covered by the row's spinner, not a label.
+    expect(sessionStatusBadge({ status: 'working' })).toBeNull();
+    expect(sessionStatusBadge({ status: 'connecting' })).toBeNull();
+  });
+
+  test('hides archived tasks unless the toggle asks for them', () => {
+    const sessions = [
+      session({ id: 'a' }),
+      session({ id: 'b', archived_at: 1_000 }),
+    ];
+    expect(filterArchivedSessions(sessions, false).map((item) => item.id)).toEqual(['a']);
+    // Asking for archived tasks returns the list untouched.
+    expect(filterArchivedSessions(sessions, true)).toBe(sessions);
+
+    // The drawer re-renders on every stream tick, so a list with nothing
+    // archived must not produce a new array and invalidate every row.
+    const active = [session({ id: 'a' }), session({ id: 'c' })];
+    expect(filterArchivedSessions(active, false)).toBe(active);
   });
 
   test('folds a group to an empty section that keeps its header', () => {

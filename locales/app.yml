@@ -511,6 +511,12 @@ session.unarchive:
   en: Unarchive
 session.archived_toast:
   en: "Archived \u201C%{title}\u201D"
+session.delete:
+  en: Delete
+session.delete_confirm_title:
+  en: Delete this task?
+session.delete_confirm_body:
+  en: The task and its transcript are removed from the daemon for every device. This cannot be undone.
 
 sidebar.show_archived:
   en: Show archived

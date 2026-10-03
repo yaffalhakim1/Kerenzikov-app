@@ -18,6 +18,7 @@ import { DaemonList } from '@/components/daemon-list';
 import { NativeTint } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
+import { tapHaptic } from '@/lib/haptics';
 import type { DaemonProfile } from '@/lib/daemon-profile';
 
 export default function DaemonsScreen() {
@@ -33,7 +34,7 @@ export default function DaemonsScreen() {
     }
     setSelectingId(profile.id);
     try {
-      await Haptics.selectionAsync();
+      tapHaptic();
       const connected = await daemon.selectProfile(profile.id);
       if (connected) navigateBack();
       else await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);

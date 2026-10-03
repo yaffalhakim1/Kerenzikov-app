@@ -16,6 +16,7 @@ import {
   discoverComposerCommands,
   fetchPlanUsage,
   hydrateSession,
+  listProjectFiles,
   loadDaemonSettings,
   loadTaskState,
   loadSkills,
@@ -274,6 +275,20 @@ export function useComposerCommands(provider: ProviderKind | null, cwd: string |
     ),
     enabled: phase === 'connected'
       && Boolean(activeProfile && client && provider && cwd && settings.data),
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+}
+
+/** The project's file index for `@` mentions. Indexing walks the whole tree
+ * (one `git ls-files`), so it is fetched once per root and reused. `enabled`
+ * keeps that work off composer mount: a session that never types `@` never
+ * pays for the index. */
+export function useProjectFiles(root: string | undefined, enabled = true) {
+  const { activeProfile, client, phase } = useDaemon();
+  return useQuery({
+    queryKey: daemonKeys.projectFiles(activeProfile?.id ?? 'disconnected', root ?? 'none'),
+    queryFn: () => listProjectFiles(requireClient(client), root!),
+    enabled: enabled && phase === 'connected' && Boolean(activeProfile && client && root),
     staleTime: Number.POSITIVE_INFINITY,
   });
 }

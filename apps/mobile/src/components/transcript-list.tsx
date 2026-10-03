@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type Ref,
 } from 'react';
 import {
@@ -66,6 +67,10 @@ const MAX_CONTENT_WIDTH = 736;
 
 /** Longer than UIScrollView's animated scroll (~0.3 s) plus a frame. */
 const SEAT_GLIDE_MS = 700;
+
+/** How long a just-revealed fold's rows fade in. Matches the row reveal in
+ *  `MdRevealOnMount`, so a fold and a streamed block dissolve alike. */
+const REVEAL_MS = 240;
 
 export interface TranscriptListHandle {
   scrollToLatest: (animated?: boolean) => void;
@@ -162,13 +167,46 @@ export function TranscriptList({
     setSeeded({ phase: hydrated, ids });
   }
 
+  // Turn ids whose hidden work was just revealed: their rows fade in on mount
+  // instead of popping, and the set clears once the reveal has run. Kept
+  // separate from `expandedFolds` so collapsing does not animate.
+  const [revealingTurns, setRevealingTurns] = useState<ReadonlySet<string>>(() => new Set());
+  const revealTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // Mirrors `expandedFolds` so `toggleFold` can stay referentially stable —
+  // a changing callback would invalidate every memoized row on each tap.
+  const expandedRef = useRef(expandedFolds);
+  expandedRef.current = expandedFolds;
   const toggleFold = useCallback((turnId: string) => {
+    const expanding = !expandedRef.current.has(turnId);
     setExpandedFolds((current) => {
       const next = new Set(current);
-      if (next.has(turnId)) next.delete(turnId);
-      else next.add(turnId);
+      if (expanding) next.add(turnId);
+      else next.delete(turnId);
       return next;
     });
+    if (!expanding) return;
+    // Mark the turn for a one-shot fade. The timer is per turn so a second
+    // expand (or a collapse then expand) restarts its own reveal cleanly.
+    setRevealingTurns((revealing) => new Set(revealing).add(turnId));
+    const timers = revealTimers.current;
+    const existing = timers.get(turnId);
+    if (existing) clearTimeout(existing);
+    timers.set(turnId, setTimeout(() => {
+      timers.delete(turnId);
+      setRevealingTurns((revealing) => {
+        if (!revealing.has(turnId)) return revealing;
+        const cleared = new Set(revealing);
+        cleared.delete(turnId);
+        return cleared;
+      });
+    }, REVEAL_MS));
+  }, []);
+  useEffect(() => {
+    const timers = revealTimers.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
   }, []);
 
   // ── Anchor handshake ────────────────────────────────────────────────────
@@ -478,6 +516,7 @@ export function TranscriptList({
                 markdownStyles={markdownStyles}
                 md={md}
                 model={session.model ?? null}
+                reveal={row.turnId != null && revealingTurns.has(row.turnId)}
                 row={row}
                 seeded={row.kind === 'md' && seeded.ids.has(row.messageId)}
                 veils={veils}
@@ -540,6 +579,7 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   seeded,
   markdownStyles,
   model,
+  reveal,
   onToggleFold,
 }: {
   row: TranscriptRow;
@@ -549,6 +589,8 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   seeded: boolean;
   markdownStyles: MarkdownStyles;
   model: string | null;
+  /** True for a row whose fold was just opened; it fades in once on mount. */
+  reveal: boolean;
   onToggleFold: (turnId: string) => void;
 }) {
   const keepTop = useCallback(
@@ -558,19 +600,43 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
   return (
     <View style={[styles.inverted, styles.column, { paddingTop: row.topGap }]}>
       <RowAnchorProvider value={keepTop}>
-        <TranscriptRowView
-          markdownStyles={markdownStyles}
-          md={md}
-          model={model}
-          row={row}
-          seeded={seeded}
-          veils={veils}
-          onToggleFold={onToggleFold}
-        />
+        <FoldReveal reveal={reveal}>
+          <TranscriptRowView
+            markdownStyles={markdownStyles}
+            md={md}
+            model={model}
+            row={row}
+            seeded={seeded}
+            veils={veils}
+            onToggleFold={onToggleFold}
+          />
+        </FoldReveal>
       </RowAnchorProvider>
     </View>
   );
 });
+
+/**
+ * Fades a just-revealed fold's rows in. The decision to animate is latched at
+ * mount: `reveal` flips back to false once the timer clears, and re-deciding
+ * then would swap the wrapper and remount the row (losing the native anchor
+ * and the parsed markdown). Compositor-driven opacity only.
+ */
+function FoldReveal({ reveal, children }: { reveal: boolean; children: ReactNode }) {
+  const reducedMotion = useReducedMotion();
+  const animate = useRef(reveal && !reducedMotion).current;
+  const opacity = useRef(new Animated.Value(animate ? 0 : 1)).current;
+  useEffect(() => {
+    if (!animate) return;
+    Animated.timing(opacity, {
+      duration: REVEAL_MS,
+      toValue: 1,
+      useNativeDriver: true,
+    }).start();
+  }, [animate, opacity]);
+  if (!animate) return <>{children}</>;
+  return <Animated.View style={{ opacity }}>{children}</Animated.View>;
+}
 
 const styles = StyleSheet.create({
   frame: { flex: 1, overflow: 'hidden' },

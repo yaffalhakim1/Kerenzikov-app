@@ -1,5 +1,4 @@
 import type { SkillEntry } from '@waku/client';
-import * as Haptics from 'expo-haptics';
 import { Stack } from 'expo-router';
 import { useState } from 'react';
 import {
@@ -22,6 +21,7 @@ import {
   useTrashSkills,
 } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
+import { tapHaptic } from '@/lib/haptics';
 import {
   groupSkillsByProject,
   skillEnabled,
@@ -47,7 +47,7 @@ export default function SkillsScreen() {
     setLocalError(null);
     try {
       await setEnabled.mutateAsync({ dirs: skillInstallDirs(entry), enabled });
-      await Haptics.selectionAsync();
+      tapHaptic();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
     }

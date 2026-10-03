@@ -95,8 +95,28 @@ export function isPrivateDaemonAddress(address: string): boolean {
     }
     const match = hostname.match(/^172\.(\d{1,3})\./);
     if (match && Number(match[1]) >= 16 && Number(match[1]) <= 31) return true;
-    if (/^(?:100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(hostname)) return true;
+    if (isTailscaleAddress(hostname)) return true;
     return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a host is in Tailscale's CGNAT block (`100.64.0.0/10`). Tailscale
+ * assigns every device an address there, so this is how the editor recognises
+ * a tailnet address and can tell the user it will work from any network. */
+export function isTailscaleAddress(hostname: string): boolean {
+  return /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(hostname);
+}
+
+/** Whether a daemon address points at a Tailscale-assigned host. Returns false
+ * for anything unparseable rather than throwing, since it runs on keystrokes. */
+export function isTailscaleDaemonAddress(address: string): boolean {
+  try {
+    const hostname = new URL(normalizeDaemonAddress(address)).hostname
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '');
+    return isTailscaleAddress(hostname);
   } catch {
     return false;
   }

@@ -24,6 +24,23 @@ class MainActivity : ReactActivity() {
   }
 
   /**
+   * Drop the saved instance state instead of parcelling it to the system.
+   *
+   * This app restores from `super.onCreate(null)` by design — every piece of
+   * durable state lives on the daemon, in AsyncStorage, or in the keychain —
+   * so nothing written here is ever read back. Left in place it is not merely
+   * wasted: the React tree's saveable state (one 116 KB entry per mounted
+   * screen) pushes the parcel past Android's ~1 MB binder limit and the
+   * process is killed with `TransactionTooLargeException` the moment it is
+   * backgrounded. Clearing it keeps the app alive through a background/foreground
+   * cycle on a low-RAM device, which is exactly when it used to die.
+   */
+  override fun onSaveInstanceState(outState: Bundle) {
+    super.onSaveInstanceState(outState)
+    outState.clear()
+  }
+
+  /**
    * Returns the name of the main component registered from JavaScript. This is used to schedule
    * rendering of the component.
    */
