@@ -19,6 +19,7 @@ import {
   relativeSessionTime,
   sessionDateGroup,
   sessionHasStarted,
+  sessionStatusBadge,
   stabilizeSessionSummaries,
   stabilizeTranscriptRows,
   turnOptionsForSession,
@@ -157,6 +158,36 @@ describe('mobile session presentation', () => {
       { title: 'Waku', sessions: ['c', 'a'] },
       { title: 'T3', sessions: ['b'] },
     ]);
+  });
+
+  test('leads with a pinned section and drops pinned tasks from the groups below', () => {
+    const now = new Date(2026, 7, 31, 12);
+    const projects: Project[] = [{ id: 'project', name: 'Waku', path: '/waku', created_at: 1 }];
+    const a = session({ id: 'a', last_reply_at: epoch(2026, 7, 31, 11) });
+    const b = session({ id: 'b', last_reply_at: epoch(2026, 7, 31, 10) });
+    const c = session({ id: 'c', last_reply_at: epoch(2026, 7, 20, 10) });
+    // Pin order, not recency, decides the pinned rows; `a` is newer but pinned
+    // second, so it must still come after `b`.
+    const groups = groupSessions(projects, [a, b, c], now, { pinned: ['b', 'a'] });
+    expect(groups.map((group) => ({
+      id: group.id,
+      sessions: group.data.map((item) => item.session.id),
+    }))).toEqual([
+      { id: '__pinned__', sessions: ['b', 'a'] },
+      { id: 'month', sessions: ['c'] },
+    ]);
+    // A pin that resolves to no live task is simply absent.
+    expect(groupSessions(projects, [a], now, { pinned: ['ghost'] }).map((group) => group.id))
+      .toEqual(['today']);
+  });
+
+  test('names the settled state a task row should show, and none while running', () => {
+    expect(sessionStatusBadge({ status: 'waiting' })).toEqual({ label: 'Input', tone: 'warning' });
+    expect(sessionStatusBadge({ status: 'failed' })).toEqual({ label: 'Failed', tone: 'danger' });
+    expect(sessionStatusBadge({ status: 'idle' })).toEqual({ label: 'Done', tone: 'ghost' });
+    // Connecting/working are covered by the row's spinner, not a label.
+    expect(sessionStatusBadge({ status: 'working' })).toBeNull();
+    expect(sessionStatusBadge({ status: 'connecting' })).toBeNull();
   });
 
   test('hides archived tasks unless the toggle asks for them', () => {

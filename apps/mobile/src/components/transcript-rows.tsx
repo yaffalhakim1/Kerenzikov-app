@@ -2,8 +2,8 @@ import type { AgentSession, Checkpoint, Message } from '@waku/client';
 import { formatMessageTime } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { memo, useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { memo, useEffect, useRef, useState } from 'react';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
@@ -19,6 +19,7 @@ import {
 } from '@/components/md-block-row';
 import { useRowAnchor } from '@/components/transcript-anchor';
 import { MonoFont, Radius } from '@/constants/theme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { mentionSegments } from '@/lib/composer-commands';
 import type { TranscriptRow } from '@/lib/session-presentation';
@@ -133,6 +134,24 @@ function FoldRow({
 }) {
   const theme = useTheme();
   const keepTop = useRowAnchor();
+  // The chevron rotates on the compositor as the fold opens or closes, so the
+  // direction change reads as motion rather than a swap. Native driver only:
+  // transform, never layout.
+  const reducedMotion = useReducedMotion();
+  const rotation = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  useEffect(() => {
+    if (reducedMotion) {
+      rotation.setValue(expanded ? 1 : 0);
+      return;
+    }
+    Animated.timing(rotation, {
+      duration: 140,
+      easing: Easing.out(Easing.ease),
+      toValue: expanded ? 1 : 0,
+      useNativeDriver: true,
+    }).start();
+  }, [expanded, reducedMotion, rotation]);
+  const spin = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] });
   return (
     <AppPressable
       accessibilityHint={expanded ? 'Collapses the agent’s work' : 'Shows the agent’s work'}
@@ -146,13 +165,13 @@ function FoldRow({
       <Text numberOfLines={1} style={[styles.foldLabel, { color: theme.textTertiary }]}>
         {label}
       </Text>
-      <AppSymbol
-        name={expanded
-          ? { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
-          : { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-        size={10}
-        tintColor={theme.textGhost}
-      />
+      <Animated.View style={{ transform: [{ rotate: spin }] }}>
+        <AppSymbol
+          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+          size={10}
+          tintColor={theme.textGhost}
+        />
+      </Animated.View>
       <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
     </AppPressable>
   );

@@ -15,8 +15,10 @@ import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
 export function TaskRowMenu({
   accessibilityLabel: label,
   archived,
+  pinned,
   onArchive,
   onDelete,
+  onPin,
   onRename,
   onSelect,
   renderTrigger,
@@ -34,6 +36,11 @@ export function TaskRowMenu({
         ]}
         onPrimaryAction={onSelect}>
         <Button label="Rename task" systemImage="pencil" onPress={onRename} />
+        <Button
+          label={pinned ? 'Unpin' : 'Pin'}
+          systemImage={pinned ? 'pin.slash' : 'pin'}
+          onPress={onPin}
+        />
         <Button
           label={archived ? 'Unarchive' : 'Archive'}
           systemImage={archived ? 'tray.and.arrow.up' : 'archivebox'}

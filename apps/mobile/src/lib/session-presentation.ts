@@ -25,6 +25,10 @@ export type SessionOrdering = 'newest' | 'oldest';
 export interface SessionGroupOptions {
   grouping?: SessionGrouping;
   ordering?: SessionOrdering;
+  /** Session ids the user pinned, in the order they should lead the list.
+   *  Pinned tasks are pulled into their own section above every date/project
+   *  group, so a pin survives whatever grouping is active. */
+  pinned?: readonly string[];
 }
 
 export interface SessionListItem {
@@ -129,6 +133,10 @@ const GAP_TURN = 16;
 const GAP_GROUP = 12;
 const GAP_BLOCK = 12;
 
+/** Section id for the pinned group, distinct from every date/project id so a
+ *  project literally named "Pinned" cannot collide with it. */
+export const PINNED_GROUP_ID = '__pinned__';
+
 const GROUPS: Array<{ id: SessionGroupId; title: string }> = [
   { id: 'today', title: 'Today' },
   { id: 'yesterday', title: 'Yesterday' },
@@ -155,6 +163,37 @@ export function sessionTimestamp(session: SessionListSummary): number {
   return session.last_reply_at ?? session.created_at;
 }
 
+export interface SessionStatusBadge {
+  label: string;
+  /** Theme token the badge paints with, so colour is paired with a word. */
+  tone: 'warning' | 'danger' | 'ghost' | 'secondary';
+}
+
+/**
+ * The settled state a task row can name, or `null` while the row should show
+ * its running spinner instead. Mirrors the desktop's `status_color` split
+ * (`src/ui/mod.rs`): Waiting is the one the user must act on, so it reads as
+ * "Input" rather than a bare status word.
+ */
+export function sessionStatusBadge(
+  session: Pick<SessionListSummary, 'status'>,
+): SessionStatusBadge | null {
+  switch (session.status) {
+    case 'waiting':
+      return { label: 'Input', tone: 'warning' };
+    case 'failed':
+      return { label: 'Failed', tone: 'danger' };
+    case 'background':
+      return { label: 'Background', tone: 'secondary' };
+    case 'idle':
+      return { label: 'Done', tone: 'ghost' };
+    default:
+      // connecting / working: the row's spinner already says it, and a label
+      // beside it would just be noise.
+      return null;
+  }
+}
+
 export function groupSessions(
   projects: Project[],
   sessions: SessionListSummary[],
@@ -163,53 +202,76 @@ export function groupSessions(
 ): SessionGroup[] {
   const projectNames = new Map(projects.map((project) => [project.id, project.name]));
   const ordering = options.ordering ?? 'newest';
-  const sorted = sessions
-    .filter(sessionHasStarted)
-    .sort((a, b) => {
-      const delta = sessionTimestamp(b) - sessionTimestamp(a);
-      return ordering === 'newest' ? delta : -delta;
-    });
+  const pinnedRank = new Map((options.pinned ?? []).map((id, index) => [id, index]));
+  const started = sessions.filter(sessionHasStarted);
+  const sorted = [...started].sort((a, b) => {
+    const delta = sessionTimestamp(b) - sessionTimestamp(a);
+    return ordering === 'newest' ? delta : -delta;
+  });
 
-  if ((options.grouping ?? 'updated') === 'project') {
-    // Groups appear in first-occurrence order of the sorted list, mirroring
-    // the desktop: the most (or least, oldest-first) recently active project
-    // leads. Unknown projects share one bucket.
-    const groups: SessionGroup[] = [];
-    const indexes = new Map<string, number>();
-    for (const session of sorted) {
-      const name = projectNames.get(session.project_id) ?? 'Unknown project';
-      const id = session.project_id || 'unknown';
-      let index = indexes.get(id);
-      if (index === undefined) {
-        index = groups.length;
-        indexes.set(id, index);
-        groups.push({ id, title: name, data: [] });
-      }
-      groups[index]!.data.push({
-        session,
-        projectName: name,
-        timestamp: sessionTimestamp(session),
-      });
-    }
-    return groups;
-  }
-
-  const grouped = new Map<SessionGroupId, SessionListItem[]>();
-  for (const session of sorted) {
-    const id = sessionDateGroup(sessionTimestamp(session), now);
-    const items = grouped.get(id) ?? [];
-    items.push({
+  // Pinned tasks form their own leading section, in pin order, and are removed
+  // from the groups below so a task is never shown twice. A pinned id that no
+  // longer resolves to a live task is simply absent, which is what unbinding
+  // a deleted or archived task means.
+  const pinnedItems: SessionListItem[] = [];
+  for (const session of started) {
+    if (!pinnedRank.has(session.id)) continue;
+    pinnedItems.push({
       session,
       projectName: projectNames.get(session.project_id) || 'Unknown project',
       timestamp: sessionTimestamp(session),
     });
-    grouped.set(id, items);
   }
-  const order = ordering === 'newest' ? GROUPS : [...GROUPS].reverse();
-  return order.flatMap((group) => {
-    const data = grouped.get(group.id);
-    return data?.length ? [{ ...group, data }] : [];
-  });
+  pinnedItems.sort((a, b) => (pinnedRank.get(a.session.id) ?? 0) - (pinnedRank.get(b.session.id) ?? 0));
+
+  const groupedSections = (() => {
+    if ((options.grouping ?? 'updated') === 'project') {
+      // Groups appear in first-occurrence order of the sorted list, mirroring
+      // the desktop: the most (or least, oldest-first) recently active project
+      // leads. Unknown projects share one bucket.
+      const groups: SessionGroup[] = [];
+      const indexes = new Map<string, number>();
+      for (const session of sorted) {
+        if (pinnedRank.has(session.id)) continue;
+        const name = projectNames.get(session.project_id) ?? 'Unknown project';
+        const id = session.project_id || 'unknown';
+        let index = indexes.get(id);
+        if (index === undefined) {
+          index = groups.length;
+          indexes.set(id, index);
+          groups.push({ id, title: name, data: [] });
+        }
+        groups[index]!.data.push({
+          session,
+          projectName: name,
+          timestamp: sessionTimestamp(session),
+        });
+      }
+      return groups;
+    }
+
+    const grouped = new Map<SessionGroupId, SessionListItem[]>();
+    for (const session of sorted) {
+      if (pinnedRank.has(session.id)) continue;
+      const id = sessionDateGroup(sessionTimestamp(session), now);
+      const items = grouped.get(id) ?? [];
+      items.push({
+        session,
+        projectName: projectNames.get(session.project_id) || 'Unknown project',
+        timestamp: sessionTimestamp(session),
+      });
+      grouped.set(id, items);
+    }
+    const order = ordering === 'newest' ? GROUPS : [...GROUPS].reverse();
+    return order.flatMap((group) => {
+      const data = grouped.get(group.id);
+      return data?.length ? [{ ...group, data }] : [];
+    });
+  })();
+
+  return pinnedItems.length
+    ? [{ id: PINNED_GROUP_ID, title: 'Pinned', data: pinnedItems }, ...groupedSections]
+    : groupedSections;
 }
 
 /**

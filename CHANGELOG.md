@@ -12,6 +12,23 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.44]
+
+- Tasks can be pinned to the top of the list. Pin or unpin from a task's
+  row menu; pinned tasks collect in their own section above Today.
+- The task list shows more at a glance: each row carries the provider mark, a
+  status badge (Done, Input, Failed, Background), and the project it belongs to.
+- Attachments show an upload ring while they send, so a large file no longer
+  looks stuck.
+- Collapsed sections fade their rows in when opened, instead of popping.
+- The daemon picker shows connection details for each host: online state,
+  version, session count, and address.
+- Sending a message now keeps the newest reply in view. Before, the view could
+  land past the reply on blank space, or on your own message, while the answer
+  streamed in.
+- The app no longer crashes when Android saves its state in the background,
+  which was killing the app after you left and returned to it.
+
 ## [0.1.43]
 
 - Settings → Daemon now shows the machine's Tailscale address when Tailscale

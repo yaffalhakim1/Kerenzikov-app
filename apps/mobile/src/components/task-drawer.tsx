@@ -36,7 +36,7 @@ import { ConnectionBanner, useConnectionNotice } from '@/components/connection-b
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
 import { GlassSurface } from '@/components/glass-surface';
 import { ConnectionStatus, connectionPhaseLabel } from '@/components/connection-status';
-import { ProviderIcon } from '@/components/provider-icon';
+import { ProviderIcon, providerBrandColor } from '@/components/provider-icon';
 import { RenameDialog } from '@/components/rename-dialog';
 import { Sheet, SheetRow } from '@/components/sheet';
 import { TaskRowMenu } from '@/components/task-row-menu';
@@ -54,6 +54,7 @@ import {
   groupSessions,
   messageSearchRows,
   providerLabel,
+  sessionStatusBadge,
   stabilizeSessionSummaries,
   type MessageSearchRow,
   type SessionGrouping,
@@ -72,6 +73,9 @@ interface SidebarPrefs {
   showArchived: boolean;
   /** Section ids whose rows are folded away. */
   folded: string[];
+  /** Pinned task ids, in pin order. Pinned tasks lead the list in their own
+   *  section, the way a project board keeps the handful you care about on top. */
+  pinned: string[];
 }
 
 const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
@@ -79,6 +83,7 @@ const DEFAULT_SIDEBAR_PREFS: SidebarPrefs = {
   ordering: 'newest',
   showArchived: false,
   folded: [],
+  pinned: [],
 };
 
 function stringArray(value: unknown): string[] {
@@ -94,6 +99,7 @@ function parseSidebarPrefs(raw: string | null): SidebarPrefs | null {
       ordering: value.ordering === 'oldest' ? 'oldest' : 'newest',
       showArchived: value.showArchived === true,
       folded: stringArray(value.folded),
+      pinned: stringArray(value.pinned),
     };
   } catch {
     return null;
@@ -259,6 +265,7 @@ function TaskDrawerContent({
       : [];
     return foldGroups(built, foldedGroups);
   }, [taskState.data, visibleSessions, prefs, foldedGroups]);
+  const pinnedIds = useMemo(() => new Set(prefs.pinned), [prefs.pinned]);
   const messageRows = useMemo(
     () => (messageQuery.trim() && messageSearch.data)
       ? messageSearchRows(messageSearch.data, taskState.data?.sessions ?? [])
@@ -284,6 +291,17 @@ function TaskDrawerContent({
     (session: SessionListSummary) => setRenameTarget(session),
     [],
   );
+  /** Pinning is local list organization, not daemon state: it is stored beside
+   *  the grouping/ordering prefs, so it costs no protocol change and a pin on
+   *  this device never surprises another. */
+  const handlePin = useCallback((session: SessionListSummary) => {
+    tapHaptic();
+    updatePrefs({
+      pinned: prefs.pinned.includes(session.id)
+        ? prefs.pinned.filter((id) => id !== session.id)
+        : [...prefs.pinned, session.id],
+    });
+  }, [prefs.pinned, updatePrefs]);
   /** Archiving is the default removal: it is recoverable, and the task stays on
    *  the daemon for every device. The Show archived toggle brings it back. */
   const handleArchive = useCallback((session: SessionListSummary) => {
@@ -475,10 +493,12 @@ function TaskDrawerContent({
           <SessionRow
             drawerRowWidth={drawerRowWidth}
             item={item}
+            pinned={pinnedIds.has(item.session.id)}
             running={Boolean(runtime.runtimes[item.session.id]?.running ?? sessionIsRunning(item.session))}
             selected={item.session.id === selectedSessionId}
             onArchive={handleArchive}
             onDelete={handleDelete}
+            onPin={handlePin}
             onRename={handleRename}
             onSelect={handleSelect}
           />
@@ -768,31 +788,41 @@ function useStableSessionSummaries(sessions: readonly AgentSession[] | undefined
 const SessionRow = memo(function SessionRow({
   drawerRowWidth,
   item,
+  pinned,
   running,
   selected,
   onArchive,
   onDelete,
+  onPin,
   onRename,
   onSelect,
 }: {
   drawerRowWidth: number;
   item: SessionListItem;
+  pinned: boolean;
   running: boolean;
   selected: boolean;
   onArchive: (session: SessionListSummary) => void;
   onDelete: (session: SessionListSummary) => void;
+  onPin: (session: SessionListSummary) => void;
   onRename: (session: SessionListSummary) => void;
   onSelect: (sessionId: string) => void;
 }) {
   const theme = useTheme();
   const rowWidth = Math.max(0, drawerRowWidth);
   const session = item.session;
+  // A running task shows the spinner; a settled one names its state. Only one
+  // of the two ever renders, so the trailing slot never says two things.
+  const badge = running ? null : sessionStatusBadge(session);
+  const statusColor = badge ? badgeToneColor(theme, badge.tone) : undefined;
   return (
     <TaskRowMenu
-      accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${item.projectName}${running ? ', Running' : ''}`}
+      accessibilityLabel={`${displaySessionTitle(session)}, ${providerLabel(session.provider)} in ${item.projectName}${pinned ? ', Pinned' : ''}${running ? ', Running' : badge ? `, ${badge.label}` : ''}`}
       archived={session.archived_at != null}
+      pinned={pinned}
       onArchive={() => onArchive(session)}
       onDelete={() => onDelete(session)}
+      onPin={() => onPin(session)}
       onRename={() => onRename(session)}
       onSelect={() => onSelect(session.id)}
       renderTrigger={(pressed) => (
@@ -806,21 +836,31 @@ const SessionRow = memo(function SessionRow({
               width: rowWidth,
             },
           ]}>
+          <ProviderTile provider={session.provider} />
           <View style={styles.sessionContent}>
             <View style={styles.sessionHeading}>
+              {pinned && (
+                <AppSymbol
+                  name={{ ios: 'pin.fill', android: 'keep', web: 'keep' }}
+                  size={11}
+                  tintColor={theme.textGhost}
+                />
+              )}
               <Text numberOfLines={1} style={[styles.sessionTitle, { color: theme.text }]}>
                 {displaySessionTitle(session)}
               </Text>
-              {running && (
-                <View style={styles.sessionSpinner}>
-                  <Blocks
-                    color={theme.accent}
-                    size={14}
-                  />
-                </View>
-              )}
             </View>
+            <Text numberOfLines={1} style={[styles.sessionProject, { color: theme.textTertiary }]}>
+              {item.projectName}
+            </Text>
           </View>
+          {running ? (
+            <View style={styles.sessionSpinner}>
+              <Blocks color={theme.accent} size={14} />
+            </View>
+          ) : badge ? (
+            <Text style={[styles.sessionStatus, { color: statusColor }]}>{badge.label}</Text>
+          ) : null}
         </View>
       )}
       selected={selected}
@@ -828,6 +868,31 @@ const SessionRow = memo(function SessionRow({
     />
   );
 });
+
+/** The harness mark in a tinted rounded tile, so a row's agent is legible at a
+ *  glance rather than as a bare glyph lost against the title. */
+function ProviderTile({ provider }: { provider: SessionListSummary['provider'] }) {
+  const theme = useTheme();
+  const brand = providerBrandColor(provider);
+  return (
+    <View style={[styles.providerTile, { backgroundColor: theme.surfaceMuted }]}>
+      <ProviderIcon color={brand ?? theme.textSecondary} provider={provider} size={17} />
+    </View>
+  );
+}
+
+function badgeToneColor(theme: ReturnType<typeof useTheme>, tone: NonNullable<ReturnType<typeof sessionStatusBadge>>['tone']): string {
+  switch (tone) {
+    case 'warning':
+      return theme.warning;
+    case 'danger':
+      return theme.danger;
+    case 'secondary':
+      return theme.textSecondary;
+    default:
+      return theme.textGhost;
+  }
+}
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -1000,19 +1065,29 @@ const styles = StyleSheet.create({
     // radius, where a fully-round row reads as a chip rather than a list item.
     borderRadius: Radius.small,
     flexDirection: 'row',
+    gap: 10,
     // 56 rather than the 48 minimum: a task title is the row you aim at most,
     // and at 48 the ripple read as barely taller than the text.
-    height: 56,
+    height: 60,
     paddingHorizontal: 12,
   },
-  sessionContent: { flex: 1 },
-  sessionHeading: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+  sessionContent: { flex: 1, gap: 1, minWidth: 0 },
+  sessionHeading: { alignItems: 'center', flexDirection: 'row', gap: 6 },
+  sessionProject: { fontSize: 12.5 },
+  sessionStatus: { fontSize: 12, fontWeight: '600' },
   sessionSpinner: { alignItems: 'center', height: 14, justifyContent: 'center', width: 14 },
+  providerTile: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
   sessionTitle: {
-    flex: 1,
-    fontSize: 16.5,
-    fontWeight: '400',
+    flexShrink: 1,
+    fontSize: 15.5,
+    fontWeight: '500',
     letterSpacing: -0.2,
-    lineHeight: 22,
+    lineHeight: 20,
   },
 });

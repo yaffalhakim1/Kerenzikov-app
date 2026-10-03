@@ -2,7 +2,7 @@
   "expo": {
     "name": "Kerenzikov",
     "slug": "waku-mobile",
-    "version": "0.1.43",
+    "version": "0.1.44",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": "waku",

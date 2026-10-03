@@ -17,7 +17,10 @@ if %errorlevel%==0 (
 )
 
 echo Starting agent-avd...
-start "" "Y:\android-sdk\emulator\emulator.exe" -avd agent-avd -no-audio -no-boot-anim -gpu swiftshader_indirect
+rem -gpu host: render with the host GPU (RTX 4050). The previous
+rem swiftshader_indirect forced CPU rasterization, which capped the whole app
+rem far below 60fps. Fall back to swiftshader_indirect only if host GPU fails.
+start "" "Y:\android-sdk\emulator\emulator.exe" -avd agent-avd -no-audio -no-boot-anim -gpu host
 
 echo Waiting for boot, about a minute...
 "%ADB%" wait-for-device

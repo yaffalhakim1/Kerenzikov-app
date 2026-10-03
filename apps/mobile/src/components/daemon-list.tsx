@@ -7,6 +7,7 @@ import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionStatus, connectionPhaseLabel } from '@/components/connection-status';
 import { DaemonAvatar } from '@/components/daemon-avatar';
 import { NativeTint, Radius } from '@/constants/theme';
+import { useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
 import { displayHost, type DaemonProfile } from '@/lib/daemon-profile';
@@ -22,6 +23,8 @@ export function DaemonList({
 }) {
   const theme = useTheme();
   const daemon = useDaemon();
+  const taskState = useTaskState();
+  const activeSessionCount = taskState.data?.sessions.length ?? null;
   return (
     <View
       style={[
@@ -31,6 +34,18 @@ export function DaemonList({
       {daemon.profiles.map((profile, index) => {
         const active = profile.id === daemon.activeProfile?.id;
         const selecting = profile.id === selectingId;
+        const connected = active && daemon.phase === 'connected';
+        // One line answering "is this reachable, and what is it running" — the
+        // question the old host-only subline left unanswered. Version and
+        // session count come from the live handshake and task state, so they
+        // are absent (not zero) while disconnected.
+        const meta = [
+          connected ? 'Online' : 'Offline',
+          connected && daemon.client?.daemonVersion ? `v${daemon.client.daemonVersion}` : null,
+          connected && activeSessionCount != null
+            ? `${activeSessionCount} session${activeSessionCount === 1 ? '' : 's'}`
+            : null,
+        ].filter(Boolean).join(' · ');
         return (
           <View key={profile.id}>
             <View style={styles.row}>
@@ -55,7 +70,7 @@ export function DaemonList({
                     {active && <ConnectionStatus compact phase={daemon.phase} />}
                   </View>
                   <Text numberOfLines={1} style={[styles.host, { color: theme.textSecondary }]}>
-                    {displayHost(profile.address)}
+                    {meta} · {displayHost(profile.address)}
                   </Text>
                 </View>
                 {selecting ? (

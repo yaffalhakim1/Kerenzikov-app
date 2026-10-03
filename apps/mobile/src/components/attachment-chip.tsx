@@ -1,16 +1,77 @@
 import type { MessageAttachment } from '@waku/client';
-import { useEffect, useState } from 'react';
-import { Image, Modal, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, Image, Modal, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 
 import { AppSymbol } from './app-symbol';
 import { AppPressable } from '@/components/app-pressable';
 
 import { Radius } from '@/constants/theme';
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { isPreviewableImage, readAttachmentImage } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
 
 const TILE = 76;
+
+/**
+ * The upload indicator on a file still being handed to the daemon.
+ *
+ * The wire protocol stores an attachment in one request and reports no byte
+ * progress, so this is deliberately indeterminate — a rotating arc, not a
+ * fabricated percentage. It spins on the compositor (`useNativeDriver`), so a
+ * staging screen full of them costs nothing on the JS thread.
+ */
+export function UploadRing({ size = 18 }: { size?: number }) {
+  const theme = useTheme();
+  const reducedMotion = useReducedMotion();
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (reducedMotion) return;
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        duration: 900,
+        easing: Easing.linear,
+        toValue: 1,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [reducedMotion, spin]);
+
+  const strokeWidth = 2;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const center = size / 2;
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  return (
+    <Animated.View
+      accessibilityLabel="Uploading"
+      style={{ height: size, transform: [{ rotate }], width: size }}>
+      <Svg height={size} width={size}>
+        <Circle
+          cx={center}
+          cy={center}
+          fill="none"
+          r={radius}
+          stroke={theme.overlayStrong}
+          strokeWidth={strokeWidth}
+        />
+        <Circle
+          cx={center}
+          cy={center}
+          fill="none"
+          r={radius}
+          stroke={theme.accent}
+          strokeDasharray={`${circumference * 0.28} ${circumference}`}
+          strokeLinecap="round"
+          strokeWidth={strokeWidth}
+        />
+      </Svg>
+    </Animated.View>
+  );
+}
 
 /** One attachment in a message: an inline preview when it is an image the
  * daemon can hand back, otherwise the same name chip as before. */

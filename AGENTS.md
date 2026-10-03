@@ -93,11 +93,23 @@ already be in memory.
   has no `system-images` — so the launch dies with "Broken AVD system path"
   unless both point at `Y:\android-sdk`. The AVD is also outside the default
   `%USERPROFILE%\.android\avd`, so `ANDROID_AVD_HOME` is needed too:
-  `$env:ANDROID_HOME = 'Y:\android-sdk'; $env:ANDROID_SDK_ROOT = 'Y:\android-sdk'; $env:ANDROID_AVD_HOME = 'Y:\android-sdk\avd'; Y:\android-sdk\emulator\emulator.exe -avd agent-avd -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect`
+  `$env:ANDROID_HOME = 'Y:\android-sdk'; $env:ANDROID_SDK_ROOT = 'Y:\android-sdk'; $env:ANDROID_AVD_HOME = 'Y:\android-sdk\avd'; Y:\android-sdk\emulator\emulator.exe -avd agent-avd -no-window -no-audio -no-boot-anim -gpu host`
   A visible window is the same command without the `-no-window` flags. Boot
   takes about a minute; wait for `adb shell getprop sys.boot_completed` to print
   `1` before interacting, rather than sleeping a fixed time. `expo run:android`
   inherits these, so run it from the same shell.
+- **Always launch with `-gpu host` (the host GPU).** `-gpu swiftshader_indirect`
+  rasterizes everything on the CPU and makes the whole app feel laggy — measured
+  on this machine as 64.6% janky frames and a 4950 ms 90th-percentile GPU time,
+  versus 12.7% janky and 19 ms with `host`. The AVD's own `config.ini` must also
+  say `hw.gpu.enabled = yes` and `hw.gpu.mode = host`; a stale `no`/`auto` there
+  silently forces software rendering even when the flag says `host`. Confirm the
+  renderer actually took effect before blaming the app:
+  `adb shell dumpsys SurfaceFlinger | findstr GLES:` must name the host GPU
+  (e.g. `NVIDIA GeForce RTX 4050`), not `Google SwiftShader`. Measure frames with
+  `adb shell dumpsys gfxinfo sh.waku.mobile` (`reset` first); the emulator's
+  `swiftshader` fallback is the first thing to rule out on any "it's laggy"
+  report. `emu.cmd` at the repo root encodes all of this.
 - `adb` is `Y:\android-sdk\platform-tools\adb.exe`; `sdkmanager` and
   `avdmanager` are under `Y:\android-sdk\cmdline-tools\latest\bin`. Kill the
   emulator process when finished — it does not exit on its own.

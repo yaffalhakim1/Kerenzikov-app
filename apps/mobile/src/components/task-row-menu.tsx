@@ -9,8 +9,10 @@ import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
 export function TaskRowMenu({
   accessibilityLabel,
   archived,
+  pinned,
   onArchive,
   onDelete,
+  onPin,
   onRename,
   onSelect,
   renderTrigger,
@@ -21,6 +23,11 @@ export function TaskRowMenu({
   const menu = useRef<MenuComponentRef>(null);
   const actions: MenuAction[] = [
     { id: 'rename', title: 'Rename task', image: 'pencil' },
+    {
+      id: 'pin',
+      title: pinned ? 'Unpin' : 'Pin',
+      image: pinned ? 'pin.slash' : 'pin',
+    },
     {
       id: 'archive',
       title: archived ? 'Unarchive' : 'Archive',
@@ -40,6 +47,7 @@ export function TaskRowMenu({
       colorScheme={scheme}
       onPressAction={({ nativeEvent }) => {
         if (nativeEvent.event === 'rename') onRename();
+        else if (nativeEvent.event === 'pin') onPin();
         else if (nativeEvent.event === 'archive') onArchive();
         else if (nativeEvent.event === 'delete') onDelete();
       }}

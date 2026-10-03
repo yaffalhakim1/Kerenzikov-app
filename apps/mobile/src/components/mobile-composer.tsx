@@ -26,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AgentPresetMenu } from './agent-preset-menu';
 import { AppSymbol } from './app-symbol';
-import { AttachmentChip } from './attachment-chip';
+import { AttachmentChip, UploadRing } from './attachment-chip';
 import { ComposerAccessMenu } from './composer-access-menu';
 import {
   ComposerAttachmentMenu,
@@ -358,6 +358,10 @@ export function MobileComposer({
 
   const attachmentImportTail = useRef<Promise<void>>(Promise.resolve());
   const pendingAttachmentImports = useRef(0);
+  // Each file gets its own pending tile with a spinner, so a multi-file drop
+  // shows what is still in flight rather than one opaque "Attaching…" chip.
+  const pendingId = useRef(0);
+  const [pendingFiles, setPendingFiles] = useState<{ id: number; name: string }[]>([]);
 
   async function addLocalFiles(files: LocalAttachmentFile[]) {
     if (!files.length) return;
@@ -365,16 +369,20 @@ export function MobileComposer({
     pendingAttachmentImports.current += 1;
     setImportingAttachments(true);
     setLocalError(null);
+    const staged = files.map((file) => ({ id: ++pendingId.current, name: file.name }));
+    setPendingFiles((current) => [...current, ...staged]);
     const operation = attachmentImportTail.current.catch(() => {}).then(async () => {
       const client = daemon.client;
       if (!client || daemon.phase !== 'connected') {
         throw new Error('Kerenzikov daemon is disconnected');
       }
-      for (const file of files) {
-        const imported = await importLocalAttachment(client, file);
+      for (let index = 0; index < files.length; index += 1) {
+        const imported = await importLocalAttachment(client, files[index]!);
         if (mounted.current && activeSessionId.current === targetSessionId) {
           draftSync.markEdited();
           setAttachments((current) => [...current, imported]);
+          const id = staged[index]!.id;
+          setPendingFiles((current) => current.filter((item) => item.id !== id));
         }
       }
     });
@@ -386,6 +394,7 @@ export function MobileComposer({
       pendingAttachmentImports.current -= 1;
       if (mounted.current && pendingAttachmentImports.current === 0) {
         setImportingAttachments(false);
+        setPendingFiles([]);
       }
     }
   }
@@ -660,7 +669,7 @@ export function MobileComposer({
               </ScrollView>
             </View>
           ) : null}
-          {attachments.length || importingAttachments ? (
+          {attachments.length || pendingFiles.length ? (
             <View style={styles.attachmentStack}>
               {attachments.map((attachment, index) => (
                 <View
@@ -688,12 +697,14 @@ export function MobileComposer({
                   </AppPressable>
                 </View>
               ))}
-              {importingAttachments && (
-                <View style={[styles.attachmentChip, { backgroundColor: theme.overlayStrong }]}>
-                  <Blocks color={theme.textSecondary} size={14} />
-                  <Text style={[styles.attachmentName, { color: theme.textSecondary }]}>Attaching…</Text>
+              {pendingFiles.map((file) => (
+                <View key={file.id} style={[styles.attachmentChip, { backgroundColor: theme.overlayStrong }]}>
+                  <UploadRing size={14} />
+                  <Text numberOfLines={1} style={[styles.attachmentName, { color: theme.textSecondary }]}>
+                    {file.name}
+                  </Text>
                 </View>
-              )}
+              ))}
             </View>
           ) : null}
           </>
