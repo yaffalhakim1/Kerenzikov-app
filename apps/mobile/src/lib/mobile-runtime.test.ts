@@ -8,8 +8,11 @@ import {
   createSession,
   queueSubmission,
   runtimeEventAlreadyApplied,
+  foldRuntimeEvents,
+  runtimeEventCarriesTranscript,
   runtimeEventIsDeferrable,
   runtimeEventTouchesSession,
+  runtimeSnapshotIsAtLeastAsNew,
   sessionBusy,
   sessionCwd,
   sessionHasActiveProviderTurn,
@@ -367,12 +370,109 @@ describe('runtime event pump classification', () => {
   });
 });
 
-function event(kind: string, sequence = 1): SequencedEvent {
+function event(
+  kind: string,
+  sequence = 1,
+  payload: SequencedEvent['event']['payload'] = null,
+): SequencedEvent {
   return {
     sessionId: 'session',
     runtimeId: 'runtime',
     epoch: 'epoch',
     sequence,
-    event: { kind, payload: null },
+    event: { kind, payload },
   };
 }
+
+describe('reload reconstruction', () => {
+  test('a stored snapshot behind the live cursor is caught up by replaying events', () => {
+    // The daemon persists on a debounce, so a mid-stream reload would otherwise
+    // move the transcript backwards. Replaying the events it missed is what
+    // makes reload safe while the agent is still working.
+    const stored = session({
+      status: 'working',
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 10 },
+      messages: [
+        { id: 'u1', turn_id: 't1', role: 'user', content: 'hi', created_at: 1, streaming: false },
+        { id: 'a1', turn_id: 't1', role: 'assistant', content: 'Hel', created_at: 2, streaming: true },
+      ],
+      turns: [{
+        id: 't1', turn_count: 1, status: 'running', provider_turn_started: true,
+        provider_resume_at: null, started_at: 1, completed_at: null, checkpoint: null,
+      }],
+    });
+    const events = [
+      event('textDelta', 11, 'lo '),
+      event('textDelta', 12, 'there'),
+    ];
+    const replayed = foldRuntimeEvents(stored, events);
+    expect(replayed.messages.at(-1)?.content).toBe('Hello there');
+    expect(replayed.runtime_event_cursor?.sequence).toBe(12);
+  });
+
+  test('events the snapshot already folded in are not applied twice', () => {
+    const stored = session({
+      status: 'working',
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 12 },
+      messages: [
+        { id: 'u1', turn_id: 't1', role: 'user', content: 'hi', created_at: 1, streaming: false },
+        { id: 'a1', turn_id: 't1', role: 'assistant', content: 'Hello there', created_at: 2, streaming: true },
+      ],
+      turns: [{
+        id: 't1', turn_count: 1, status: 'running', provider_turn_started: true,
+        provider_resume_at: null, started_at: 1, completed_at: null, checkpoint: null,
+      }],
+    });
+    const replayed = foldRuntimeEvents(stored, [
+      event('textDelta', 11, 'lo '),
+      event('textDelta', 12, 'there'),
+    ]);
+    expect(replayed.messages.at(-1)?.content).toBe('Hello there');
+  });
+
+  test('a transcript event outside the stream cadence is never skipped', () => {
+    // `backgroundWork` is conversation meta this app does not project; a
+    // transcript event is anything else. Misclassifying one would drop it.
+    for (const kind of ['textDelta', 'reasoningDelta', 'turnFinished', 'error', 'permission']) {
+      expect(runtimeEventCarriesTranscript(event(kind))).toBe(true);
+    }
+    for (const kind of ['backgroundWork', 'todoUpdated', 'planUsageUpdated']) {
+      expect(runtimeEventCarriesTranscript(event(kind))).toBe(false);
+    }
+  });
+
+  test('folding nothing leaves the stored snapshot untouched', () => {
+    const stored = session({ status: 'idle' });
+    expect(foldRuntimeEvents(stored, [])).toBe(stored);
+  });
+});
+describe('reload snapshot choice', () => {
+  const cursor = (sequence: number, epoch = 'epoch') => ({
+    runtime_id: 'runtime', epoch, sequence,
+  });
+
+  test('a snapshot behind the cached transcript never wins', () => {
+    const cached = session({ runtime_event_cursor: cursor(100) });
+    const stored = session({ runtime_event_cursor: cursor(40) });
+    expect(runtimeSnapshotIsAtLeastAsNew(cached, stored)).toBe(true);
+    expect(runtimeSnapshotIsAtLeastAsNew(stored, cached)).toBe(false);
+  });
+
+  test('a snapshot ahead of the cache wins', () => {
+    const cached = session({ runtime_event_cursor: cursor(40) });
+    const stored = session({ runtime_event_cursor: cursor(100) });
+    expect(runtimeSnapshotIsAtLeastAsNew(stored, cached)).toBe(true);
+  });
+
+  test('a new daemon epoch is authoritative', () => {
+    const cached = session({ runtime_event_cursor: cursor(999, 'old-epoch') });
+    const stored = session({ runtime_event_cursor: cursor(1, 'new-epoch') });
+    expect(runtimeSnapshotIsAtLeastAsNew(stored, cached)).toBe(true);
+  });
+
+  test('an unknown cursor is never treated as newer than a known one', () => {
+    const cached = session({ runtime_event_cursor: cursor(5) });
+    expect(runtimeSnapshotIsAtLeastAsNew(session({}), cached)).toBe(false);
+    expect(runtimeSnapshotIsAtLeastAsNew(cached, session({}))).toBe(true);
+  });
+});

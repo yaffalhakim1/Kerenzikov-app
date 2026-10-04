@@ -6,6 +6,7 @@ import type {
   RuntimeMode,
   SequencedEvent,
 } from '@waku/client';
+import { reduceRuntimeEvent } from '@waku/client/event-reducer';
 
 export interface MobileRuntimeClock {
   nowSeconds: () => number;
@@ -345,6 +346,64 @@ export function advanceRuntimeEventCursor(
       sequence: event.sequence,
     },
   };
+}
+
+/** Whether folding this event changes the transcript the user reads, as opposed
+ *  to conversation meta this app does not project. Only these are worth
+ *  replaying to catch a stored snapshot up to the live cursor. */
+export function runtimeEventCarriesTranscript(event: SequencedEvent): boolean {
+  return runtimeEventTouchesSession(event);
+}
+
+/**
+ * Fold a replayed run of events into a stored snapshot.
+ *
+ * A reload reads the daemon's persisted snapshot, which is written on a
+ * debounce and therefore trails a live turn. Applying the events the snapshot
+ * has not seen is what keeps the transcript from moving backwards, so the
+ * cursor is the authority and a missing or foreign cursor means "apply
+ * everything, nothing can be proven already folded".
+ *
+ * Pure and I/O-free: the caller owns fetching the events and writing the
+ * result back to the cache.
+ */
+export function foldRuntimeEvents(
+  stored: AgentSession,
+  events: readonly SequencedEvent[],
+): AgentSession {
+  const cursor = stored.runtime_event_cursor;
+  const applicable = events.filter((event) => {
+    if (!runtimeEventCarriesTranscript(event)) return false;
+    if (!cursor) return true;
+    return cursor.runtime_id !== event.runtimeId
+      || cursor.epoch !== event.epoch
+      || cursor.sequence < event.sequence;
+  });
+  if (!applicable.length) return stored;
+  return applicable.reduce(
+    (session, event) => reduceRuntimeEvent(session, event).session,
+    stored,
+  );
+}
+
+/**
+ * Whether `candidate` holds a transcript at least as new as `current`.
+ *
+ * Cursors are only comparable within one runtime epoch: a different runtime id
+ * or epoch means the daemon restarted (or the runtime was replaced), and the
+ * freshly read snapshot is the authority. An absent cursor on the candidate is
+ * "nothing known yet", which is never newer than a known one.
+ */
+export function runtimeSnapshotIsAtLeastAsNew(
+  candidate: AgentSession,
+  current: AgentSession,
+): boolean {
+  const next = candidate.runtime_event_cursor;
+  const previous = current.runtime_event_cursor;
+  if (!previous) return true;
+  if (!next) return false;
+  if (next.runtime_id !== previous.runtime_id || next.epoch !== previous.epoch) return true;
+  return next.sequence >= previous.sequence;
 }
 
 function promptTitle(prompt: string): string | null {

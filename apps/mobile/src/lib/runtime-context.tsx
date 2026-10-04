@@ -53,8 +53,10 @@ import {
   createSession,
   providerPromptForSubmission,
   queueSubmission,
+  foldRuntimeEvents,
   runtimeEventIsDeferrable,
   runtimeEventTouchesSession,
+  runtimeSnapshotIsAtLeastAsNew,
   sessionBusy,
   sessionCwd,
   sessionHasActiveProviderTurn,
@@ -143,6 +145,7 @@ interface RuntimeContextValue {
   archiveSession: (sessionId: string, archived: boolean) => Promise<void>;
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
   steerQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
+  reloadSession: (sessionId: string) => Promise<void>;
   rewindSession: (
     sessionId: string,
     turnCount: number,
@@ -651,6 +654,45 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     await attachSessionRef.current?.(session);
     return entries.current.get(session.id) ?? null;
   }, []);
+  /**
+   * Re-read a task from the daemon and reconcile it with what is on screen.
+   *
+   * The daemon persists a transcript on a debounce, so the stored snapshot can
+   * trail a live turn by tens of thousands of events. Replacing the cache with
+   * it would move the transcript backwards, which is why the old
+   * `query.refetch()` looked like a no-op. The snapshot is only accepted when
+   * it is at least as new as the cached transcript, and whatever it is missing
+   * is replayed on top before the cache is written.
+   *
+   * Anything already buffered for the followed runtime is replayed too: the
+   * fold advances the cursor, so the pending flush skips those events rather
+   * than applying them twice.
+   */
+  const reloadSession = useCallback(async (sessionId: string): Promise<void> => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId || daemon.phase !== 'connected') {
+      throw new Error('Kerenzikov daemon is disconnected');
+    }
+    const key = daemonKeys.session(profileId, sessionId);
+    const cached = queryClient.getQueryData<AgentSession>(key);
+    const replayed: SequencedEvent[] = entries.current.get(sessionId)?.pending.slice() ?? [];
+    const stored = await hydrateSession(client, sessionId);
+    if (!stored) throw new Error('This task no longer exists on the daemon');
+    const snapshot = cached && !runtimeSnapshotIsAtLeastAsNew(stored, cached) ? cached : stored;
+    const reconciled = foldRuntimeEvents(snapshot, replayed);
+    cacheSession(reconciled);
+    // A task opened without a runtime (or whose runtime was replaced) gets one
+    // now, so the reload leaves the screen able to act rather than half-dead.
+    if (!entries.current.has(sessionId)) await ensureRuntime(reconciled);
+  }, [
+    cacheSession,
+    daemon.activeProfile?.id,
+    daemon.client,
+    daemon.phase,
+    ensureRuntime,
+    queryClient,
+  ]);
   const sendPrompt = useCallback(async (
     inputSession: AgentSession,
     rawPrompt: string,
@@ -1248,6 +1290,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       archiveSession,
       removeQueuedMessage,
       steerQueuedMessage,
+      reloadSession,
       rewindSession,
       forkSession,
       resumeProviderSession,
