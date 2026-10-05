@@ -12,6 +12,29 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.47]
+
+### Mobile
+
+- The task list reads better: tasks group into segmented cards with counts,
+  each tinted by its project, and archiving a task offers Undo instead of
+  asking for forgiveness.
+- The composer's Send and Stop buttons cross-fade in place instead of
+  swapping, so the toolbar no longer shifts when an agent starts or finishes.
+- Pressing Send, Stop, or long-pressing a task now gives a firmer, immediate
+  confirmation tick.
+- The filter sheet's selected row carries just its checkmark, without a
+  background fill, and the extra "Task list" heading is gone.
+- Fixed a Reanimated warning the archive-undo banner produced on every render.
+
+### Development
+
+- `bun scripts/mobile.ts` now runs the Metro dev server in the terminal
+  (logs stream, Ctrl+C stops everything) instead of spawning it in the
+  background, refuses to run against a release build of the app — whose
+  embedded bundle made every change invisible — and no longer crashes
+  starting Metro's log file.
+
 ## [0.1.46]
 
 ### Mobile
