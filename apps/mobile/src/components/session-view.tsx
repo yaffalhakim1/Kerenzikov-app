@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { flex: 1 },
   placeholder: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
-  linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 10 },
+  linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 30 },
   devBadge: {
     backgroundColor: 'rgba(0,0,0,0.75)',
     borderRadius: 6,

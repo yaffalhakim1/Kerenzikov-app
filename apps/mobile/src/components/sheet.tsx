@@ -107,7 +107,10 @@ export function SheetRow({
       style={({ pressed }) => [
         styles.row,
         {
-          backgroundColor: pressed ? theme.overlayStrong : selected ? theme.overlay : 'transparent',
+          // Selection is carried by the trailing checkmark alone, not by a
+          // fill: a tinted background reads as a hover remnant on a static
+          // picker, and the checkmark is the stronger signal anyway.
+          backgroundColor: pressed ? theme.overlayStrong : 'transparent',
           opacity: disabled ? 0.4 : 1,
         },
       ]}>

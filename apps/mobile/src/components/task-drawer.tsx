@@ -26,7 +26,16 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Drawer } from 'react-native-drawer-layout';
+import Animated, {
+  FadeIn,
+  FadeOut,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { useReducedMotion } from '@/hooks/use-reduced-motion';
 
 import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
@@ -216,6 +225,7 @@ function TaskDrawerContent({
   const insets = useSafeAreaInsets();
   const daemon = useDaemon();
   const runtime = useRuntime();
+  const reducedMotion = useReducedMotion();
   // Pull the two stable callbacks the row menu depends on out of the context
   // value. The provider rebuilds that object on every stream commit, so
   // depending on `runtime` itself would hand `SessionRow` a new callback each
@@ -321,14 +331,44 @@ function TaskDrawerContent({
         : [...prefs.pinned, session.id],
     });
   }, [prefs.pinned, updatePrefs]);
+  /** The archived task, held so the undo banner can restore it while showing. */
+  const [undoArchive, setUndoArchive] = useState<{ id: string; archived: boolean } | null>(null);
+  const undoTimer = useRef<number | null>(null);
+  const showUndo = (entry: { id: string; archived: boolean }) => {
+    clearTimeout(undoTimer.current ?? undefined);
+    setUndoArchive(entry);
+    undoTimer.current = setTimeout(() => setUndoArchive(null), 5000) as unknown as number;
+  };
+  const dismissUndo = useCallback(() => {
+    clearTimeout(undoTimer.current ?? undefined);
+    undoTimer.current = null;
+    setUndoArchive(null);
+  }, []);
+  useEffect(() => () => {
+    clearTimeout(undoTimer.current ?? undefined);
+  }, []);
   /** Archiving is the default removal: it is recoverable, and the task stays on
-   *  the daemon for every device. The Show archived toggle brings it back. */
+   *  the daemon for every device. The Show archived toggle brings it back — and
+   *  so does the undo banner, so a mistaken archive costs one tap, not a hunt
+   *  through the filter menu. */
   const handleArchive = useCallback((session: SessionListSummary) => {
     tapHaptic();
-    archiveSession(session.id, session.archived_at == null).catch((cause) => {
-      Alert.alert('Couldn’t archive task', cause instanceof Error ? cause.message : String(cause));
-    });
+    const archived = session.archived_at == null;
+    archiveSession(session.id, archived)
+      .then(() => {
+        if (archived) showUndo({ id: session.id, archived });
+      })
+      .catch((cause) => {
+        Alert.alert('Couldn’t archive task', cause instanceof Error ? cause.message : String(cause));
+      });
   }, [archiveSession]);
+  const handleUndo = useCallback(() => {
+    if (!undoArchive) return;
+    archiveSession(undoArchive.id, false).catch((cause) => {
+      Alert.alert('Couldn’t restore task', cause instanceof Error ? cause.message : String(cause));
+    });
+    dismissUndo();
+  }, [archiveSession, dismissUndo, undoArchive]);
   /** Deleting is destructive and irreversible, so it is confirmed first and
    *  the row is removed for every device once the daemon confirms. */
   const handleDelete = useCallback((session: SessionListSummary) => {
@@ -504,23 +544,39 @@ function TaskDrawerContent({
               <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>
                 {section.title}
               </Text>
+              {section.data.length > 0 && (
+                <Text style={[styles.sectionCount, { color: theme.textTertiary }]}>
+                  {section.data.length}
+                </Text>
+              )}
               <AppSymbol name={chevron} size={13} tintColor={theme.textTertiary} />
             </AppPressable>
           );
         }}
-        renderItem={({ item }) => (
-          <SessionRow
-            drawerRowWidth={drawerRowWidth}
-            item={item}
-            pinned={pinnedIds.has(item.session.id)}
-            running={Boolean(runtime.runtimes[item.session.id]?.running ?? sessionIsRunning(item.session))}
-            selected={item.session.id === selectedSessionId}
-            onArchive={handleArchive}
-            onDelete={handleDelete}
-            onPin={handlePin}
-            onRename={handleRename}
-            onSelect={handleSelect}
-          />
+        renderItem={({ item, index, section }) => (
+          // Entering/exiting fades fire only when a row mounts or unmounts —
+          // a new task, an archive, a delete: user actions, never stream
+          // commits (streamed updates mutate a row in place, which keeps it
+          // mounted). Both run on the UI thread; reduced motion skips them.
+          <Animated.View
+            entering={reducedMotion ? undefined : FadeIn.duration(180)}
+            exiting={reducedMotion ? undefined : FadeOut.duration(140)}
+            style={index < section.data.length - 1 ? styles.rowSeam : undefined}>
+            <SessionRow
+              drawerRowWidth={drawerRowWidth}
+              index={index}
+              sectionSize={section.data.length}
+              item={item}
+              pinned={pinnedIds.has(item.session.id)}
+              running={Boolean(runtime.runtimes[item.session.id]?.running ?? sessionIsRunning(item.session))}
+              selected={item.session.id === selectedSessionId}
+              onArchive={handleArchive}
+              onDelete={handleDelete}
+              onPin={handlePin}
+              onRename={handleRename}
+              onSelect={handleSelect}
+            />
+          </Animated.View>
         )}
         ListHeaderComponent={(
           <>
@@ -554,6 +610,12 @@ function TaskDrawerContent({
 
       {/* Below the list and always present: Settings stays reachable whatever
           the connection is doing, unlike the toolbar above it. */}
+      <UndoBanner
+        entry={undoArchive}
+        onDismiss={dismissUndo}
+        onUndo={handleUndo}
+        paddingBottom={insets.bottom + 56}
+      />
       <View style={[styles.drawerFooter, { paddingBottom: insets.bottom + 8 }]}>
         <AppPressable
           accessibilityLabel="Settings"
@@ -608,7 +670,7 @@ function TaskDrawerContent({
         onDismiss={() => setDaemonPickerOpen(false)}
         visible={daemonPickerOpen}
       />
-      <Sheet onDismiss={() => setFilterOpen(false)} title="Task list" visible={filterOpen}>
+      <Sheet onDismiss={() => setFilterOpen(false)} visible={filterOpen}>
         <Text style={[styles.filterHeading, { color: theme.textTertiary }]}>Group by</Text>
         <SheetRow
           label="Updated"
@@ -640,6 +702,77 @@ function TaskDrawerContent({
         />
       </Sheet>
     </KeyboardAvoidingView>
+  );
+}
+
+/** Undo for a mistaken archive: a pill above the footer that slides up when an
+ *  archive lands and auto-dismisses after five seconds.
+ *
+ *  One shared value drives the whole banner, so the enter/exit animation runs
+ *  on the UI thread and nothing here touches the JS thread per frame — the
+ *  same constraint as the streaming surfaces. While hidden it renders nothing
+ *  (not just opacity 0), so a closed banner costs no view at all. */
+interface UndoEntry {
+  id: string;
+  archived: boolean;
+}
+function UndoBanner({
+  entry,
+  onDismiss,
+  onUndo,
+  paddingBottom,
+}: {
+  entry: UndoEntry | null;
+  onDismiss: () => void;
+  onUndo: () => void;
+  paddingBottom: number;
+}) {
+  const theme = useTheme();
+  const shown = useSharedValue(0);
+  useEffect(() => {
+    shown.value = withTiming(entry ? 1 : 0, { duration: 220 });
+  }, [entry, shown]);
+  const bannerStyle = useAnimatedStyle(() => ({
+    opacity: shown.value,
+    transform: [{ translateY: (1 - shown.value) * 14 }],
+  }));
+  if (!entry) return null;
+  return (
+    <Animated.View
+      pointerEvents="box-none"
+      style={[styles.undoLayer, { paddingBottom }]}>
+      <Animated.View
+        accessibilityLiveRegion="polite"
+        style={[
+          styles.undoPill,
+          { backgroundColor: theme.inverse, borderColor: theme.overlayStrong },
+          bannerStyle,
+        ]}>
+        <Text numberOfLines={1} style={[styles.undoText, { color: theme.onInverse }]}>
+          Task archived
+        </Text>
+        <AppPressable
+          accessibilityLabel="Undo archive"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={onUndo}
+          style={({ pressed }) => [styles.undoAction, { opacity: pressed ? 0.6 : 1 }]}>
+          <Text style={[styles.undoActionText, { color: theme.onInverse }]}>Undo</Text>
+        </AppPressable>
+        <AppPressable
+          accessibilityLabel="Dismiss"
+          accessibilityRole="button"
+          hitSlop={8}
+          onPress={onDismiss}
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
+          <AppSymbol
+            name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            size={14}
+            tintColor={theme.onInverse}
+          />
+        </AppPressable>
+      </Animated.View>
+    </Animated.View>
   );
 }
 
@@ -806,6 +939,8 @@ function useStableSessionSummaries(sessions: readonly AgentSession[] | undefined
 }
 const SessionRow = memo(function SessionRow({
   drawerRowWidth,
+  index,
+  sectionSize,
   item,
   pinned,
   running,
@@ -817,6 +952,9 @@ const SessionRow = memo(function SessionRow({
   onSelect,
 }: {
   drawerRowWidth: number;
+  /** Position within its section, for the segmented corner treatment. */
+  index: number;
+  sectionSize: number;
   item: SessionListItem;
   pinned: boolean;
   running: boolean;
@@ -830,6 +968,19 @@ const SessionRow = memo(function SessionRow({
   const theme = useTheme();
   const rowWidth = Math.max(0, drawerRowWidth);
   const session = item.session;
+  // Segmented corners (Android 16 settings style): the group's first and last
+  // rows carry the large outer radius, seams between rows the small one. A
+  // one-row group is both, so it reads as a single rounded card. The shape is
+  // a plain object; recomputing it per render costs nothing measurable next
+  // to the row's own work, so no memo machinery for it.
+  const outer = Radius.large;
+  const inner = Radius.small;
+  const borderRadius = {
+    borderTopLeftRadius: index === 0 ? outer : inner,
+    borderTopRightRadius: index === 0 ? outer : inner,
+    borderBottomLeftRadius: index === sectionSize - 1 ? outer : inner,
+    borderBottomRightRadius: index === sectionSize - 1 ? outer : inner,
+  };
   // A running task shows the spinner; a settled one names its state. Only one
   // of the two ever renders, so the trailing slot never says two things.
   const badge = running ? null : sessionStatusBadge(session);
@@ -848,6 +999,7 @@ const SessionRow = memo(function SessionRow({
         <View
           style={[
             styles.sessionRow,
+            borderRadius,
             {
               backgroundColor: pressed
                 ? theme.overlayStrong
@@ -855,7 +1007,7 @@ const SessionRow = memo(function SessionRow({
               width: rowWidth,
             },
           ]}>
-          <ProviderTile provider={session.provider} />
+          <ProviderTile provider={session.provider} projectId={session.project_id} />
           <View style={styles.sessionContent}>
             <View style={styles.sessionHeading}>
               {pinned && (
@@ -890,14 +1042,30 @@ const SessionRow = memo(function SessionRow({
 
 /** The harness mark in a tinted rounded tile, so a row's agent is legible at a
  *  glance rather than as a bare glyph lost against the title. */
-function ProviderTile({ provider }: { provider: SessionListSummary['provider'] }) {
+function ProviderTile({ provider, projectId }: { provider: SessionListSummary['provider']; projectId: string }) {
   const theme = useTheme();
   const brand = providerBrandColor(provider);
+  // The tile is toned by the task's project, so the list reads by project
+  // first and agent second — the desktop sidebar's same hierarchy. The hue
+  // is a stable hash of the id, computed at render (not per frame), so it
+  // costs nothing on the streaming path.
+  const hue = projectHue(projectId);
   return (
-    <View style={[styles.providerTile, { backgroundColor: theme.surfaceMuted }]}>
+    <View style={[styles.providerTile, { backgroundColor: `hsla(${hue}, 65%, 60%, 0.16)` }]}>
       <ProviderIcon color={brand ?? theme.textSecondary} provider={provider} size={17} />
     </View>
   );
+}
+
+/** A stable 0-359 hue for a project id. djb2 over the UUID's bytes: no
+ *  dependencies, deterministic across restarts, and uniform enough over hex
+ *  characters that two projects rarely land on near-identical hues. */
+export function projectHue(id: string): number {
+  let hash = 5381;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = ((hash << 5) + hash + id.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % 360;
 }
 
 function badgeToneColor(theme: ReturnType<typeof useTheme>, tone: NonNullable<ReturnType<typeof sessionStatusBadge>>['tone']): string {
@@ -941,6 +1109,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingTop: 8,
   },
+  sectionCount: {
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+    opacity: 0.6,
+  },
+  // The 2dp seam between segmented rows, matching the corner treatment: the
+  // background shows through, so the group reads as one card with grooves.
+  rowSeam: { marginBottom: 2 },
   sectionHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -990,6 +1166,29 @@ const styles = StyleSheet.create({
   daemonButton: { borderRadius: Radius.small, maxWidth: 176 },
   // Absolute over the list so it floats above the rows without owning layout.
   // `box-none` on the layer keeps taps between it and the list passing through.
+  // Absolute over the list's bottom edge: the banner slides up from here, so
+  // it never owns layout inside the scroll content. `box-none` keeps taps
+  // between the pill and the list passing through.
+  undoLayer: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    alignItems: 'center',
+    paddingHorizontal: Spacing.three,
+  },
+  undoPill: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 44,
+    paddingHorizontal: 16,
+  },
+  undoText: { flexShrink: 1, fontSize: 14, fontWeight: '600' },
+  undoAction: { paddingHorizontal: 2 },
+  undoActionText: { fontSize: 14, fontWeight: '700' },
   fabLayer: {
     bottom: 0,
     left: 0,
@@ -1080,9 +1279,8 @@ const styles = StyleSheet.create({
   },
   sessionRow: {
     alignItems: 'center',
-    // A rounded rectangle, not a pill: matches the desktop sidebar's 7pt row
-    // radius, where a fully-round row reads as a chip rather than a list item.
-    borderRadius: Radius.small,
+    // Corner radii come from the segmented-corner treatment in `SessionRow`:
+    // large on the group's first and last rows, small at the seams.
     flexDirection: 'row',
     gap: 10,
     // 56 rather than the 48 minimum: a task title is the row you aim at most,

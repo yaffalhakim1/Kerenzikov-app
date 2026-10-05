@@ -8,8 +8,11 @@
  *
  *   - red "Unable to load script"   -> Metro was not running
  *   - app loads, daemon never links -> the adb reverse tunnel was missing
- *   - an edit does nothing          -> the app kept its last bundle
+ *   - an edit does nothing          -> Metro kept serving a stale bundle
  *   - "it's laggy"                  -> the emulator fell back to SwiftShader
+ *   - nothing ever changes          -> the installed app is a release build,
+ *                                      whose bundle is embedded and cannot
+ *                                      read Metro at all
  *
  * Works with an emulator or a physical device. An already-attached device is
  * always preferred; the emulator is only started when nothing is attached.
@@ -19,6 +22,12 @@
  *   bun scripts/mobile.ts --window         # start an emulator with a window
  *   bun scripts/mobile.ts --clear          # drop Metro's cache (stale bundle)
  *   bun scripts/mobile.ts --native         # expo run:android (native changed)
+ *   bun scripts/mobile.ts --detach         # spawn Metro and exit (old behavior)
+ *
+ * Default is now foreground: the script IS the dev server, like `dev.ts` is.
+ * Metro runs attached to the terminal — logs stream, Ctrl+C stops everything,
+ * and the device/tunnel/launch work happens once before the server takes
+ * over. `--detach` keeps the old spawn-and-exit behavior for one-shot setup.
  *
  * `emu.cmd` stays the zero-dependency path for a fresh Windows box.
  */
@@ -49,23 +58,29 @@ const flags = new Set(argv);
 const showWindow = flags.has("--window");
 const useNative = flags.has("--native");
 const clearCache = flags.has("--clear");
+const detach = flags.has("--detach");
 const allowSoftware = flags.has("--allow-software-gpu");
 const explicitDevice = valueAfter("--device") ?? process.env.ANDROID_SERIAL ?? null;
 
 function valueAfter(name: string): string | null {
   const index = argv.indexOf(name);
-  return index >= 0 ? argv[index + 1] ?? null : null;
+  if (index >= 0) return argv[index + 1] ?? null;
+  // Accept --device=SERIAL too.
+  const inline = argv.find((arg) => arg.startsWith(`${name}=`));
+  return inline ? inline.slice(name.length + 1) : null;
 }
 
 if (flags.has("--help") || flags.has("-h")) {
   console.log(
     [
-      "Usage: bun scripts/mobile.ts [--device SERIAL] [--window] [--clear] [--native]",
+      "Usage: bun scripts/mobile.ts [--device SERIAL] [--window] [--clear] [--native] [--detach]",
       "",
       "  --device SERIAL        target a specific attached device or emulator",
       "  --window               start an emulator window (default: headless)",
       "  --clear                delete Metro's cache before starting it",
       "  --native               rebuild via expo run:android instead of relaunching",
+      "  --detach               spawn Metro and exit after the setup, instead of",
+      "                         keeping the dev server in this terminal (default)",
       "  --allow-software-gpu   do not fail when an emulator renders on SwiftShader",
     ].join("\n"),
   );
@@ -101,14 +116,23 @@ function run(cmd: string[], log?: string): { code: number; out: string } {
 }
 
 function spawnDetached(cmd: string[], logPath?: string): void {
-  const sink = logPath ? Bun.file(logPath).writer() : undefined;
-  Bun.spawn(cmd, {
+  // Bun.spawn rejects sinks in stdout/stderr: they must be "pipe", "ignore",
+  // or a file descriptor number. When a log is wanted, the pipes are drained
+  // into it asynchronously so the child's output cannot back up.
+  const proc = Bun.spawn(cmd, {
     env: { ...process.env, ...SDK_ENV },
     stdin: "ignore",
-    stdout: sink ?? "ignore",
-    stderr: sink ?? "ignore",
+    stdout: logPath ? "pipe" : "ignore",
+    stderr: logPath ? "pipe" : "ignore",
     detached: true,
-  }).unref();
+  });
+  proc.unref();
+  if (logPath) {
+    void Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]).then(([out, err]) => Bun.write(logPath, `${out}${err}`).catch(() => {}));
+  }
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -192,28 +216,49 @@ async function metroRunning(): Promise<boolean> {
   }
 }
 
-async function ensureMetro(): Promise<void> {
-  if (await metroRunning()) {
-    console.log(`metro: already listening on ${METRO_PORT}`);
-    return;
-  }
+function clearMetroCache(): void {
   if (clearCache && existsSync(METRO_CACHE)) {
     // A failed transform leaves Metro serving its last good bundle, so the app
     // silently runs stale code. Deleting the cache is the fix.
     rmSync(METRO_CACHE, { recursive: true, force: true });
     console.log("metro: cleared transform cache");
   }
+}
+
+/** True when this call started Metro; false when one was already listening. */
+async function startDetachedMetro(): Promise<boolean> {
+  if (await metroRunning()) {
+    console.log(`metro: already listening on ${METRO_PORT}`);
+    return false;
+  }
+  clearMetroCache();
   console.log(`metro: starting, logging to ${METRO_LOG}`);
   spawnDetached(["bun", "x", "expo", "start", "--port", String(METRO_PORT)], METRO_LOG);
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {
     if (await metroRunning()) {
       console.log(`metro: ready on ${METRO_PORT}`);
-      return;
+      return true;
     }
     await sleep(1_000);
   }
   throw new Error(`Metro did not come up on ${METRO_PORT}; see ${METRO_LOG}`);
+}
+
+/** Runs Metro in THIS process so its logs stream and Ctrl+C stops everything —
+ *  the desktop dev.ts experience. Resolves only when the server exits. */
+function runMetroForeground(): Promise<void> {
+  const expo = join("node_modules", "expo", "bin", "cli");
+  clearMetroCache();
+  console.log(`metro: starting in this terminal (Ctrl+C to stop)`);
+  const proc = Bun.spawn(["bun", expo, "start", "--port", String(METRO_PORT)], {
+    cwd: join(import.meta.dir, "..", "apps", "mobile"),
+    env: { ...process.env, ...SDK_ENV, CI: undefined },
+    stdin: "inherit",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  return proc.exited;
 }
 
 function reverseTunnels(serial: string): void {
@@ -249,7 +294,25 @@ function assertHostGpu(serial: string): void {
   console.log(`gpu: ${renderer}`);
 }
 
+function assertDebuggableApp(serial: string): void {
+  // A release APK carries its JS bundle inside and never reads Metro, so the
+  // JS-only loop silently does nothing on it: the app relaunches and shows
+  // exactly the code it shipped with. That was indistinguishable from
+  // "the fix didn't work". Fail here, naming the actual problem.
+  const { out } = run([ADB, "-s", serial, "shell", "dumpsys", "package", APP_ID]);
+  const flags = out.match(/pkgFlags=\[([^\]]*)\]/)?.[1] ?? "";
+  if (!/\bDEBUGGABLE\b/.test(flags)) {
+    throw new Error(
+      `the installed ${APP_ID} on ${serial} is a release build (pkgFlags=[${flags.trim()}]); ` +
+      "it has the JS bundle embedded and will never read Metro. Install the debug " +
+      'build first: cd apps/mobile/android && cmd /c "gradlew.bat assembleDebug" && ' +
+      `${ADB} -s ${serial} install -r app/build/outputs/apk/debug/app-debug.apk`,
+    );
+  }
+}
+
 function relaunchApp(serial: string): void {
+  assertDebuggableApp(serial);
   run([ADB, "-s", serial, "shell", "am", "force-stop", APP_ID]);
   run([
     ADB, "-s", serial, "shell", "monkey",
@@ -288,7 +351,29 @@ async function main(): Promise<void> {
     console.log("gpu: physical device, skipping the emulator GPU check");
   }
 
-  await ensureMetro();
+  if (detach) {
+    await startDetachedMetro();
+  } else if (!(await metroRunning())) {
+    // Everything the device needs happens first; Metro then owns the
+    // terminal, exactly like `dev.ts`. Edits reload on save; the app picks
+    // them up on force-stop + relaunch (or the terminal's `r`).
+    reverseTunnels(device.serial);
+    if (useNative) {
+      console.log("app: expo run:android (native rebuild)");
+      const result = run([
+        "bun", "--filter", "@waku/mobile", "android", "--", "-d", device.serial,
+      ]);
+      process.stdout.write(result.out);
+      if (result.code !== 0) throw new Error("expo run:android failed");
+    } else {
+      relaunchApp(device.serial);
+    }
+    reportDaemonAddress(device);
+    console.log("\nready — the dev server owns this terminal until Ctrl+C.");
+    await runMetroForeground();
+    return;
+  }
+
   reverseTunnels(device.serial);
 
   if (useNative) {

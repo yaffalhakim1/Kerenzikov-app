@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { MenuView, type MenuAction, type MenuComponentRef } from '@expo/ui/community/menu';
 
 import { AppPressable } from '@/components/app-pressable';
+import { longPressHaptic } from '@/lib/haptics';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 import type { TaskRowMenuProps } from '@/components/task-row-menu.types';
@@ -62,7 +63,10 @@ export function TaskRowMenu({
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        onLongPress={() => menu.current?.show()}
+        onLongPress={() => {
+          longPressHaptic();
+          menu.current?.show();
+        }}
         onPress={onSelect}>
         {({ pressed }) => renderTrigger(pressed)}
       </AppPressable>
