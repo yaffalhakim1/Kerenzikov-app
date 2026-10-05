@@ -16,3 +16,29 @@ export function tapHaptic(): void {
     void Haptics.selectionAsync();
   }
 }
+
+/**
+ * The deliberate-action confirm: fired synchronously with the press, not
+ * after the action's async result, so the haptic reads as part of the
+ * gesture (Zeron's `HapticFeedbackType.Confirm`). Outcomes keep their own
+ * longer-delay notification buzzes.
+ */
+export function confirmHaptic(): void {
+  if (Platform.OS === 'android') {
+    void Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Keyboard_Tap);
+  } else {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  }
+}
+
+/**
+ * A long press opened something: slightly firmer than a tick so the gesture
+ * that revealed a menu is distinguishable from the taps inside it.
+ */
+export function longPressHaptic(): void {
+  if (Platform.OS === 'android') {
+    void Haptics.performAndroidHapticsAsync(Haptics.AndroidHaptics.Long_Press);
+  } else {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  }
+}

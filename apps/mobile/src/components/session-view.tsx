@@ -28,6 +28,7 @@ import {
   HeaderActionGroup,
   HeaderMenuTrigger,
   HeaderTitle,
+  ScreenHeaderBackdrop,
   nativeHeaderButtons,
   navigateBack,
   useScreenHeaderInset,
@@ -119,6 +120,10 @@ export function SessionView({
   const [renaming, setRenaming] = useState(false);
   const [turnTarget, setTurnTarget] = useState<'rewind' | 'fork' | null>(null);
   const [mountedTranscriptSessionId, setMountedTranscriptSessionId] = useState<string | null>(null);
+  // The header backdrop's trigger, fed by the transcript's transition-only
+  // callback. Kept here rather than in the list so the backdrop renders
+  // outside the scroll frame, where it cannot clip.
+  const [underHeader, setUnderHeader] = useState(false);
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<TranscriptListHandle>(null);
   const headerInset = useScreenHeaderInset();
@@ -488,6 +493,9 @@ export function SessionView({
       style={[styles.screen, { backgroundColor: theme.background }]}>
       <Stack.Screen options={headerOptions} />
       <View style={styles.body}>
+        {/* Scroll-edge treatment for the floating native bar: rendered before
+            the banner so the banner paints above it in document order. */}
+        <ScreenHeaderBackdrop visible={underHeader && Boolean(session)} />
         {session && transcriptMounted ? (
           <ActivitySheetHost key={`activity-sheet:${session.id}`} session={session}>
             <TranscriptList
@@ -496,6 +504,7 @@ export function SessionView({
               ref={listRef}
               running={running}
               session={session}
+              onUnderHeaderChange={setUnderHeader}
               onDevSample={devPrompt ? probe.sample : undefined}
             />
           </ActivitySheetHost>
@@ -630,7 +639,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { flex: 1 },
   placeholder: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
-  linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 10 },
+  linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 30 },
   devBadge: {
     backgroundColor: 'rgba(0,0,0,0.75)',
     borderRadius: 6,

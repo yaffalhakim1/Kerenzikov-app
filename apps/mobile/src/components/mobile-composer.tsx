@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  Animated,
   ScrollView,
   StyleSheet,
   Text,
@@ -57,7 +58,7 @@ import {
   type LocalAttachmentFile,
 } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
-import { tapHaptic } from '@/lib/haptics';
+import { confirmHaptic, tapHaptic } from '@/lib/haptics';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
 import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { agentPresetAvailable } from '@/lib/session-presentation';
@@ -227,6 +228,105 @@ export function SendButton({
         />
       )}
     </AppPressable>
+  );
+}
+
+/**
+ * The composer's primary slot: Stop while the agent works, Send when it can
+ * act, cross-fading in place instead of one button replacing the other.
+ *
+ * Two stacked absolute children driven by one Animated pair per state flip —
+ * `useNativeDriver: true` keeps every frame on the compositor, so the morph
+ * costs nothing on the JS thread during a stream. The slot is 36dp wide in
+ * both states, so the swap never shifts the toolbar.
+ */
+export function SendStopSlot({
+  busy,
+  submitting,
+  queueing,
+  canSubmit,
+  importingAttachments,
+  disconnected,
+  onStop,
+  onSend,
+}: {
+  busy: boolean;
+  submitting: boolean;
+  queueing: boolean;
+  canSubmit: boolean;
+  importingAttachments: boolean;
+  disconnected: boolean;
+  onStop: () => void;
+  onSend: () => void;
+}) {
+  const theme = useTheme();
+  const sendDisabled = !canSubmit || submitting || importingAttachments || disconnected;
+  const sendVisible = !busy || canSubmit;
+  const sendOpacity = useRef(new Animated.Value(sendVisible ? 1 : 0)).current;
+  const stopOpacity = useRef(new Animated.Value(busy && sendVisible ? 1 : busy ? 1 : 0)).current;
+  const [sendMounted, setSendMounted] = useState(sendVisible);
+  const [stopMounted, setStopMounted] = useState(busy);
+  useEffect(() => {
+    Animated.timing(sendOpacity, {
+      duration: 140,
+      toValue: sendVisible ? 1 : 0,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setSendMounted(sendVisible);
+    });
+    if (sendVisible) setSendMounted(true);
+  }, [sendOpacity, sendVisible]);
+  useEffect(() => {
+    const stopShown = busy && !sendVisible;
+    Animated.timing(stopOpacity, {
+      duration: 140,
+      toValue: stopShown ? 1 : 0,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setStopMounted(stopShown || busy);
+    });
+    if (stopShown) setStopMounted(true);
+  }, [busy, sendVisible, stopOpacity]);
+  const sendScale = sendOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+  const stopScale = stopOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+  if (!sendMounted && !stopMounted) return null;
+  return (
+    <View style={styles.sendSlot}>
+      {stopMounted && (
+        <Animated.View
+          pointerEvents={busy && !sendVisible ? 'auto' : 'none'}
+          style={[styles.sendSlotChild, { opacity: stopOpacity, transform: [{ scale: stopScale }] }]}>
+          <AppPressable
+            accessibilityLabel="Stop agent"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={onStop}
+            style={({ pressed }) => [
+              styles.sendButton,
+              { backgroundColor: theme.dangerSoft, opacity: pressed ? 0.55 : 1 },
+            ]}>
+            <AppSymbol
+              name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
+              size={14}
+              tintColor={theme.danger}
+            />
+          </AppPressable>
+        </Animated.View>
+      )}
+      {sendMounted && (
+        <Animated.View
+          pointerEvents={sendVisible ? 'auto' : 'none'}
+          style={[styles.sendSlotChild, { opacity: sendOpacity, transform: [{ scale: sendScale }] }]}>
+          <SendButton
+            busy={submitting}
+            disabled={sendDisabled}
+            label={queueing ? 'Queue message' : 'Send message'}
+            onPress={onSend}
+            queueing={queueing}
+          />
+        </Animated.View>
+      )}
+    </View>
   );
 }
 
@@ -468,6 +568,7 @@ export function MobileComposer({
     setSubmitting(true);
     setLocalError(null);
     onSubmitted?.();
+    confirmHaptic();
     try {
       // While the agent is working a new message queues; it is never steered
       // implicitly. Steering a live turn is deliberate and lives on the queued
@@ -488,6 +589,7 @@ export function MobileComposer({
 
   async function stop() {
     setLocalError(null);
+    confirmHaptic();
     try {
       await runtime.cancel(session.id);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -508,7 +610,6 @@ export function MobileComposer({
   // Same rule as the desktop's `composer_submit_action` + `can_send` pair, so
   // an idle working session never shows a dead Send button beside Stop.
   const canSubmit = Boolean(draft.trim() || attachments.length);
-  const showSend = !busy || canSubmit;
   const placeholder = disconnected
     ? daemon.phase === 'reconnecting'
       ? 'Reconnecting…'
@@ -750,39 +851,16 @@ export function MobileComposer({
         )}
         placeholder={placeholder}
         right={(
-          <>
-            {busy && (
-              <AppPressable
-                accessibilityLabel="Stop agent"
-                accessibilityRole="button"
-                hitSlop={8}
-                onPress={() => void stop()}
-                style={({ pressed }) => [
-                  styles.sendButton,
-                  { backgroundColor: theme.dangerSoft, opacity: pressed ? 0.55 : 1 },
-                ]}>
-                <AppSymbol
-                  name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
-                  size={14}
-                  tintColor={theme.danger}
-                />
-              </AppPressable>
-            )}
-            {showSend && (
-              <SendButton
-                busy={submitting}
-                disabled={
-                  !canSubmit
-                  || submitting
-                  || importingAttachments
-                  || disconnected
-                }
-                label={busy ? 'Queue message' : 'Send message'}
-                onPress={() => void submit()}
-                queueing={busy}
-              />
-            )}
-          </>
+          <SendStopSlot
+            busy={busy}
+            submitting={submitting}
+            queueing={busy}
+            canSubmit={canSubmit}
+            importingAttachments={importingAttachments}
+            disconnected={disconnected}
+            onStop={() => void stop()}
+            onSend={() => void submit()}
+          />
         )}
         value={draft}
         onChangeText={(value) => {
@@ -1167,6 +1245,18 @@ const styles = StyleSheet.create({
     borderRadius: Radius.pill,
     height: 36,
     justifyContent: 'center',
+    width: 36,
+  },
+  // The morph slot: both states are absolutely positioned in the same 36dp
+  // box, so the cross-fade never shifts the toolbar.
+  sendSlot: { height: 36, width: 36 },
+  sendSlotChild: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    top: 0,
     width: 36,
   },
   errorBanner: {
