@@ -2067,11 +2067,18 @@ mod tests {
         assert_eq!(clients[0].name, "desktop");
         assert_eq!(clients[2].name, "web");
 
-        // Unsubscribing (a closed connection) removes the client.
-        let state = hub.state.lock();
-        let ids: Vec<u64> = state.subscribers.keys().copied().collect();
-        drop(state);
-        hub.unsubscribe(ids[0]);
+        // Unsubscribing (a closed connection) removes the client. Key order in
+        // the map is not the subscription order, so find the id by identity.
+        let desktop_id = {
+            let state = hub.state.lock();
+            state
+                .subscribers
+                .iter()
+                .find(|(_, subscriber)| subscriber.client.name == "desktop")
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        hub.unsubscribe(desktop_id);
         let clients = hub.connected_clients();
         assert_eq!(clients.len(), 2);
         assert!(clients.iter().all(|client| client.name != "desktop"));
