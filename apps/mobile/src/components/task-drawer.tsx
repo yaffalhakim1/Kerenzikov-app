@@ -670,7 +670,7 @@ function TaskDrawerContent({
         onDismiss={() => setDaemonPickerOpen(false)}
         visible={daemonPickerOpen}
       />
-      <Sheet onDismiss={() => setFilterOpen(false)} title="Task list" visible={filterOpen}>
+      <Sheet onDismiss={() => setFilterOpen(false)} visible={filterOpen}>
         <Text style={[styles.filterHeading, { color: theme.textTertiary }]}>Group by</Text>
         <SheetRow
           label="Updated"
