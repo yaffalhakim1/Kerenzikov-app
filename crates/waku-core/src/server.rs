@@ -19,9 +19,10 @@ use uuid::Uuid;
 
 use crate::model::{AgentSession, Project, ProviderKind, SessionStatus};
 use crate::protocol::MAX_WIRE_MESSAGE_BYTES;
+use crate::model::unix_time;
 use crate::protocol::{
-    ClientMessage, Command, PROTOCOL_VERSION, ReplayCursor, Request, ResponseOutcome,
-    ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireDriverEvent,
+    ClientMessage, Command, ConnectedClient, PROTOCOL_VERSION, ReplayCursor, Request,
+    ResponseOutcome, ResponsePayload, RpcError, SequencedEvent, ServerMessage, WireDriverEvent,
 };
 
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -129,12 +130,28 @@ struct Subscriber {
     /// the hub. The connection polls it and closes, letting the client
     /// reconnect and resume from its last replayed cursor.
     kicked: Sender<()>,
+    /// The client's self-reported identity for the connected-clients view.
+    client: ConnectedClient,
 }
 
 impl Subscriber {
-    fn new(messages: Sender<ServerMessage>) -> (Self, Receiver<()>) {
+    fn new(messages: Sender<ServerMessage>, client: ConnectedClient) -> (Self, Receiver<()>) {
         let (kicked, kicked_rx) = unbounded();
-        (Self { messages, kicked }, kicked_rx)
+        (Self { messages, kicked, client }, kicked_rx)
+    }
+
+    /// A subscriber without a meaningful identity, for hub tests.
+    #[cfg(test)]
+    fn anonymous(messages: Sender<ServerMessage>) -> Self {
+        Self::new(
+            messages,
+            ConnectedClient {
+                client_id: Uuid::new_v4(),
+                name: "test".into(),
+                connected_at: 0,
+            },
+        )
+        .0
     }
 }
 
@@ -332,6 +349,16 @@ impl Hub {
 
     fn unsubscribe(&self, subscriber_id: u64) {
         self.state.lock().subscribers.remove(&subscriber_id);
+    }
+
+    /// The clients currently connected, oldest first. The connection order
+    /// is the map's insertion order by subscriber id, which is what makes
+    /// "the owner" (the first attach) read as the head of the list.
+    fn connected_clients(&self) -> Vec<ConnectedClient> {
+        let state = self.state.lock();
+        let mut clients: Vec<&ConnectedClient> = state.subscribers.values().map(|s| &s.client).collect();
+        clients.sort_by_key(|client| client.connected_at);
+        clients.into_iter().cloned().collect()
     }
 
     /// Sends `message` to every subscriber except `skip`, dropping any whose
@@ -651,14 +678,15 @@ fn handle_connection(
     )
     .context("WebSocket handshake failed")?;
     let hello = read_client_message(&mut socket)?;
-    let resume_from = match hello {
+    let (resume_from, client_id, client_name) = match hello {
         ClientMessage::Hello {
             protocol_version,
             token,
+            client_id,
+            client_name,
             resume_from,
-            ..
         } if protocol_version == PROTOCOL_VERSION && token_matches(expected_token, &token) => {
-            resume_from
+            (resume_from, client_id, client_name)
         }
         ClientMessage::Hello {
             protocol_version, ..
@@ -705,7 +733,14 @@ fn handle_connection(
         .set_write_timeout(Some(SOCKET_WRITE_STALL_TIMEOUT))?;
 
     let (outgoing, outgoing_rx) = bounded(MAX_QUEUED_MESSAGES_PER_SUBSCRIBER);
-    let (subscriber, kicked) = Subscriber::new(outgoing.clone());
+    let (subscriber, kicked) = Subscriber::new(
+        outgoing.clone(),
+        ConnectedClient {
+            client_id,
+            name: client_name.unwrap_or_else(|| "Unknown client".into()),
+            connected_at: unix_time(),
+        },
+    );
     let subscriber_id = hub.subscribe(&resume_from, subscriber);
 
     // Any successful write counts as liveness, so queued events reset the
@@ -984,6 +1019,17 @@ fn handle_request(
     let (outcome, executed) = if !notification && let Some(cached) = hub.cached_response(request_id)
     {
         (cached, false)
+    } else if matches!(request.command, Command::ListConnections) {
+        // Hub-level state, not backend state: answered before dispatch so the
+        // response never touches the backend or its session mailboxes.
+        (
+            ResponseOutcome::Ok {
+                payload: ResponsePayload::Connections {
+                    clients: hub.connected_clients(),
+                },
+            },
+            true,
+        )
     } else {
         if starts_runtime {
             hub.begin_runtime(session_id, runtime_id);
@@ -1205,9 +1251,9 @@ mod tests {
     fn task_state_revisions_notify_other_clients_only() {
         let hub = Hub::default();
         let (source_tx, source_rx) = unbounded();
-        let source_id = hub.subscribe(&[], Subscriber::new(source_tx).0);
+        let source_id = hub.subscribe(&[], Subscriber::anonymous(source_tx));
         let (observer_tx, observer_rx) = unbounded();
-        hub.subscribe(&[], Subscriber::new(observer_tx).0);
+        hub.subscribe(&[], Subscriber::anonymous(observer_tx));
 
         hub.task_state_changed(source_id);
 
@@ -1446,6 +1492,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             token: "secret".into(),
             client_id: Uuid::new_v4(),
+            client_name: Some("test client".into()),
             resume_from: Vec::new(),
         })
         .unwrap();
@@ -1997,13 +2044,54 @@ mod tests {
     }
 
     #[test]
+    fn connected_clients_lists_subscribers_oldest_first_and_drops_closed() {
+        let hub = Arc::new(Hub::default());
+        let make = |name: &str, at: u64| {
+            let (outgoing, _events) = bounded(16);
+            Subscriber::new(
+                outgoing,
+                ConnectedClient {
+                    client_id: Uuid::new_v4(),
+                    name: name.into(),
+                    connected_at: at,
+                },
+            )
+            .0
+        };
+        hub.subscribe(&[], make("desktop", 100));
+        hub.subscribe(&[], make("phone", 200));
+        hub.subscribe(&[], make("web", 300));
+
+        let clients = hub.connected_clients();
+        assert_eq!(clients.len(), 3);
+        assert_eq!(clients[0].name, "desktop");
+        assert_eq!(clients[2].name, "web");
+
+        // Unsubscribing (a closed connection) removes the client. Key order in
+        // the map is not the subscription order, so find the id by identity.
+        let desktop_id = {
+            let state = hub.state.lock();
+            state
+                .subscribers
+                .iter()
+                .find(|(_, subscriber)| subscriber.client.name == "desktop")
+                .map(|(id, _)| *id)
+                .unwrap()
+        };
+        hub.unsubscribe(desktop_id);
+        let clients = hub.connected_clients();
+        assert_eq!(clients.len(), 2);
+        assert!(clients.iter().all(|client| client.name != "desktop"));
+    }
+
+    #[test]
     fn replaced_runtime_ignores_late_events_from_the_old_generation() {
         let hub = Arc::new(Hub::default());
         let session_id = Uuid::new_v4();
         let old_runtime_id = Uuid::new_v4();
         let new_runtime_id = Uuid::new_v4();
         let (outgoing, events) = unbounded();
-        hub.subscribe(&[], Subscriber::new(outgoing).0);
+        hub.subscribe(&[], Subscriber::anonymous(outgoing));
 
         hub.begin_runtime(session_id, old_runtime_id);
         let old_sink = hub.event_sink(session_id, old_runtime_id);
@@ -2050,7 +2138,7 @@ mod tests {
                 epoch: Uuid::nil(),
                 sequence: u64::MAX,
             }],
-            Subscriber::new(outgoing).0,
+            Subscriber::anonymous(outgoing),
         );
 
         let ServerMessage::Event(event) = events.recv().unwrap() else {
@@ -2067,7 +2155,14 @@ mod tests {
         let runtime_id = Uuid::new_v4();
         // Capacity one and no drainer: the second queued message overflows.
         let (outgoing, events) = bounded(1);
-        let (subscriber, kicked) = Subscriber::new(outgoing);
+        let (subscriber, kicked) = Subscriber::new(
+            outgoing,
+            ConnectedClient {
+                client_id: Uuid::new_v4(),
+                name: "test".into(),
+                connected_at: 0,
+            },
+        );
         hub.subscribe(&[], subscriber);
         hub.begin_runtime(session_id, runtime_id);
         let sink = hub.event_sink(session_id, runtime_id);

@@ -1921,7 +1921,9 @@ fn handle_driver_command(
         | Command::WriteTerminal { .. }
         | Command::ResizeTerminal { .. }
         | Command::CloseTerminal
-        | Command::CloseSession => {
+        | Command::CloseSession
+        // Hub-level: answered in `handle_request` before the backend sees it.
+        | Command::ListConnections => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }

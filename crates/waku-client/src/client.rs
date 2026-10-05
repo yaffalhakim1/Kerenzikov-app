@@ -51,13 +51,23 @@ pub struct DaemonClient {
 
 impl DaemonClient {
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
-        Self::connect_with_resume(address, token, Vec::new())
+        Self::connect_named(address, token, Vec::new(), None)
     }
 
-    pub fn connect_with_resume(
+    pub fn connect_named(
         address: &str,
         token: String,
         resume_from: Vec<ReplayCursor>,
+        client_name: Option<String>,
+    ) -> anyhow::Result<Self> {
+        Self::connect_inner(address, token, resume_from, client_name)
+    }
+
+    fn connect_inner(
+        address: &str,
+        token: String,
+        resume_from: Vec<ReplayCursor>,
+        client_name: Option<String>,
     ) -> anyhow::Result<Self> {
         let last_sequences = resume_from
             .iter()
@@ -85,6 +95,7 @@ impl DaemonClient {
                 protocol_version: PROTOCOL_VERSION,
                 token,
                 client_id: Uuid::new_v4(),
+                client_name,
                 resume_from,
             },
         )?;

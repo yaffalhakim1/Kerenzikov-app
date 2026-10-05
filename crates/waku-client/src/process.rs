@@ -24,6 +24,33 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const REBUILD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub const DEFAULT_EXPOSED_DAEMON_PORT: u16 = 34_123;
 
+/// A human name for this machine, for the daemon's connected-clients view.
+/// The desktop is identified by its host name; the phone and web clients
+/// choose their own names in their clients.
+pub(crate) fn this_machine_name() -> Option<String> {
+    #[cfg(unix)]
+    {
+        let mut buffer = [0_u8; 256];
+        let result = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
+        if result == 0 {
+            let length = buffer
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(buffer.len());
+            let hostname = String::from_utf8_lossy(&buffer[..length]).trim().to_owned();
+            if !hostname.is_empty() {
+                return Some(hostname);
+            }
+        }
+    }
+    ["COMPUTERNAME", "HOSTNAME"]
+        .into_iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .map(|hostname| hostname.trim().to_owned())
+        .find(|hostname| !hostname.is_empty())
+        .map(|hostname| format!("Desktop ({hostname})"))
+}
+
 /// Desktop-owned launch configuration for the daemon it supervises.
 ///
 /// Provider settings belong to the daemon and live in `settings.json`; this
@@ -225,7 +252,7 @@ impl DaemonProcess {
                 return Err(error);
             }
         };
-        let client = match DaemonClient::connect(&client_address, token) {
+        let client = match DaemonClient::connect_named(&client_address, token, Vec::new(), this_machine_name()) {
             Ok(client) => client,
             Err(error) => {
                 let _ = child.kill();
@@ -412,7 +439,8 @@ impl DaemonSupervisor {
     /// Connect to a daemon managed on another host (or by an external local
     /// service manager). Dropping the desktop never shuts this daemon down.
     pub fn connect(address: &str, token: String) -> anyhow::Result<Self> {
-        let client = DaemonClient::connect(address, token.clone())?;
+        let client =
+            DaemonClient::connect_named(address, token.clone(), Vec::new(), this_machine_name())?;
         let settings = read_settings(&client)?;
         let supervisor = Self::from_target(
             DaemonTarget::Remote {
@@ -618,7 +646,7 @@ fn monitor_daemon(
                 continue;
             }
             let Ok(replacement) =
-                DaemonClient::connect_with_resume(&address, token.clone(), resume_from)
+                DaemonClient::connect_named(&address, token.clone(), resume_from, this_machine_name())
             else {
                 continue;
             };
@@ -655,7 +683,7 @@ fn monitor_daemon(
                 continue;
             }
             let mut connect = |address: &str, token: String, resume_from: Vec<ReplayCursor>| {
-                DaemonClient::connect_with_resume(address, token, resume_from)
+                DaemonClient::connect_named(address, token, resume_from, this_machine_name())
             };
             try_local_reconnect(&mut *target, &mut connect)
         };
