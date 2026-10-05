@@ -12,6 +12,22 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.46]
+
+### Mobile
+
+- Fixed the task-history drawer hanging for tens of seconds the first time it
+  was opened after connecting to a daemon. It now opens immediately and fills
+  in as the task list arrives.
+- Fixed "Reload transcript" on a task whose stored copy was behind the live
+  stream: it now reconciles against what is on screen instead of doing
+  nothing, and it re-attaches the agent so controls work afterwards.
+- Fixed tasks that stayed stuck on a spinner saying "no live agent runtime"
+  after a daemon restart, and "Send now" not working on queued messages.
+- Streaming a long task no longer burns seconds of the app's time per minute
+  on background bookkeeping nobody sees.
+- New dev-loop script (`bun scripts/mobile.ts`) for development setups.
+
 ## [0.1.45]
 
 - The app no longer freezes for a few seconds right after it opens and

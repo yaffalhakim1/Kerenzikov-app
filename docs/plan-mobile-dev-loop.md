@@ -1,6 +1,6 @@
 # Plan: make the mobile inner loop fast
 
-Status: proposal. Owner: yaffalhakim1.
+Status: shipped as `scripts/mobile.ts` (#39). Owner: yaffalhakim1.
 
 ## The problem
 
@@ -13,7 +13,7 @@ unwired, and the failure modes are all silent:
 |---|---|
 | Red "Unable to load script" screen | Debug APK has no embedded bundle and Metro is not running |
 | Bundle loads, daemon never connects | `adb reverse tcp:8081` missing after an emulator restart |
-| Nothing updates after an edit | `force-stop` skipped, so the app kept its last bundle |
+| Nothing updates after an edit | Metro cached a failed transform and is serving its last good bundle; `expo run:android` has no `--clear`, so delete `$env:TEMP\metro-cache` |
 | "It's laggy" | Emulator fell back to SwiftShader |
 
 Measured on this machine, the pieces cost:
