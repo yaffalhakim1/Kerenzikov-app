@@ -16,6 +16,9 @@ temp/
 # Per-session agent memory, not project source.
 MEMORY.md
 
+# Expo dev-server state, written whenever a dev server runs here.
+.expo/
+
 # Local one-off repro scripts; repro-connect.ts carries a live daemon token.
 repro-connect.ts
 

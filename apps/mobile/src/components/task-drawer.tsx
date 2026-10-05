@@ -729,7 +729,9 @@ function UndoBanner({
 }) {
   const theme = useTheme();
   const shown = useSharedValue(0);
-  shown.value = withTiming(entry ? 1 : 0, { duration: 220 });
+  useEffect(() => {
+    shown.value = withTiming(entry ? 1 : 0, { duration: 220 });
+  }, [entry, shown]);
   const bannerStyle = useAnimatedStyle(() => ({
     opacity: shown.value,
     transform: [{ translateY: (1 - shown.value) * 14 }],
