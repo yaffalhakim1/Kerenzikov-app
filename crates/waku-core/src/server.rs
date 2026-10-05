@@ -213,7 +213,7 @@ impl From<&AgentSession> for SessionCatalogEntry {
     }
 }
 
-struct Hub {
+pub(crate) struct Hub {
     epoch: Uuid,
     state: Mutex<HubState>,
 }
@@ -249,7 +249,7 @@ struct RequestDispatcher {
 }
 
 impl Hub {
-    fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
+    pub(crate) fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
         EventSink {
             session_id,
             runtime_id,

@@ -1727,12 +1727,6 @@ impl Waku {
             .is_some_and(|turn| self.checkpoint_capture_pending(session_id, turn.turn_count))
     }
 
-    fn defer_queue_drain(&mut self, session_id: Uuid) {
-        if !self.pending_queue_drains.contains(&session_id) {
-            self.pending_queue_drains.push(session_id);
-        }
-    }
-
     /// Queues the newest finished turn's checkpoint for capture.
     ///
     /// Bookkeeping only. The capture itself is upwards of ten `git`
@@ -1864,11 +1858,6 @@ impl Waku {
                         // hosted inline before its footer.
                         waku.splice_transcript_rows_after_visibility_change(&previous_kinds);
                         waku.remeasure_changed_files(turn_id);
-                    }
-                    let resume_queue = waku.pending_queue_drains.contains(&session_id);
-                    if resume_queue {
-                        waku.pending_queue_drains.retain(|id| *id != session_id);
-                        waku.drain_queued_message(session_id, cx);
                     }
                     cx.notify();
                     if attached_turn_id.is_some() {
@@ -2051,7 +2040,6 @@ impl Waku {
                         runtime.driver.close();
                     }
                 }
-                self.drain_queued_message(session_id, cx);
                 self.show_toast(error);
                 cx.notify();
                 return;
@@ -2068,7 +2056,6 @@ impl Waku {
         let fork_id = forked.id;
         self.state.push_session(forked);
         self.select_session(fork_id, cx);
-        self.drain_queued_message(session_id, cx);
         match checkpoint_warning {
             Some(error) => {
                 self.show_toast(tr!("session.forked_with_checkpoint_warning", error = error))
@@ -3022,7 +3009,6 @@ impl Waku {
                 self.pending_goal_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
                 self.show_toast(error.to_string());
-                self.drain_queued_message(session_id, cx);
                 cx.notify();
                 return;
             }
@@ -3072,13 +3058,11 @@ impl Waku {
                 self.pending_goal_operations.remove(&session_id);
                 self.unwind_unconfirmed_pursuit_turn(session_id);
                 self.show_toast(error.to_string());
-                self.drain_queued_message(session_id, cx);
                 cx.notify();
                 return;
             }
         }
         self.save();
-        self.drain_queued_message(session_id, cx);
         cx.notify();
     }
 
@@ -3329,42 +3313,9 @@ impl Waku {
         self.steer_queued_message(session_id, message_id, cx);
     }
 
-    /// Start the next queued follow-up as a fresh turn. Only called once a
-    /// settled turn has been fully closed, so the session is Idle.
-    fn drain_queued_message(&mut self, session_id: Uuid, cx: &mut Context<Self>) {
-        if self.response_fork_preparations.contains_key(&session_id) {
-            return;
-        }
-        let Some(session) = self
-            .state
-            .sessions
-            .iter()
-            .find(|session| session.id == session_id)
-        else {
-            return;
-        };
-        if session.is_busy()
-            || session.queued_messages.is_empty()
-            || self.ending_checkpoint_pending(session_id)
-            // Messages parked behind a goal-initiated provider start stay
-            // queued until that runtime installs.
-            || self.goal_runtime_starts.contains(&session_id)
-        {
-            return;
-        }
-        let Some(message) = self
-            .state
-            .session_mut(session_id)
-            .map(|session| session.queued_messages.remove(0))
-        else {
-            return;
-        };
-        self.submit_submission_for_session(
-            session_id,
-            ComposerSubmission::from_queued_message(message),
-            cx,
-        );
-    }
+    /// Settled turns no longer drain queued prompts here: the daemon does
+    /// it (ADR 0003). The desktop observes the drained prompt as an ordinary
+    /// `promptSubmitted` event on the session's runtime stream.
 
     fn submit_submission_for_session(
         &mut self,
@@ -3386,7 +3337,6 @@ impl Waku {
         };
         if self.ending_checkpoint_pending(session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
-            self.defer_queue_drain(session_id);
             return;
         }
         // A goal operation is already starting this session's provider.
@@ -3394,7 +3344,6 @@ impl Waku {
         // instead of racing a second provider process into existence.
         if self.goal_runtime_starts.contains(&session_id) {
             self.enqueue_follow_up_submission(session_id, submission, cx);
-            self.defer_queue_drain(session_id);
             return;
         }
         if session.status.is_busy() {
@@ -3831,7 +3780,7 @@ impl Waku {
                 } else {
                     runtime_changed = true;
                 }
-                keep_runtime &= self.handle_driver_event(session_id, &mut runtime, event, true, cx);
+                keep_runtime &= self.handle_driver_event(session_id, &mut runtime, event, cx);
                 if !keep_runtime {
                     break;
                 }
@@ -3847,18 +3796,6 @@ impl Waku {
             {
                 selected_changed = true;
             }
-        }
-
-        if !self.pending_queue_drains.is_empty() {
-            let drains = std::mem::take(&mut self.pending_queue_drains);
-            for session_id in drains {
-                if self.ending_checkpoint_pending(session_id) {
-                    self.defer_queue_drain(session_id);
-                } else {
-                    self.drain_queued_message(session_id, cx);
-                }
-            }
-            changed = true;
         }
 
         if persisted_state_changed {

@@ -1345,12 +1345,6 @@ pub struct Waku {
     /// A source can have only one in flight because Pi temporarily changes
     /// its resident session while producing a branch.
     response_fork_preparations: HashMap<Uuid, usize>,
-    /// Sessions whose just-settled turn should start the next queued
-    /// follow-up. The request stays here until the ending checkpoint lands, so
-    /// the next provider cannot edit the worktree while that snapshot is still
-    /// being collected; it then reuses the runtime after the event drain has
-    /// re-inserted it.
-    pending_queue_drains: Vec<Uuid>,
     stream_state_dirty: bool,
     last_stream_save: Instant,
     /// User expansion overrides keyed by persisted transcript block index.
@@ -3004,7 +2998,6 @@ impl Waku {
                 submission_preparations: HashSet::new(),
                 escape_stop_confirmation: EscapeStopConfirmation::default(),
                 response_fork_preparations: HashMap::new(),
-                pending_queue_drains: Vec::new(),
                 stream_state_dirty: false,
                 last_stream_save: Instant::now(),
                 activities_expanded: HashMap::new(),

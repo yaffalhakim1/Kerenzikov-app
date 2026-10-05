@@ -668,7 +668,6 @@ impl Waku {
                     success: true,
                     summary: None,
                 },
-                true,
                 cx,
             );
             if keep_runtime {

@@ -1274,13 +1274,12 @@ impl Waku {
         if let Some(runtime) = runtime.as_mut() {
             Self::collect_runtime_events(runtime);
             while let Some(event) = runtime.pending_events.pop_front() {
-                keep_runtime &= self.handle_driver_event(session_id, runtime, event, false, cx);
+                keep_runtime &= self.handle_driver_event(session_id, runtime, event, cx);
                 if !keep_runtime {
                     break;
                 }
             }
         }
-        self.pending_queue_drains.retain(|id| *id != session_id);
         let has_active_turn = self
             .state
             .sessions

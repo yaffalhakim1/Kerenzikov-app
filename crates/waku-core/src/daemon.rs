@@ -20,7 +20,7 @@ use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
     ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
-    Project, ProviderKind, ProviderResumeCursor, SessionStatus,
+    Project, ProviderKind, ProviderResumeCursor, QueuedMessage, SessionStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -48,8 +48,10 @@ pub struct WakuBackend {
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
     settings: DaemonSettingsStore,
-    task_store: StateStore,
-    task_state: Mutex<PersistedState>,
+    /// Shared with the queue-drain worker: it dequeues settled turns from
+    /// the same state the request handlers read, under the same lock.
+    task_state: Arc<Mutex<PersistedState>>,
+    task_store: Arc<StateStore>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
     attachments: AttachmentStore,
@@ -57,6 +59,26 @@ pub struct WakuBackend {
     checkpoint_capture_locks: Mutex<HashMap<(PathBuf, Uuid, usize), Arc<Mutex<()>>>>,
     usage_rates_dir: std::path::PathBuf,
     default_cwd: std::path::PathBuf,
+    /// Settled turns waiting for the drain worker to run their queued
+    /// prompt. Unbounded is correct: each entry is one settled turn, and
+    /// the worker keeps pace with any realistic settle rate.
+    drain_requests: crossbeam_channel::Sender<DrainRequest>,
+    /// Sessions whose next settle must NOT start a queued prompt: the user
+    /// pressed Stop. Cleared by any new prompt on the session.
+    drain_suppressed: Mutex<HashSet<Uuid>>,
+}
+
+/// One settled turn whose queued prompt the drain worker should consider.
+struct DrainRequest {
+    session_id: Uuid,
+    /// The settled session's event sink: the drain publishes its submission
+    /// through it, so attached clients mirror the queued prompt.
+    events: EventSink,
+    /// The settled session's live driver. The worker submits through the
+    /// same actor a client `Prompt` reaches — no re-attach, no restart.
+    driver: DriverHandle,
+    /// True when a Stop on this session suppressed the next drain.
+    suppressed: bool,
 }
 
 impl WakuBackend {
@@ -65,6 +87,7 @@ impl WakuBackend {
             .load()
             .context("could not load Kerenzikov task database")?;
         migrate_projectless_state(&task_store, &mut task_state)?;
+        let (drain_requests, drain_request_rx) = crossbeam_channel::unbounded::<DrainRequest>();
         let composer_drafts = ComposerDraftStore::for_state_path(task_store.path());
         let attachments = AttachmentStore::new(
             task_store
@@ -78,6 +101,18 @@ impl WakuBackend {
             .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_owned();
+        let task_state = Arc::new(Mutex::new(task_state));
+        let task_store = Arc::new(task_store);
+        {
+            // The drain worker outlives this scope; it holds Weak handles so
+            // dropping the backend (daemon shutdown) ends the worker.
+            let task_state = Arc::downgrade(&task_state);
+            let task_store = Arc::downgrade(&task_store);
+            std::thread::Builder::new()
+                .name("waku-daemon-queue-drain".into())
+                .spawn(move || run_queue_drain_worker(task_state, task_store, drain_request_rx))
+                .context("could not start Kerenzikov queue drain worker")?;
+        }
         Ok(Self {
             sessions: Mutex::new(HashMap::new()),
             terminals: Mutex::new(HashMap::new()),
@@ -85,7 +120,7 @@ impl WakuBackend {
             terminal_shell: None,
             settings,
             task_store,
-            task_state: Mutex::new(task_state),
+            task_state,
             removed_session_ids: Mutex::new(HashSet::new()),
             composer_drafts,
             attachments,
@@ -93,6 +128,8 @@ impl WakuBackend {
             checkpoint_capture_locks: Mutex::new(HashMap::new()),
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
+            drain_requests,
+            drain_suppressed: Mutex::new(HashSet::new()),
         })
     }
 
@@ -226,6 +263,18 @@ impl Backend for WakuBackend {
     fn handle(&self, request: Request, events: EventSink) -> anyhow::Result<ResponsePayload> {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
+        match &request.command {
+            // Stop is a user decision to halt, not to continue: the next
+            // settle must not start a queued follow-up. An explicit prompt
+            // clears it. Both are cheap checks ahead of normal dispatch.
+            Command::Cancel => {
+                self.drain_suppressed.lock().insert(session_id);
+            }
+            Command::Prompt { .. } => {
+                self.drain_suppressed.lock().remove(&session_id);
+            }
+            _ => {}
+        }
         match request.command {
             Command::AttachSession => {
                 let sessions = self.sessions.lock();
@@ -837,10 +886,31 @@ impl Backend for WakuBackend {
                 let (event_sender, event_receiver) = driver::event_channel(wake);
                 let handle = driver::start_local(provider, options, event_sender)?;
                 let supports_steer = handle.supports_steer();
+                // The daemon drains the session's queued prompts itself when
+                // a turn finishes: the queuing client may be gone by then,
+                // and the daemon is the one component that always observes
+                // the settle. The drain request is posted to the backend's
+                // worker (which owns task state) rather than handled here,
+                // because this thread has no task-state access. See ADR 0003.
+                let drain_requests = self.drain_requests.clone();
+                let drain_driver = handle.clone();
+                let drain_events = events.clone();
+                // Read once at start; a Cancel during the turn flips the
+                // backend's set, but the suppression the drain checks is the
+                // one the worker sees — populated by the request path above.
+                let suppressed = self.drain_suppressed.lock().contains(&session_id);
                 std::thread::Builder::new()
                     .name(format!("waku-daemon-events-{session_id}"))
                     .spawn(move || {
                         while let Ok(event) = event_receiver.recv() {
+                            if matches!(event, DriverEvent::TurnFinished { .. }) {
+                                let _ = drain_requests.send(DrainRequest {
+                                    session_id,
+                                    events: drain_events.clone(),
+                                    driver: drain_driver.clone(),
+                                    suppressed,
+                                });
+                            }
                             let wire = event_to_wire(event).unwrap_or_else(|error| {
                                 WireDriverEvent::new(
                                     "error",
@@ -1828,7 +1898,6 @@ fn handle_driver_command(
     match command {
         Command::Prompt { prompt, .. } => driver.prompt(prompt),
         Command::Steer { prompt } => driver.steer(prompt),
-        Command::Cancel => driver.cancel(),
         Command::CancelComputerUse => driver.cancel_computer_use(),
         Command::RefreshBackgroundWork => driver.refresh_background_work(),
         Command::StopBackgroundWork { key, control_id } => {
@@ -1922,8 +1991,10 @@ fn handle_driver_command(
         | Command::ResizeTerminal { .. }
         | Command::CloseTerminal
         | Command::CloseSession
-        // Hub-level: answered in `handle_request` before the backend sees it.
-        | Command::ListConnections => {
+        // Hub-level (ListConnections) and dispatch-level (Cancel: suppression
+        // is applied in `handle`) commands never reach the driver path.
+        | Command::ListConnections
+        | Command::Cancel => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }
@@ -1935,6 +2006,87 @@ fn ensure_shell_environment() {
     REFRESHED.get_or_init(|| {
         crate::command_env::refresh_from_default_shell();
     });
+}
+
+/// Settled turns are posted here by the per-session event forwarding
+/// threads; this worker dequeues the session's queued prompt and submits it
+/// through the same driver actor a client `Prompt` reaches. Exits when the
+/// backend (and with it both Weak handles) is gone.
+fn run_queue_drain_worker(
+    task_state: std::sync::Weak<Mutex<PersistedState>>,
+    task_store: std::sync::Weak<StateStore>,
+    requests: crossbeam_channel::Receiver<DrainRequest>,
+) {
+    for request in requests {
+        let (Some(task_state), Some(task_store)) = (task_state.upgrade(), task_store.upgrade())
+        else {
+            // Backend dropped: daemon is shutting down.
+            return;
+        };
+        drain_queued_prompt(&task_state, &task_store, request);
+    }
+}
+/// Dequeues the session's head queued message and submits it, if the session
+/// is idle and holds one. Every check and the dequeue itself happen under
+/// the task-state lock, so a second drain request for the same settle (or a
+/// racing client save) cannot submit twice: the first caller removes the
+/// message, the second sees an empty queue.
+fn drain_queued_prompt(
+    task_state: &Mutex<PersistedState>,
+    task_store: &StateStore,
+    request: DrainRequest,
+) {
+    let DrainRequest {
+        session_id,
+        events,
+        driver,
+        suppressed,
+    } = request;
+    let mut state = task_state.lock();
+    let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) else {
+        return;
+    };
+    if session.is_busy() || session.queued_messages.is_empty() {
+        return;
+    }
+    // A Stop before this settle suppressed the queue: the user asked to
+    // halt, not to continue. The next explicit prompt clears it.
+    if suppressed {
+        return;
+    }
+    let queued = session.queued_messages.remove(0);
+    let rollback = |state: &mut PersistedState, queued: QueuedMessage| {
+        if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
+            session.queued_messages.insert(0, queued);
+        }
+    };
+    if let Err(error) = task_store.save(&mut state) {
+        eprintln!("waku-daemon could not persist a queue drain: {error}");
+        // Put the message back so a later settle can retry the drain.
+        rollback(&mut state, queued);
+        return;
+    }
+    drop(state);
+
+    // Turn and message ids derive from the queue entry's id: a stale client
+    // snapshot that still holds this entry cannot mint a second turn from
+    // it, because the same ids address the same turn.
+    let turn_id = queued.id;
+    // The submission is published before the provider can start the turn,
+    // exactly as a client `Prompt` does, so every attached client mirrors
+    // the user message and its turn from this event.
+    if let Err(error) =
+        event_to_wire(DriverEvent::PromptSubmitted {
+            message: queued.content.clone(),
+            turn_id,
+            message_id: turn_id,
+        })
+        .and_then(|wire| events.send(wire))
+    {
+        eprintln!("waku-daemon could not publish a drained prompt: {error}");
+        return;
+    }
+    driver.prompt(queued.content);
 }
 
 fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {
@@ -2391,5 +2543,162 @@ mod tests {
             DriverEvent::PromptSubmitted { message, turn_id: decoded_turn, message_id: decoded_message }
                 if message == "ship it" && decoded_turn == turn_id && decoded_message == message_id
         ));
+    }
+
+    mod drain {
+        use super::super::*;
+        use crate::driver::{DriverControl, DriverHandle};
+        use crate::model::unix_time;
+        use crate::server::Hub;
+
+        pub(super) struct RecordingDriver {
+            prompts: Mutex<Vec<String>>,
+        }
+
+        impl RecordingDriver {
+            pub(super) fn new() -> Arc<Self> {
+                Arc::new(Self {
+                    prompts: parking_lot::Mutex::new(Vec::new()),
+                })
+            }
+
+            pub(super) fn prompts(&self) -> Vec<String> {
+                self.prompts.lock().clone()
+            }
+        }
+
+        impl DriverControl for RecordingDriver {
+            fn prompt(&self, prompt: String) {
+                self.prompts.lock().push(prompt);
+            }
+            fn cancel(&self) {}
+            fn respond(&self, _request_id: String, _option_id: String) {}
+            fn rollback(
+                &self,
+                _turns: usize,
+            ) -> anyhow::Result<Option<crate::model::ProviderResumeCursor>> {
+                Ok(None)
+            }
+        }
+
+        pub(super) struct Fixture {
+            pub task_state: Arc<Mutex<PersistedState>>,
+            pub store: Arc<StateStore>,
+            pub session_id: Uuid,
+            pub driver: Arc<RecordingDriver>,
+        }
+
+        pub(super) fn fixture() -> Fixture {
+            let directory = std::env::temp_dir().join(format!("waku-drain-{}", Uuid::new_v4()));
+            let store = Arc::new(StateStore::new(directory.join("app.db")));
+            let mut task_state = store.load().unwrap();
+            let project = Project {
+                id: Uuid::new_v4(),
+                name: "drain-test".into(),
+                path: directory.clone(),
+                created_at: unix_time(),
+            };
+            task_state.projects.push(project.clone());
+            let session = AgentSession::new(project.id, ProviderKind::Codex);
+            let session_id = session.id;
+            task_state.sessions.push(session);
+            store.save(&mut task_state).unwrap();
+            Fixture {
+                task_state: Arc::new(Mutex::new(task_state)),
+                store,
+                session_id,
+                driver: RecordingDriver::new(),
+            }
+        }
+
+        pub(super) fn seed_queued(
+            task_state: &Mutex<PersistedState>,
+            store: &StateStore,
+            session_id: Uuid,
+            text: &str,
+        ) -> Uuid {
+            let id = Uuid::new_v4();
+            let mut state = task_state.lock();
+            let session = state.sessions.iter_mut().find(|s| s.id == session_id).unwrap();
+            session.status = SessionStatus::Idle;
+            session.queued_messages.push(crate::model::QueuedMessage {
+                id,
+                content: text.into(),
+                display_content: None,
+                attachments: Vec::new(),
+                created_at: unix_time(),
+            });
+            store.save(&mut state).unwrap();
+            id
+        }
+
+        pub(super) fn make_request(
+            session_id: Uuid,
+            driver: Arc<RecordingDriver>,
+            suppressed: bool,
+        ) -> DrainRequest {
+            let hub = Arc::new(Hub::default());
+            DrainRequest {
+                session_id,
+                events: hub.event_sink(session_id, Uuid::new_v4()),
+                driver: DriverHandle::from_control(driver),
+                suppressed,
+            }
+        }
+    }
+
+    #[test]
+    fn queued_prompt_drains_when_requested() {
+        let fixture = drain::fixture();
+        drain::seed_queued(&fixture.task_state, &fixture.store, fixture.session_id, "follow up");
+
+        let request = drain::make_request(fixture.session_id, fixture.driver.clone(), false);
+        drain_queued_prompt(&fixture.task_state, &fixture.store, request);
+
+        assert_eq!(fixture.driver.prompts(), vec!["follow up".to_string()]);
+        let state = fixture.task_state.lock();
+        let session = state.sessions.iter().find(|s| s.id == fixture.session_id).unwrap();
+        assert!(session.queued_messages.is_empty());
+    }
+
+    #[test]
+    fn suppressed_settle_skips_the_queue() {
+        let fixture = drain::fixture();
+        drain::seed_queued(
+            &fixture.task_state,
+            &fixture.store,
+            fixture.session_id,
+            "do not run",
+        );
+
+        let request = drain::make_request(fixture.session_id, fixture.driver.clone(), true);
+        drain_queued_prompt(&fixture.task_state, &fixture.store, request);
+
+        assert!(fixture.driver.prompts().is_empty());
+        let state = fixture.task_state.lock();
+        let session = state.sessions.iter().find(|s| s.id == fixture.session_id).unwrap();
+        assert_eq!(session.queued_messages.len(), 1);
+    }
+
+    #[test]
+    fn busy_session_is_not_drained() {
+        let fixture = drain::fixture();
+        drain::seed_queued(&fixture.task_state, &fixture.store, fixture.session_id, "later");
+        task_state_lock_sets_working(&fixture.task_state, fixture.session_id);
+
+        let request = drain::make_request(fixture.session_id, fixture.driver.clone(), false);
+        drain_queued_prompt(&fixture.task_state, &fixture.store, request);
+
+        assert!(fixture.driver.prompts().is_empty());
+        let state = fixture.task_state.lock();
+        let session = state.sessions.iter().find(|s| s.id == fixture.session_id).unwrap();
+        assert_eq!(session.queued_messages.len(), 1);
+    }
+
+    fn task_state_lock_sets_working(task_state: &Mutex<PersistedState>, session_id: Uuid) {
+        let mut state = task_state.lock();
+        if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
+            session.status = SessionStatus::Working;
+        }
     }
 }

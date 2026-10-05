@@ -302,17 +302,11 @@ impl Waku {
     }
 
     /// Returns whether the runtime should remain attached after this event.
-    ///
-    /// `allow_queue_drain` is false when the caller is flushing buffered
-    /// events for a turn the user just stopped: a settling event must not
-    /// start queued follow-ups then, because the user asked to stop, not to
-    /// continue.
     pub(super) fn handle_driver_event(
         &mut self,
         session_id: Uuid,
         runtime: &mut SessionRuntime,
         event: DriverEvent,
-        allow_queue_drain: bool,
         cx: &mut Context<Self>,
     ) -> bool {
         runtime.last_active_at = Instant::now();
@@ -607,20 +601,14 @@ impl Waku {
                         ));
                     }
                 } else if settled_cleanly {
-                    // The turn settled before the steer arrived; run the
-                    // message as a fresh turn instead of losing it. Submission
-                    // is deferred through the queue-drain pass because this
-                    // session's runtime is detached from the map while its
-                    // events are handled — an inline submit would spawn a
-                    // second driver process only to have it clobbered when the
-                    // drain re-inserts the detached runtime.
+                    // The turn settled before the steer arrived; the daemon
+                    // drains the re-queued head when the settle completes
+                    // (ADR 0003). The re-queue here persists it so the
+                    // daemon's task state sees it.
                     if let Some(session) = self.state.session_mut(session_id) {
                         session
                             .queued_messages
                             .insert(0, submission.into_queued_message());
-                    }
-                    if allow_queue_drain {
-                        self.pending_queue_drains.push(session_id);
                     }
                 } else {
                     // The user stopped the turn (or the provider died) before
@@ -794,11 +782,8 @@ impl Waku {
                     // never interrupt the session it just observed.
                     self.spawn_memory_extraction(session_id, cx);
                 }
-                if allow_queue_drain && success {
-                    // Start the next queued follow-up once the runtime has
-                    // been re-inserted so the same process is reused.
-                    self.pending_queue_drains.push(session_id);
-                }
+                // Queued follow-ups are drained by the daemon on settle
+                // (ADR 0003); no desktop-side drain trigger here.
                 if let Some(previous_kinds) = previous_kinds.as_deref() {
                     self.splice_active_transcript_rows_after_visibility_change(previous_kinds);
                 }
