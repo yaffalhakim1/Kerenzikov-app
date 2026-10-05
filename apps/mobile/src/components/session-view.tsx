@@ -59,33 +59,41 @@ const SURFACE_MENU_COMMANDS = [
   { id: 'review', title: 'Review', symbol: 'doc.text.magnifyingglass' },
 ] as const;
 
+/** Every task-menu command. The `symbol` literals stay `as const` so they keep
+ *  satisfying the SF Symbol name types. `needsIdle` marks commands that rewrite
+ *  the transcript from the daemon's stored snapshot, which trails a live turn —
+ *  mid-stream that would move the screen backwards. */
 const TASK_MENU_COMMANDS = [
-  { id: 'rename', title: 'Rename task', symbol: 'pencil', destructive: false },
+  { id: 'rename', title: 'Rename task', symbol: 'pencil', destructive: false, needsIdle: false },
   {
     id: 'copy-last-response',
     title: 'Copy last response',
     symbol: 'doc.on.doc',
     destructive: false,
+    needsIdle: false,
   },
   {
     id: 'rewind',
     title: 'Rewind to turn…',
     symbol: 'clock.arrow.circlepath',
     destructive: true,
+    needsIdle: true,
   },
   {
     id: 'fork',
     title: 'Fork from turn…',
     symbol: 'arrow.branch',
     destructive: false,
+    needsIdle: true,
   },
   {
     id: 'reload',
     title: 'Reload transcript',
     symbol: 'arrow.clockwise',
     destructive: false,
+    needsIdle: true,
   },
-  { id: 'delete', title: 'Delete task', symbol: 'trash', destructive: true },
+  { id: 'delete', title: 'Delete task', symbol: 'trash', destructive: true, needsIdle: false },
 ] as const;
 
 
@@ -294,6 +302,27 @@ export function SessionView({
     );
   }, [turnTarget]);
 
+  const reloadTranscript = useCallback(() => {
+    const current = sessionRef.current;
+    if (!current) return;
+    // A reload replaces the transcript from the daemon's stored snapshot, which
+    // trails a live turn. Mid-stream that would move the screen backwards, so
+    // it is refused rather than half-applied; the menu entry is disabled too.
+    if (sessionBusy(current)) {
+      Alert.alert(
+        'Task is busy',
+        'The transcript is still streaming. Reload it once the turn settles.',
+      );
+      return;
+    }
+    void runtimeRef.current.reloadSession(current.id).catch((cause) => {
+      Alert.alert(
+        'Couldn\'t reload the transcript',
+        cause instanceof Error ? cause.message : String(cause),
+      );
+    });
+  }, []);
+
   const handleTaskMenuCommand = useCallback(
     (command: string) => {
       if (command === 'terminal' || command === 'files' || command === 'review') {
@@ -305,12 +334,12 @@ export function SessionView({
       } else if (command === 'copy-last-response') {
         void copyLastResponse();
       } else if (command === 'reload') {
-        void queryRef.current.refetch();
+        reloadTranscript();
       } else if (command === 'delete') {
         confirmDelete();
       }
     },
-    [confirmDelete, copyLastResponse, openTaskSurface, openTurnTarget],
+    [confirmDelete, copyLastResponse, openTaskSurface, openTurnTarget, reloadTranscript],
   );
 
   const taskState = useTaskState().data;
@@ -342,10 +371,13 @@ export function SessionView({
         id: item.id,
         title: item.title,
         image: item.symbol,
-        attributes: item.destructive ? { destructive: true } : undefined,
+        attributes: {
+          ...(item.destructive ? { destructive: true } : {}),
+          ...(item.needsIdle ? { disabled: running } : {}),
+        },
       })),
     ],
-    [],
+    [running],
   );
 
   // The chrome lives in the native navigation bar, so it stays put while the
@@ -382,6 +414,7 @@ export function SessionView({
                   label: item.title,
                   icon: { type: 'sfSymbol' as const, name: item.symbol },
                   destructive: item.destructive,
+                  disabled: item.needsIdle && running,
                   onPress: () => handleTaskMenuCommand(item.id),
                 })),
               ],
@@ -443,6 +476,7 @@ export function SessionView({
     handleTaskMenuCommand,
     hasSession,
     openTaskDrawer,
+    running,
     subtitle,
     taskMenuActions,
     title,

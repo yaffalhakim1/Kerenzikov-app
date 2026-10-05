@@ -6,6 +6,7 @@ import type {
   RuntimeMode,
   SequencedEvent,
 } from '@waku/client';
+import { reduceRuntimeEvent } from '@waku/client/event-reducer';
 
 export interface MobileRuntimeClock {
   nowSeconds: () => number;
@@ -294,6 +295,115 @@ export function shouldApplyRuntimeEvent(
   event: SequencedEvent,
 ): boolean {
   return !runtimeEventAlreadyApplied(session, event);
+}
+
+/**
+ * Event kinds that reach `reduceRuntimeEvent`'s `default: break`.
+ *
+ * The mobile app has no background-work, todo or plan-usage surface, so these
+ * carry no projection this client draws. Cloning the session for them is pure
+ * waste — measured at 4ms per clone on a 1.3MB transcript — and `backgroundWork`
+ * arrives as often as the model streams (a 15s sample of one live turn: 2026
+ * reasoningDelta + 90 backgroundWork events, 137/sec).
+ */
+const UNPROJECTED_RUNTIME_EVENTS = new Set(['todoUpdated', 'planUsageUpdated', 'backgroundWork']);
+
+/** Whether folding this event can change the session the transcript draws. */
+export function runtimeEventTouchesSession(event: SequencedEvent): boolean {
+  return !UNPROJECTED_RUNTIME_EVENTS.has(event.event.kind);
+}
+
+/** Stream-rate kinds that wait for the commit tick instead of flushing the
+ * buffer. `backgroundWork` belongs here because it is conversation meta with no
+ * consumer in this app: flushing per event cost one deep clone and one
+ * task-state cache write each, and it arrives at stream cadence. */
+export function runtimeEventIsDeferrable(event: SequencedEvent): boolean {
+  const kind = event.event.kind;
+  return kind === 'textDelta'
+    || kind === 'reasoningDelta'
+    || kind === 'usageUpdated'
+    || kind === 'backgroundWork';
+}
+
+/**
+ * Move the replay cursor over an event the reducer ignores.
+ *
+ * The cursor is the client's "already folded in" marker, so it has to advance
+ * even when nothing was projected — otherwise a reconnect replays the event.
+ * Everything else is left by reference, so no row is invalidated and no cache
+ * write happens.
+ */
+export function advanceRuntimeEventCursor(
+  session: AgentSession,
+  event: SequencedEvent,
+): AgentSession {
+  if (runtimeEventAlreadyApplied(session, event)) return session;
+  return {
+    ...session,
+    runtime_event_cursor: {
+      runtime_id: event.runtimeId,
+      epoch: event.epoch,
+      sequence: event.sequence,
+    },
+  };
+}
+
+/** Whether folding this event changes the transcript the user reads, as opposed
+ *  to conversation meta this app does not project. Only these are worth
+ *  replaying to catch a stored snapshot up to the live cursor. */
+export function runtimeEventCarriesTranscript(event: SequencedEvent): boolean {
+  return runtimeEventTouchesSession(event);
+}
+
+/**
+ * Fold a replayed run of events into a stored snapshot.
+ *
+ * A reload reads the daemon's persisted snapshot, which is written on a
+ * debounce and therefore trails a live turn. Applying the events the snapshot
+ * has not seen is what keeps the transcript from moving backwards, so the
+ * cursor is the authority and a missing or foreign cursor means "apply
+ * everything, nothing can be proven already folded".
+ *
+ * Pure and I/O-free: the caller owns fetching the events and writing the
+ * result back to the cache.
+ */
+export function foldRuntimeEvents(
+  stored: AgentSession,
+  events: readonly SequencedEvent[],
+): AgentSession {
+  const cursor = stored.runtime_event_cursor;
+  const applicable = events.filter((event) => {
+    if (!runtimeEventCarriesTranscript(event)) return false;
+    if (!cursor) return true;
+    return cursor.runtime_id !== event.runtimeId
+      || cursor.epoch !== event.epoch
+      || cursor.sequence < event.sequence;
+  });
+  if (!applicable.length) return stored;
+  return applicable.reduce(
+    (session, event) => reduceRuntimeEvent(session, event).session,
+    stored,
+  );
+}
+
+/**
+ * Whether `candidate` holds a transcript at least as new as `current`.
+ *
+ * Cursors are only comparable within one runtime epoch: a different runtime id
+ * or epoch means the daemon restarted (or the runtime was replaced), and the
+ * freshly read snapshot is the authority. An absent cursor on the candidate is
+ * "nothing known yet", which is never newer than a known one.
+ */
+export function runtimeSnapshotIsAtLeastAsNew(
+  candidate: AgentSession,
+  current: AgentSession,
+): boolean {
+  const next = candidate.runtime_event_cursor;
+  const previous = current.runtime_event_cursor;
+  if (!previous) return true;
+  if (!next) return false;
+  if (next.runtime_id !== previous.runtime_id || next.epoch !== previous.epoch) return true;
+  return next.sequence >= previous.sequence;
 }
 
 function promptTitle(prompt: string): string | null {

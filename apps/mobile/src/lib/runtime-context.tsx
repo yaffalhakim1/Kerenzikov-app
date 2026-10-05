@@ -47,11 +47,16 @@ import {
 import { persistentStorageSync } from './composer-preferences-store';
 import { useDaemon } from './daemon-context';
 import {
+  advanceRuntimeEventCursor,
   applySessionOptions,
   beginTurn,
   createSession,
   providerPromptForSubmission,
   queueSubmission,
+  foldRuntimeEvents,
+  runtimeEventIsDeferrable,
+  runtimeEventTouchesSession,
+  runtimeSnapshotIsAtLeastAsNew,
   sessionBusy,
   sessionCwd,
   sessionHasActiveProviderTurn,
@@ -93,10 +98,13 @@ interface PendingSubmission {
  * events (permissions, turn lifecycle) flush the buffer immediately. */
 const STREAM_COMMIT_MS = 120;
 
-function deferrableEvent(event: SequencedEvent): boolean {
-  const kind = event.event.kind;
-  return kind === 'textDelta' || kind === 'reasoningDelta' || kind === 'usageUpdated';
-}
+/** How many attach attempts must find no runtime before a busy task is treated
+ *  as orphaned, and how long to wait between them. Mirrors the desktop's
+ *  `finish_runtime_attachment` (four tries, 250ms apart). */
+const RUNTIME_ATTACH_MISS_LIMIT = 4;
+const RUNTIME_ATTACH_RETRY_MS = 250;
+
+
 
 interface RuntimeContextValue {
   runtimes: Record<string, MobileRuntime | undefined>;
@@ -137,6 +145,7 @@ interface RuntimeContextValue {
   archiveSession: (sessionId: string, archived: boolean) => Promise<void>;
   removeQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
   steerQueuedMessage: (sessionId: string, messageId: string) => Promise<void>;
+  reloadSession: (sessionId: string) => Promise<void>;
   rewindSession: (
     sessionId: string,
     turnCount: number,
@@ -167,6 +176,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     && Object.values(errors).some(isDaemonDisconnectError);
   const entries = useRef(new Map<string, RuntimeEntry>());
   const attachRequests = useRef(new Map<string, Promise<boolean>>());
+  /** Attach attempts that found no live runtime, per session, with the
+   *  transcript cursor observed at the first miss. Reaching the threshold
+   *  proves the daemon has nothing running, so a `working` status is a leftover
+   *  projection rather than a live turn. */
+  const runtimeAttachMisses = useRef(
+    new Map<string, { count: number; sequence: number }>(),
+  );
+  const attachSessionRef = useRef<((session: AgentSession) => Promise<boolean>) | null>(null);
   /** The daemon connection count whose runtimes were last revalidated. */
   const revalidatedConnections = useRef(0);
   const persistTails = useRef(new Map<string, Promise<AgentSession>>());
@@ -447,6 +464,18 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       };
       for (const event of batch) {
         if (!shouldApplyRuntimeEvent(state.current, event)) continue;
+        // Conversation meta this app never projects (background work, todos,
+        // plan usage). Reducing it would deep-clone the whole session — 4ms on
+        // a 1.3MB transcript — and rewrite the task-state cache to change
+        // nothing on screen. Advance the replay cursor instead, and flush the
+        // coalesced text run first so its own (older) envelope cannot drag the
+        // cursor back.
+        if (!runtimeEventTouchesSession(event)) {
+          flushRun();
+          state.current = advanceRuntimeEventCursor(state.current, event);
+          state.mutated = true;
+          continue;
+        }
         const kind = event.event.kind;
         if ((kind === 'textDelta' || kind === 'reasoningDelta') && typeof event.event.payload === 'string') {
           if (run && run.kind === kind) {
@@ -484,7 +513,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const unsubscribe = client.subscribe(session.id, runtimeId, (event) => {
       if (entries.current.get(session.id) !== entry) return;
       entry.pending.push(event);
-      if (!deferrableEvent(event)) {
+      if (!runtimeEventIsDeferrable(event)) {
         if (entry.flushTimer) {
           clearTimeout(entry.flushTimer);
           entry.flushTimer = null;
@@ -509,6 +538,75 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     return entry;
   }, [cacheSession, daemon.activeProfile?.id, daemon.client, drainQueue, persistOrdered, queryClient, removeRuntime, schedulePersist]);
 
+
+  /**
+   * Reconcile a session the daemon has no runtime for.
+   *
+   * A persisted `working`/`connecting` status is a projection of a turn that
+   * may have died with the daemon process — the task then shows a spinner that
+   * never clears and every control fails with "no live runtime". The desktop
+   * answers this by retrying the attach four times and then interrupting the
+   * orphaned turn; this mirrors that.
+   *
+   * Two guards keep a live agent safe. The retries absorb a runtime that is
+   * being replaced (another client's `start`, a reconnect), and the transcript
+   * cursor captured at the first miss must not have moved — a session still
+   * receiving events has a runtime, whatever one attach reply said.
+   *
+   * Returns whether the caller should try the attach again.
+   */
+  const reconcileMissingRuntime = useCallback((sessionId: string): boolean => {
+    const profileId = daemon.activeProfile?.id;
+    if (!profileId) return false;
+    const key = daemonKeys.session(profileId, sessionId);
+    const current = queryClient.getQueryData<AgentSession>(key);
+    if (!current || !sessionBusy(current)) {
+      runtimeAttachMisses.current.delete(sessionId);
+      return false;
+    }
+    const sequence = current.runtime_event_cursor?.sequence ?? 0;
+    const previous = runtimeAttachMisses.current.get(sessionId);
+    if (previous && previous.sequence !== sequence) {
+      // The transcript moved: a runtime is feeding this task, so the miss was
+      // a race, not an orphan.
+      runtimeAttachMisses.current.delete(sessionId);
+      return false;
+    }
+    const count = (previous?.count ?? 0) + 1;
+    if (count < RUNTIME_ATTACH_MISS_LIMIT) {
+      runtimeAttachMisses.current.set(sessionId, { count, sequence });
+      return true;
+    }
+    runtimeAttachMisses.current.delete(sessionId);
+
+    let interrupted = false;
+    const turns = current.turns.map((turn) => {
+      if (turn.status !== 'running') return turn;
+      interrupted = true;
+      return { ...turn, status: 'interrupted' as const, completed_at: clock.nowSeconds() };
+    });
+    const settled: AgentSession = {
+      ...current,
+      status: 'idle',
+      turns,
+      messages: current.messages.map((message) => (
+        message.streaming ? { ...message, streaming: false } : message
+      )),
+    };
+    cacheSession(settled);
+    void persistOrdered(settled).catch((cause) => {
+      setErrors((values) => ({ ...values, [sessionId]: errorMessage(cause) }));
+    });
+    if (interrupted) {
+      setErrors((values) => ({
+        ...values,
+        [sessionId]: 'The agent stopped before this turn finished, so the task was marked interrupted.',
+      }));
+    }
+    return false;
+  }, [cacheSession, daemon.activeProfile?.id, persistOrdered, queryClient]);
+
+
   const attachSession = useCallback((session: AgentSession): Promise<boolean> => {
     const client = daemon.client;
     const profileId = daemon.activeProfile?.id;
@@ -518,20 +616,83 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (pending) return pending;
 
     const request = (async () => {
-      const attached = await attachDaemonSession(client, session.id);
-      if (!client.connected || !attached) return false;
-      const current = queryClient.getQueryData<AgentSession>(
-        daemonKeys.session(profileId, session.id),
-      ) ?? session;
-      subscribe(current, attached.runtimeId, attached.supportsSteer, false);
-      return true;
+      // Retry a miss a few times before believing it: a runtime being replaced
+      // by another client's `start`, or a link still settling after a
+      // reconnect, answers "no runtime" for a moment.
+      for (let attempt = 0; attempt < RUNTIME_ATTACH_MISS_LIMIT; attempt += 1) {
+        const attached = await attachDaemonSession(client, session.id);
+        if (!client.connected) return false;
+        if (attached) {
+          runtimeAttachMisses.current.delete(session.id);
+          const current = queryClient.getQueryData<AgentSession>(
+            daemonKeys.session(profileId, session.id),
+          ) ?? session;
+          subscribe(current, attached.runtimeId, attached.supportsSteer, false);
+          return true;
+        }
+        if (!reconcileMissingRuntime(session.id)) return false;
+        await new Promise((resolve) => setTimeout(resolve, RUNTIME_ATTACH_RETRY_MS));
+      }
+      return false;
     })().finally(() => {
       if (attachRequests.current.get(session.id) === request) attachRequests.current.delete(session.id);
     });
     attachRequests.current.set(session.id, request);
     return request;
-  }, [daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient, subscribe]);
+  }, [daemon.activeProfile?.id, daemon.client, daemon.phase, queryClient, reconcileMissingRuntime, subscribe]);
 
+  /** The live runtime entry for a session, attaching first when this client is
+   *  not following it yet. Control paths (stop, answer, steer) need the entry
+   *  the session screen normally creates; without this a screen that attached
+   *  before a runtime swap, or one opened during a reconnect, has a live-looking
+   *  task and no runtime to act on. */
+  const ensureRuntime = useCallback(async (
+    session: AgentSession,
+  ): Promise<RuntimeEntry | null> => {
+    const existing = entries.current.get(session.id);
+    if (existing) return existing;
+    await attachSessionRef.current?.(session);
+    return entries.current.get(session.id) ?? null;
+  }, []);
+  /**
+   * Re-read a task from the daemon and reconcile it with what is on screen.
+   *
+   * The daemon persists a transcript on a debounce, so the stored snapshot can
+   * trail a live turn by tens of thousands of events. Replacing the cache with
+   * it would move the transcript backwards, which is why the old
+   * `query.refetch()` looked like a no-op. The snapshot is only accepted when
+   * it is at least as new as the cached transcript, and whatever it is missing
+   * is replayed on top before the cache is written.
+   *
+   * Anything already buffered for the followed runtime is replayed too: the
+   * fold advances the cursor, so the pending flush skips those events rather
+   * than applying them twice.
+   */
+  const reloadSession = useCallback(async (sessionId: string): Promise<void> => {
+    const client = daemon.client;
+    const profileId = daemon.activeProfile?.id;
+    if (!client || !profileId || daemon.phase !== 'connected') {
+      throw new Error('Kerenzikov daemon is disconnected');
+    }
+    const key = daemonKeys.session(profileId, sessionId);
+    const cached = queryClient.getQueryData<AgentSession>(key);
+    const replayed: SequencedEvent[] = entries.current.get(sessionId)?.pending.slice() ?? [];
+    const stored = await hydrateSession(client, sessionId);
+    if (!stored) throw new Error('This task no longer exists on the daemon');
+    const snapshot = cached && !runtimeSnapshotIsAtLeastAsNew(stored, cached) ? cached : stored;
+    const reconciled = foldRuntimeEvents(snapshot, replayed);
+    cacheSession(reconciled);
+    // A task opened without a runtime (or whose runtime was replaced) gets one
+    // now, so the reload leaves the screen able to act rather than half-dead.
+    if (!entries.current.has(sessionId)) await ensureRuntime(reconciled);
+  }, [
+    cacheSession,
+    daemon.activeProfile?.id,
+    daemon.client,
+    daemon.phase,
+    ensureRuntime,
+    queryClient,
+  ]);
   const sendPrompt = useCallback(async (
     inputSession: AgentSession,
     rawPrompt: string,
@@ -659,7 +820,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     sendPromptRef.current = sendPrompt;
-  }, [sendPrompt]);
+    attachSessionRef.current = attachSession;
+  }, [attachSession, sendPrompt]);
 
   /** Inject a prompt into the running turn when the provider supports it;
    * otherwise fall through to sendPrompt, which queues while busy. */
@@ -721,10 +883,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const cancel = useCallback(async (sessionId: string) => {
     const client = daemon.client;
     if (!client) throw new Error('Kerenzikov daemon is disconnected');
-    const runtime = entries.current.get(sessionId);
-    if (!runtime) throw new Error('This task has no live agent runtime');
+    const session = await loadFullSession(sessionId);
+    const runtime = await ensureRuntime(session);
+    if (!runtime) {
+      // The attach already reconciled: an orphaned task is settled to idle and
+      // its turn interrupted, so there is nothing left to stop and no error to
+      // show. A task that was never busy needs no message either.
+      return;
+    }
     await client.request({ type: 'cancel' }, sessionId, runtime.runtimeId);
-  }, [daemon.client]);
+  }, [daemon.client, ensureRuntime, loadFullSession, reconcileMissingRuntime]);
 
   const markWorking = useCallback((sessionId: string) => {
     const profileId = daemon.activeProfile?.id;
@@ -741,12 +909,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
   const respond = useCallback(async (sessionId: string, requestId: string, optionId: string) => {
     const client = daemon.client;
-    const runtime = entries.current.get(sessionId);
-    if (!client || !runtime) throw new Error('This task has no live agent runtime');
+    if (!client) throw new Error('Kerenzikov daemon is disconnected');
+    const runtime = await ensureRuntime(await loadFullSession(sessionId));
+    if (!runtime) throw new Error('This task has no live agent runtime');
     await client.request({ type: 'respond', requestId, optionId }, sessionId, runtime.runtimeId);
     setPermissions((values) => ({ ...values, [sessionId]: undefined }));
     markWorking(sessionId);
-  }, [daemon.client, markWorking]);
+  }, [daemon.client, ensureRuntime, loadFullSession, markWorking]);
 
   const respondUserInput = useCallback(async (
     sessionId: string,
@@ -754,8 +923,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     answers: UserInputAnswer[],
   ) => {
     const client = daemon.client;
-    const runtime = entries.current.get(sessionId);
-    if (!client || !runtime) throw new Error('This task has no live agent runtime');
+    if (!client) throw new Error('Kerenzikov daemon is disconnected');
+    const runtime = await ensureRuntime(await loadFullSession(sessionId));
+    if (!runtime) throw new Error('This task has no live agent runtime');
     await client.request(
       { type: 'respondUserInput', requestId, answers },
       sessionId,
@@ -763,7 +933,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     );
     setUserInputs((values) => ({ ...values, [sessionId]: undefined }));
     markWorking(sessionId);
-  }, [daemon.client, markWorking]);
+  }, [daemon.client, ensureRuntime, loadFullSession, markWorking]);
 
   /** Change model traits / access mode. Applied live via
    * applyOptions when a runtime exists; a runtime that can't take the change
@@ -908,8 +1078,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
     cacheSession(next);
     await persistOrdered(next);
+    await ensureRuntime(next);
     await steerPrompt(next, message.display_content ?? message.content, message.attachments ?? [], message.content);
-  }, [cacheSession, daemon.activeProfile?.id, persistOrdered, queryClient, steerPrompt]);
+  }, [cacheSession, daemon.activeProfile?.id, ensureRuntime, persistOrdered, queryClient, steerPrompt]);
 
   /** Rewinds a task to the end of `turnCount` turns.
    *
@@ -1094,6 +1265,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       persistTails.current.clear();
       pendingSteers.current.clear();
       drainingQueues.current.clear();
+      runtimeAttachMisses.current.clear();
       for (const timer of persistTimers.current.values()) clearTimeout(timer);
       persistTimers.current.clear();
     };
@@ -1118,6 +1290,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       archiveSession,
       removeQueuedMessage,
       steerQueuedMessage,
+      reloadSession,
       rewindSession,
       forkSession,
       resumeProviderSession,

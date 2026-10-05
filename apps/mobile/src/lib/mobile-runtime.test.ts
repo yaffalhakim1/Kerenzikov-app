@@ -2,11 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import type { AgentSession, MessageAttachment, Project, SequencedEvent } from '@waku/client';
 
 import {
+  advanceRuntimeEventCursor,
   applySessionOptions,
   beginTurn,
   createSession,
   queueSubmission,
   runtimeEventAlreadyApplied,
+  foldRuntimeEvents,
+  runtimeEventCarriesTranscript,
+  runtimeEventIsDeferrable,
+  runtimeEventTouchesSession,
+  runtimeSnapshotIsAtLeastAsNew,
   sessionBusy,
   sessionCwd,
   sessionHasActiveProviderTurn,
@@ -307,3 +313,166 @@ const attachment: MessageAttachment = {
   is_image: true,
   blob_reference: 'waku-attachment:file',
 };
+
+describe('runtime event pump classification', () => {
+  test('conversation meta the reducer does not project never touches the session', () => {
+    // These kinds reach the reducer's `default: break`. Mobile has no
+    // background-work, todo or plan-usage surface, so re-cloning the whole
+    // session (and rewriting the task-state cache) for them is pure waste —
+    // measured at 4ms per clone on a 1.3MB transcript.
+    for (const kind of ['todoUpdated', 'planUsageUpdated', 'backgroundWork']) {
+      expect(runtimeEventTouchesSession(event(kind))).toBe(false);
+    }
+  });
+
+  test('every kind the reducer projects still reaches the session', () => {
+    for (const kind of [
+      'connected', 'agentPresetSelected', 'autoTitleUpdated', 'availableCommands',
+      'promptSubmitted', 'turnStarted', 'turnParked', 'textDelta', 'reasoningDelta',
+      'activity', 'richActivity', 'permission', 'userInputRequested', 'usageUpdated',
+      'goalUpdated', 'turnFinished', 'error', 'processExited',
+    ]) {
+      expect(runtimeEventTouchesSession(event(kind))).toBe(true);
+    }
+  });
+
+  test('the high-frequency stream defers, interactive events flush now', () => {
+    for (const kind of ['textDelta', 'reasoningDelta', 'usageUpdated', 'backgroundWork']) {
+      expect(runtimeEventIsDeferrable(event(kind))).toBe(true);
+    }
+    for (const kind of ['turnStarted', 'turnFinished', 'permission', 'userInputRequested']) {
+      expect(runtimeEventIsDeferrable(event(kind))).toBe(false);
+    }
+  });
+
+  test('advancing the cursor over an ignored event keeps the transcript identity', () => {
+    const current = session({
+      status: 'working',
+      messages: [{ id: 'm', turn_id: null, role: 'user', content: 'hi', created_at: 1, streaming: false }],
+      transcript_blocks: [{ after_message: 1, turn_id: null, content: { kind: 'activities', data: [] } }],
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 4 },
+    });
+    const next = advanceRuntimeEventCursor(current, event('backgroundWork', 5));
+    expect(next.runtime_event_cursor).toEqual({
+      runtime_id: 'runtime', epoch: 'epoch', sequence: 5,
+    });
+    // Same arrays: nothing deep-cloned, so no row is invalidated.
+    expect(next.messages).toBe(current.messages);
+    expect(next.transcript_blocks).toBe(current.transcript_blocks);
+  });
+
+  test('advancing an already-applied cursor returns the same object', () => {
+    const current = session({
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 9 },
+    });
+    expect(advanceRuntimeEventCursor(current, event('textDelta', 9))).toBe(current);
+    expect(advanceRuntimeEventCursor(current, event('textDelta', 4))).toBe(current);
+  });
+});
+
+function event(
+  kind: string,
+  sequence = 1,
+  payload: SequencedEvent['event']['payload'] = null,
+): SequencedEvent {
+  return {
+    sessionId: 'session',
+    runtimeId: 'runtime',
+    epoch: 'epoch',
+    sequence,
+    event: { kind, payload },
+  };
+}
+
+describe('reload reconstruction', () => {
+  test('a stored snapshot behind the live cursor is caught up by replaying events', () => {
+    // The daemon persists on a debounce, so a mid-stream reload would otherwise
+    // move the transcript backwards. Replaying the events it missed is what
+    // makes reload safe while the agent is still working.
+    const stored = session({
+      status: 'working',
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 10 },
+      messages: [
+        { id: 'u1', turn_id: 't1', role: 'user', content: 'hi', created_at: 1, streaming: false },
+        { id: 'a1', turn_id: 't1', role: 'assistant', content: 'Hel', created_at: 2, streaming: true },
+      ],
+      turns: [{
+        id: 't1', turn_count: 1, status: 'running', provider_turn_started: true,
+        provider_resume_at: null, started_at: 1, completed_at: null, checkpoint: null,
+      }],
+    });
+    const events = [
+      event('textDelta', 11, 'lo '),
+      event('textDelta', 12, 'there'),
+    ];
+    const replayed = foldRuntimeEvents(stored, events);
+    expect(replayed.messages.at(-1)?.content).toBe('Hello there');
+    expect(replayed.runtime_event_cursor?.sequence).toBe(12);
+  });
+
+  test('events the snapshot already folded in are not applied twice', () => {
+    const stored = session({
+      status: 'working',
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 12 },
+      messages: [
+        { id: 'u1', turn_id: 't1', role: 'user', content: 'hi', created_at: 1, streaming: false },
+        { id: 'a1', turn_id: 't1', role: 'assistant', content: 'Hello there', created_at: 2, streaming: true },
+      ],
+      turns: [{
+        id: 't1', turn_count: 1, status: 'running', provider_turn_started: true,
+        provider_resume_at: null, started_at: 1, completed_at: null, checkpoint: null,
+      }],
+    });
+    const replayed = foldRuntimeEvents(stored, [
+      event('textDelta', 11, 'lo '),
+      event('textDelta', 12, 'there'),
+    ]);
+    expect(replayed.messages.at(-1)?.content).toBe('Hello there');
+  });
+
+  test('a transcript event outside the stream cadence is never skipped', () => {
+    // `backgroundWork` is conversation meta this app does not project; a
+    // transcript event is anything else. Misclassifying one would drop it.
+    for (const kind of ['textDelta', 'reasoningDelta', 'turnFinished', 'error', 'permission']) {
+      expect(runtimeEventCarriesTranscript(event(kind))).toBe(true);
+    }
+    for (const kind of ['backgroundWork', 'todoUpdated', 'planUsageUpdated']) {
+      expect(runtimeEventCarriesTranscript(event(kind))).toBe(false);
+    }
+  });
+
+  test('folding nothing leaves the stored snapshot untouched', () => {
+    const stored = session({ status: 'idle' });
+    expect(foldRuntimeEvents(stored, [])).toBe(stored);
+  });
+});
+describe('reload snapshot choice', () => {
+  const cursor = (sequence: number, epoch = 'epoch') => ({
+    runtime_id: 'runtime', epoch, sequence,
+  });
+
+  test('a snapshot behind the cached transcript never wins', () => {
+    const cached = session({ runtime_event_cursor: cursor(100) });
+    const stored = session({ runtime_event_cursor: cursor(40) });
+    expect(runtimeSnapshotIsAtLeastAsNew(cached, stored)).toBe(true);
+    expect(runtimeSnapshotIsAtLeastAsNew(stored, cached)).toBe(false);
+  });
+
+  test('a snapshot ahead of the cache wins', () => {
+    const cached = session({ runtime_event_cursor: cursor(40) });
+    const stored = session({ runtime_event_cursor: cursor(100) });
+    expect(runtimeSnapshotIsAtLeastAsNew(stored, cached)).toBe(true);
+  });
+
+  test('a new daemon epoch is authoritative', () => {
+    const cached = session({ runtime_event_cursor: cursor(999, 'old-epoch') });
+    const stored = session({ runtime_event_cursor: cursor(1, 'new-epoch') });
+    expect(runtimeSnapshotIsAtLeastAsNew(stored, cached)).toBe(true);
+  });
+
+  test('an unknown cursor is never treated as newer than a known one', () => {
+    const cached = session({ runtime_event_cursor: cursor(5) });
+    expect(runtimeSnapshotIsAtLeastAsNew(session({}), cached)).toBe(false);
+    expect(runtimeSnapshotIsAtLeastAsNew(cached, session({}))).toBe(true);
+  });
+});
