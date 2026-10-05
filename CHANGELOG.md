@@ -12,6 +12,17 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.48]
+
+### Desktop
+
+- Settings → Daemon now shows **Connected clients** while the daemon is
+  exposed: every phone or browser sharing this machine's tasks, by name and
+  how long it has been connected. You finally know who is on your daemon.
+- Clients introduce themselves when they connect (the desktop as its machine
+  name, the phone as its device name), so the list is readable instead of a
+  row of opaque ids.
+
 ## [0.1.47]
 
 ### Mobile
