@@ -8,6 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppPressable } from "./app-pressable";
 import { AppSymbol } from "./app-symbol";
@@ -43,8 +44,13 @@ export function useScreenHeaderInset() {
 export function ScreenHeaderBackdrop({ visible }: { visible: boolean }) {
   const theme = useTheme();
   const colorScheme = useColorScheme();
-  const height = useScreenHeaderInset();
-  if (!visible) return null;
+  // useHeaderHeight reports the bar PLUS the status-bar inset. The backdrop
+  // is the scroll-edge treatment for the bar itself, so it must stop at the
+  // bar's bottom edge — including the status area made it a wash that
+  // reached halfway into the content.
+  const statusInset = useSafeAreaInsets().top;
+  const height = Math.max(0, useScreenHeaderInset() - statusInset);
+  if (!visible || height === 0) return null;
   return (
     <View
       pointerEvents="none"
