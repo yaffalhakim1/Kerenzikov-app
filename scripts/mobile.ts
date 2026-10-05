@@ -258,7 +258,25 @@ function assertHostGpu(serial: string): void {
   console.log(`gpu: ${renderer}`);
 }
 
+function assertDebuggableApp(serial: string): void {
+  // A release APK carries its JS bundle inside and never reads Metro, so the
+  // JS-only loop silently does nothing on it: the app relaunches and shows
+  // exactly the code it shipped with. That was indistinguishable from
+  // "the fix didn't work". Fail here, naming the actual problem.
+  const { out } = run([ADB, "-s", serial, "shell", "dumpsys", "package", APP_ID]);
+  const flags = out.match(/pkgFlags=\[([^\]]*)\]/)?.[1] ?? "";
+  if (!/\bDEBUGGABLE\b/.test(flags)) {
+    throw new Error(
+      `the installed ${APP_ID} on ${serial} is a release build (pkgFlags=[${flags.trim()}]); ` +
+      "it has the JS bundle embedded and will never read Metro. Install the debug " +
+      'build first: cd apps/mobile/android && cmd /c "gradlew.bat assembleDebug" && ' +
+      `${ADB} -s ${serial} install -r app/build/outputs/apk/debug/app-debug.apk`,
+    );
+  }
+}
+
 function relaunchApp(serial: string): void {
+  assertDebuggableApp(serial);
   run([ADB, "-s", serial, "shell", "am", "force-stop", APP_ID]);
   run([
     ADB, "-s", serial, "shell", "monkey",
