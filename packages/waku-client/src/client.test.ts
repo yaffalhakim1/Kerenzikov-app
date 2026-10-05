@@ -8,6 +8,7 @@ import {
   daemonUrl,
   type WebSocketLike,
 } from "./client";
+import type { WakuClientOptions } from "./client";
 import { PROTOCOL_VERSION } from "./generated";
 
 class FakeSocket implements WebSocketLike {
@@ -58,13 +59,14 @@ class FakeSocket implements WebSocketLike {
   }
 }
 
-function fixture() {
+function fixture(options: Partial<WakuClientOptions> = {}) {
   const sockets: FakeSocket[] = [];
   let nextId = 0;
   const client = new WakuClient({
     address: "127.0.0.1:4312",
     token: "secret",
     randomUUID: () => `00000000-0000-4000-8000-${String(++nextId).padStart(12, "0")}`,
+    ...options,
     webSocketFactory: () => {
       const socket = new FakeSocket();
       sockets.push(socket);
@@ -102,7 +104,9 @@ describe("WakuClient", () => {
   });
 
   test("authenticates and correlates typed responses", async () => {
-    const { client, sockets } = fixture();
+    const { client, sockets } = fixture({
+      clientName: "Yafa's phone",
+    });
     const connected = client.connect();
     const socket = sockets[0]!;
     socket.open();
@@ -111,6 +115,7 @@ describe("WakuClient", () => {
       protocolVersion: PROTOCOL_VERSION,
       token: "secret",
       clientId: "00000000-0000-4000-8000-000000000001",
+      clientName: "Yafa's phone",
       resumeFrom: [],
     });
     socket.receive({ type: "hello", protocolVersion: PROTOCOL_VERSION, daemonVersion: "test" });
