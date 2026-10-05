@@ -249,7 +249,6 @@ struct RequestDispatcher {
 }
 
 impl Hub {
-    #[cfg(test)]
     pub(crate) fn event_sink(self: &Arc<Self>, session_id: Uuid, runtime_id: Uuid) -> EventSink {
         EventSink {
             session_id,
