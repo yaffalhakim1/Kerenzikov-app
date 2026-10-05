@@ -19,9 +19,13 @@
 # react-native-worklets
 -keep class com.swmansion.worklets.** { *; }
 
-# expo-device: its ModuleDefinitionData references expo.modules.kotlin.types.AnyTypeProvider,
-# which ships in expo-modules-core's Kotlin but is stripped by R8 before DeviceModule's
-# reflective reference resolves — the release build fails with a missing-class error.
--keep class expo.modules.kotlin.types.** { *; }
+# expo-device's prebuilt AAR references expo.modules.kotlin.types.AnyTypeProvider /
+# LazyKType from expo-modules-kotlin in its Kotlin @Metadata. R8 cannot resolve
+# them from the AAR classpath and fails the release build. The references are
+# Kotlin-metadata-only (never invoked at runtime from this app), so the right
+# tool is -dontwarn, not -keep: keep rules cannot force-retain classes that no
+# reachable code path names.
+-dontwarn expo.modules.kotlin.types.AnyTypeProvider
+-dontwarn expo.modules.kotlin.types.LazyKType
 
 # Add any project specific keep options here:
