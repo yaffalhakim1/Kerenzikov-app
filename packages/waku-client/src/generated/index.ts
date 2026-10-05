@@ -25,6 +25,7 @@ export type { ComposerDraftTarget } from "./ComposerDraftTarget";
 export type { ComposerDrafts } from "./ComposerDrafts";
 export type { ComputerAppGrant } from "./ComputerAppGrant";
 export type { ComputerPermissions } from "./ComputerPermissions";
+export type { ConnectedClient } from "./ConnectedClient";
 export type { ContextUsage } from "./ContextUsage";
 export type { CostQuality } from "./CostQuality";
 export type { CreatedWorktree } from "./CreatedWorktree";

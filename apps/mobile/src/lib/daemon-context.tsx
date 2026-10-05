@@ -1,4 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
 import { WakuClient, type WebSocketLike } from "@waku/client";
 import * as Crypto from "expo-crypto";
 import {
@@ -221,6 +223,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       const next = new WakuClient({
         address: profile.address,
         token,
+        clientName: Device.deviceName ?? Device.modelName ?? undefined,
         randomUUID: Crypto.randomUUID,
         webSocketFactory:
           Platform.OS === "web" ? undefined : createNativeDaemonSocket,

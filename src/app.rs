@@ -1121,6 +1121,10 @@ pub struct Waku {
     daemon_port_input: Entity<TextInput>,
     daemon_origins_input: Entity<TextInput>,
     daemon_reconfigure_pending: bool,
+    /// Connected clients as of the last refresh of the settings page, and
+    /// when that snapshot was taken. `None` means never fetched.
+    daemon_connections: Option<(Vec<waku_client::ConnectedClient>, std::time::Instant)>,
+    daemon_connections_loading: bool,
     daemon_token_revealed: bool,
     settings_focus: FocusHandle,
     onboarding_add_project_focus: FocusHandle,
@@ -1712,6 +1716,8 @@ mod transcript_view;
 mod usage_meter;
 mod usage_page;
 mod window_chrome;
+
+
 
 pub use autocomplete::init as init_composer_autocomplete;
 use background_work::{
@@ -2884,6 +2890,8 @@ impl Waku {
                 daemon_port_input,
                 daemon_origins_input,
                 daemon_reconfigure_pending: false,
+                daemon_connections: None,
+                daemon_connections_loading: false,
                 daemon_token_revealed: false,
                 settings_focus,
                 onboarding_add_project_focus,

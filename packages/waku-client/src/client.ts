@@ -31,6 +31,9 @@ export interface WakuClientOptions {
   address: string;
   token: string;
   clientId?: string;
+  /** A display name shown to the daemon owner in the connected-clients view
+   *  (for example "Yafa's phone"). Optional; defaults to a generic label. */
+  clientName?: string;
   requestTimeoutMs?: number;
   /** How long a handshake may take before the attempt fails as `timeout`. */
   connectTimeoutMs?: number;
@@ -102,6 +105,7 @@ interface LastSequence {
 /** Browser-safe client for Waku's versioned JSON-over-WebSocket protocol. */
 export class WakuClient {
   readonly clientId: string;
+  private readonly clientName: string | undefined;
 
   private readonly address: string;
   private readonly token: string;
@@ -147,6 +151,7 @@ export class WakuClient {
       });
     this.now = options.now ?? Date.now;
     this.clientId = options.clientId ?? this.randomUUID();
+    this.clientName = options.clientName;
   }
 
   get connected(): boolean {
@@ -234,6 +239,7 @@ export class WakuClient {
           protocolVersion: PROTOCOL_VERSION,
           token: this.token,
           clientId: this.clientId,
+          clientName: this.clientName ?? null,
           resumeFrom: this.replayCursors(),
         };
         socket.send(JSON.stringify(hello));

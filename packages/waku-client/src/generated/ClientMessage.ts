@@ -2,4 +2,10 @@
 import type { ReplayCursor } from "./ReplayCursor";
 import type { Request } from "./Request";
 
-export type ClientMessage = { "type": "hello", protocolVersion: number, token: string, clientId: string, resumeFrom: Array<ReplayCursor>, } | { "type": "request" } & Request | { "type": "shutdown" };
+export type ClientMessage = { "type": "hello", protocolVersion: number, token: string, clientId: string,
+/**
+ * A display name the client chose for itself, surfaced to the daemon
+ * owner in the connected-clients view. Optional so older clients
+ * stay valid; the daemon falls back to a generic label.
+ */
+clientName: string | null, resumeFrom: Array<ReplayCursor>, } | { "type": "request" } & Request | { "type": "shutdown" };

@@ -306,6 +306,26 @@ daemon.settings_applied:
   en: Daemon access updated
 daemon.restart_failed:
   en: "Could not restart daemon: %{error}"
+daemon.connections_title:
+  en: Connected clients
+daemon.connections_description:
+  en: "%{count} sharing this daemon right now."
+daemon.connections_one:
+  en: "1 sharing this daemon right now."
+daemon.connections_loading:
+  en: Loading…
+daemon.connections_unavailable:
+  en: Could not load the client list.
+daemon.connections_refresh:
+  en: Refresh
+daemon.connected_just_now:
+  en: just now
+daemon.connected_minutes:
+  en: "%{count} min"
+daemon.connected_hours:
+  en: "%{count} h"
+daemon.connected_days:
+  en: "%{count} d"
 daemon.url_copied:
   en: WebSocket URL copied
 daemon.token_copied:

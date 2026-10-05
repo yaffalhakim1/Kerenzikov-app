@@ -95,7 +95,7 @@ pub(super) fn visible_settings_pages(
 }
 
 impl Waku {
-    pub(super) fn render_settings(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_settings(&mut self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
 
         div()
@@ -295,7 +295,7 @@ impl Waku {
             )
     }
 
-    fn render_settings_content(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn render_settings_content(&mut self, window: &Window, cx: &mut Context<Self>) -> Div {
         let theme = Theme::current(cx);
         let page = self.settings_page.unwrap_or(SettingsPage::General);
         let right_window_controls = self.render_client_window_controls(
@@ -520,7 +520,7 @@ impl Waku {
         cx.notify();
     }
 
-    fn render_daemon_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_daemon_settings(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
         if self.daemon.is_remote() {
             return div()
@@ -1120,7 +1120,176 @@ impl Waku {
             .when(enabled, |column| {
                 column.child(self.render_tailscale_card(tailscale_url.as_deref(), cx))
             })
+            .when(enabled, |column| {
+                column.child(self.render_connected_clients_card(cx))
+            })
             .into_any_element()
+    }
+
+    /// Fetch the daemon's connected clients unless a fresh-enough snapshot
+    /// already exists or a fetch is in flight. Runs on the background
+    /// executor — the render path only ever reads the stored result.
+    pub(super) fn ensure_daemon_connections(&mut self, cx: &mut Context<Self>) {
+        if self.daemon.is_remote() || self.daemon_connections_loading {
+            return;
+        }
+        if let Some((_, fetched_at)) = &self.daemon_connections {
+            if fetched_at.elapsed() < super::usage_page::CONNECTIONS_REFRESH_AFTER {
+                return;
+            }
+        }
+        self.daemon_connections_loading = true;
+        let daemon = self.daemon.clone();
+        let fetch = cx.background_executor().spawn(async move {
+            daemon
+                .client()
+                .request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::ListConnections,
+                )
+        });
+        cx.spawn(async move |this, cx| {
+            let clients = fetch.await;
+            let _ = this.update(cx, |this, cx| {
+                this.daemon_connections_loading = false;
+                this.daemon_connections = match clients {
+                    Ok(waku_client::ResponsePayload::Connections { clients }) => {
+                        Some((clients, std::time::Instant::now()))
+                    }
+                    _ => None,
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The clients sharing this daemon right now: name, how long they have
+    /// been connected, and a refresh affordance. This is the hosted-viewport
+    /// visibility the settings page has been missing — a phone or browser
+    /// attached to the same engine was otherwise undetectable.
+    fn render_connected_clients_card(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = Theme::current(cx);
+        let loading = self.daemon_connections_loading;
+        let refresh_button = div()
+            .id("refresh-daemon-connections")
+            .tab_index(0)
+            .h(px(27.0))
+            .px(px(9.0))
+            .rounded(px(6.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .items_center()
+            .gap(px(5.0))
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .hover(|element| element.bg(theme.overlay))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.daemon_connections = None;
+                this.ensure_daemon_connections(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if !event.keystroke.modifiers.modified()
+                    && matches!(event.keystroke.key.as_str(), "enter" | "space")
+                {
+                    this.daemon_connections = None;
+                    this.ensure_daemon_connections(cx);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(icon(
+                if loading { "icons/loader-circle.svg" } else { "icons/rotate-cw.svg" },
+                11.0,
+                theme.text_tertiary,
+            ))
+            .child(tr!("daemon.connections_refresh"));
+
+        let mut card = div()
+            .px(px(20.0))
+            .py(px(15.0))
+            .rounded(px(13.0))
+            .bg(theme.raised)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_size(sp(13.5))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme.text)
+                            .child(tr!("daemon.connections_title")),
+                    )
+                    .child(refresh_button),
+            );
+
+        if let Some((clients, _)) = &self.daemon_connections {
+            let count = clients.len();
+            card = card.child(
+                div()
+                    .mt(px(4.0))
+                    .min_w_0()
+                    .whitespace_normal()
+                    .text_size(sp(12.5))
+                    .line_height(sp(16.0))
+                    .text_color(theme.text_secondary)
+                    .child(if count == 1 {
+                        tr!("daemon.connections_one")
+                    } else {
+                        tr!("daemon.connections_description", count = count)
+                    }),
+            );
+            for client in clients {
+                let connected_for = format_connected_for(client.connected_at);
+                card = card.child(
+                    div()
+                        .mt(px(8.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(icon("icons/laptop.svg", 13.0, theme.text_tertiary))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(
+                                    div()
+                                        .text_size(sp(12.5))
+                                        .text_color(theme.text)
+                                        .child(client.name.clone()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .text_size(sp(12.0))
+                                .text_color(theme.text_tertiary)
+                                .child(connected_for),
+                        ),
+                );
+            }
+        } else if loading {
+            card = card.child(
+                div()
+                    .mt(px(4.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("daemon.connections_loading")),
+            );
+        } else {
+            card = card.child(
+                div()
+                    .mt(px(4.0))
+                    .text_size(sp(12.5))
+                    .text_color(theme.text_secondary)
+                    .child(tr!("daemon.connections_unavailable")),
+            );
+        }
+        card.into_any_element()
     }
 
     /// Re-probe for the tailnet address. The probe is a UDP `connect` to a
@@ -2620,6 +2789,25 @@ fn font_size_label(size: f32) -> String {
         format!("{size:.0} px")
     } else {
         format!("{size} px")
+    }
+}
+
+/// How long a client has been connected, in the coarsest unit that still
+/// changes: minutes under an hour, hours under a day, days beyond that.
+fn format_connected_for(connected_at: u64) -> String {
+    let seconds = crate::model::unix_time().saturating_sub(connected_at);
+    let minutes = seconds / 60;
+    match minutes {
+        0..=1 => tr!("daemon.connected_just_now").to_string(),
+        2..=59 => tr!("daemon.connected_minutes", count = minutes).to_string(),
+        60..=1439 => {
+            let hours = minutes / 60;
+            tr!("daemon.connected_hours", count = hours).to_string()
+        }
+        _ => {
+            let days = minutes / 1440;
+            tr!("daemon.connected_days", count = days).to_string()
+        }
     }
 }
 

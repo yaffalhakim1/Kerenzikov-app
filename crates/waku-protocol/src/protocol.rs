@@ -44,6 +44,11 @@ pub enum ClientMessage {
         protocol_version: u32,
         token: String,
         client_id: Uuid,
+        /// A display name the client chose for itself, surfaced to the daemon
+        /// owner in the connected-clients view. Optional so older clients
+        /// stay valid; the daemon falls back to a generic label.
+        #[serde(default)]
+        client_name: Option<String>,
         #[serde(default)]
         resume_from: Vec<ReplayCursor>,
     },
@@ -270,6 +275,10 @@ pub enum Command {
     },
     CloseTerminal,
     CloseSession,
+    /// List the clients currently connected to this daemon. The daemon owner
+    /// surfaces this so a hosted session's peers are visible, mirroring the
+    /// multi-viewport model where several apps share one engine.
+    ListConnections,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -464,6 +473,22 @@ pub enum ResponsePayload {
     Workspace {
         result: WorkspaceResult,
     },
+    /// The clients currently connected to this daemon, oldest connection
+    /// first. This client is included; the owner reads the list to see which
+    /// apps are sharing the engine.
+    Connections {
+        clients: Vec<ConnectedClient>,
+    },
+}
+
+/// One connected client, as the connected-clients view presents it.
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedClient {
+    pub client_id: Uuid,
+    pub name: String,
+    /// When the connection was accepted, in Unix seconds.
+    pub connected_at: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
@@ -607,6 +632,7 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             token: "secret".into(),
             client_id: Uuid::from_u128(2),
+            client_name: Some("Yafa's phone".into()),
             resume_from: vec![ReplayCursor {
                 session_id,
                 runtime_id,
@@ -618,6 +644,7 @@ mod tests {
 
         assert_eq!(json["type"], "hello");
         assert_eq!(json["protocolVersion"], PROTOCOL_VERSION);
+        assert_eq!(json["clientName"], "Yafa's phone");
         assert_eq!(json["resumeFrom"][0]["sessionId"], session_id.to_string());
         assert_eq!(json["resumeFrom"][0]["runtimeId"], runtime_id.to_string());
         assert_eq!(

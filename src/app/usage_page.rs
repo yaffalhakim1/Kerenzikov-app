@@ -28,6 +28,11 @@ const CHART_GUTTER: f32 = 56.0;
 const USAGE_PROJECT_ROW_HEIGHT: f32 = 96.0;
 /// A snapshot older than this rescans when the page is next opened.
 const USAGE_RESCAN_AFTER: Duration = Duration::from_secs(120);
+/// How long a connected-clients snapshot answers the settings page before a
+/// re-open refetches. Short: the interesting change is exactly "a phone just
+/// connected", which a stale list would hide.
+pub(super) const CONNECTIONS_REFRESH_AFTER: Duration = Duration::from_secs(15);
+
 fn provider_kind(provider: UsageProvider) -> ProviderKind {
     match provider {
         UsageProvider::Claude => ProviderKind::Claude,
@@ -55,6 +60,9 @@ impl Waku {
         }
         if page == SettingsPage::Memory {
             self.ensure_memory(false, cx);
+        }
+        if page == SettingsPage::General {
+            self.ensure_daemon_connections(cx);
         }
         cx.notify();
     }
