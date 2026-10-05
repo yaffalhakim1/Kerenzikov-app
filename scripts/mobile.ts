@@ -101,14 +101,23 @@ function run(cmd: string[], log?: string): { code: number; out: string } {
 }
 
 function spawnDetached(cmd: string[], logPath?: string): void {
-  const sink = logPath ? Bun.file(logPath).writer() : undefined;
-  Bun.spawn(cmd, {
+  // Bun.spawn rejects sinks in stdout/stderr: they must be "pipe", "ignore",
+  // or a file descriptor number. When a log is wanted, the pipes are drained
+  // into it asynchronously so the child's output cannot back up.
+  const proc = Bun.spawn(cmd, {
     env: { ...process.env, ...SDK_ENV },
     stdin: "ignore",
-    stdout: sink ?? "ignore",
-    stderr: sink ?? "ignore",
+    stdout: logPath ? "pipe" : "ignore",
+    stderr: logPath ? "pipe" : "ignore",
     detached: true,
-  }).unref();
+  });
+  proc.unref();
+  if (logPath) {
+    void Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+    ]).then(([out, err]) => Bun.write(logPath, `${out}${err}`).catch(() => {}));
+  }
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
