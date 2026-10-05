@@ -54,7 +54,6 @@ import {
   offTail,
   shouldExtendTail,
   peekedWithinBand,
-  underHeader as underHeaderAt,
   type ScrollMetrics,
 } from '@/lib/transcript-scroll';
 import type { MarkdownStyles } from '@/md/render';
@@ -113,7 +112,6 @@ export function TranscriptList({
   hydrated,
   running,
   headerInset,
-  onUnderHeaderChange,
   onDevSample,
 }: {
   ref?: Ref<TranscriptListHandle>;
@@ -122,9 +120,6 @@ export function TranscriptList({
   hydrated: boolean;
   running: boolean;
   headerInset: number;
-  /** Fires when content starts or stops sitting under the floating header:
-   *  the screen's cue to show its backdrop. Transition-only, never per frame. */
-  onUnderHeaderChange?: (under: boolean) => void;
   onDevSample?: (sample: TranscriptDevSample) => void;
 }) {
   const theme = useTheme();
@@ -267,14 +262,9 @@ export function TranscriptList({
   const followRequest = useRef<ReturnType<typeof setTimeout> | null>(null);
   const jumpRef = useRef(false);
   const unseenRef = useRef(false);
-  const underHeaderRef = useRef(false);
   const offTailRef = useRef(false);
   const [touching, setTouching] = useState(false);
   const [readerOffTail, setReaderOffTail] = useState(false);
-  // Whether transcript content sits under the floating header right now: the
-  // backdrop's trigger. Like the other scroll-driven flags it flips React
-  // state only on transitions, never per scroll event.
-  const [underHeader, setUnderHeader] = useState(false);
   const [jump, setJump] = useState(false);
   const [unseen, setUnseen] = useState(false);
 
@@ -316,17 +306,11 @@ export function TranscriptList({
       unseenRef.current = false;
       setUnseen(false);
     }
-    const nextUnder = underHeaderAt(current);
-    if (nextUnder !== underHeaderRef.current) {
-      underHeaderRef.current = nextUnder;
-      setUnderHeader(nextUnder);
-      onUnderHeaderChange?.(nextUnder);
-    }
     if (!extending.current && shouldExtendTail(current, hasEarlier)) {
       extending.current = true;
       setWindowStart((value) => extendedWindowStart(value ?? start));
     }
-  }, [hasEarlier, onUnderHeaderChange, start]);
+  }, [hasEarlier, start]);
 
   // A window extension that changes nothing on screen (all-hidden rows) must
   // not wedge the extender.
