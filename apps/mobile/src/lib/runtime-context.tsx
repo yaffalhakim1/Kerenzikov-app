@@ -193,7 +193,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
    * snapshot it saved. */
   const cacheGenerations = useRef(new Map<string, number>());
   const pendingSteers = useRef(new Map<string, PendingSubmission[]>());
-  const drainingQueues = useRef(new Set<string>());
   const sendPromptRef = useRef<
     ((
       session: AgentSession,
@@ -306,37 +305,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     setRuntimes((current) => removeKey(current, sessionId));
   }, []);
 
-  /** After a settled turn is persisted, submit the oldest queued message as
-   * the next turn. Guarded per session so one settle drains one message. */
-  const drainQueue = useCallback(async (sessionId: string) => {
-    const profileId = daemon.activeProfile?.id;
-    if (!profileId || drainingQueues.current.has(sessionId)) return;
-    const latest = queryClient.getQueryData<AgentSession>(
-      daemonKeys.session(profileId, sessionId),
-    );
-    if (!latest || latest.status !== 'idle') return;
-    const next = latest.queued_messages?.[0];
-    if (!next) return;
-    drainingQueues.current.add(sessionId);
-    try {
-      const dequeued = {
-        ...latest,
-        queued_messages: latest.queued_messages?.slice(1),
-      };
-      cacheSession(dequeued);
-      const persisted = await persistOrdered(dequeued);
-      await sendPromptRef.current?.(
-        persisted,
-        next.display_content ?? next.content,
-        next.attachments ?? [],
-        next.content,
-      );
-    } catch (cause) {
-      setErrors((values) => ({ ...values, [sessionId]: errorMessage(cause) }));
-    } finally {
-      drainingQueues.current.delete(sessionId);
-    }
-  }, [cacheSession, daemon.activeProfile?.id, persistOrdered, queryClient]);
+  /** Settled turns no longer drain queued prompts here: the daemon does it
+   * (ADR 0003). The phone observes the drained prompt as an ordinary
+   * `promptSubmitted` event on the session's event stream. */
 
   const subscribe = useCallback((
     session: AgentSession,
@@ -498,12 +469,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         if (timer) clearTimeout(timer);
         persistTimers.current.delete(session.id);
         // No task-state refetch: the list reads a projection of the session the
-        // stream already updates locally, so a settle only has to persist.
-        void persistOrdered(state.current)
-          .then(() => drainQueue(session.id))
-          .catch((cause) => {
-            setErrors((values) => ({ ...values, [session.id]: errorMessage(cause) }));
-          });
+        // stream already updates locally, so a settle only has to persist. The
+        // daemon drains any queued follow-up itself (ADR 0003).
+        void persistOrdered(state.current).catch((cause) => {
+          setErrors((values) => ({ ...values, [session.id]: errorMessage(cause) }));
+        });
       } else {
         schedulePersist(session.id);
       }
@@ -536,7 +506,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (entries.current.get(session.id) === entry) entry.unsubscribe = teardown;
     else teardown();
     return entry;
-  }, [cacheSession, daemon.activeProfile?.id, daemon.client, drainQueue, persistOrdered, queryClient, removeRuntime, schedulePersist]);
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, queryClient, removeRuntime, schedulePersist]);
 
 
   /**
@@ -1264,7 +1234,6 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       attachRequests.current.clear();
       persistTails.current.clear();
       pendingSteers.current.clear();
-      drainingQueues.current.clear();
       runtimeAttachMisses.current.clear();
       for (const timer of persistTimers.current.values()) clearTimeout(timer);
       persistTimers.current.clear();
