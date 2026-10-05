@@ -19,4 +19,9 @@
 # react-native-worklets
 -keep class com.swmansion.worklets.** { *; }
 
+# expo-device: its ModuleDefinitionData references expo.modules.kotlin.types.AnyTypeProvider,
+# which ships in expo-modules-core's Kotlin but is stripped by R8 before DeviceModule's
+# reflective reference resolves — the release build fails with a missing-class error.
+-keep class expo.modules.kotlin.types.** { *; }
+
 # Add any project specific keep options here:
