@@ -129,6 +129,15 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
   // column with a permanently visible sliver behind it.
   const drawerWidth = width;
   const drawerEnabled = daemon.phase === 'booting' || daemon.profiles.length > 0;
+  // The first open lands right after connect, when the JS thread is still
+  // busy with the connect-time queries; measured on a physical device as a
+  // 30s+ unresponsive drawer (83% janky frames). Rows need task state to
+  // exist, so wait for the cached list rather than building the whole tree
+  // against a query that is still in flight — the shell (pill, search,
+  // footer) renders immediately and the list fills in the frame the cache
+  // lands.
+  const taskState = useTaskState();
+  const taskStateReady = taskState.isSuccess && taskState.data !== undefined;
   const openTaskDrawer = useCallback(() => {
     if (drawerEnabled) {
       setContentMounted(true);
@@ -164,7 +173,7 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
             overlayAccessibilityLabel="Close task history"
             overlayStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.18)' }}
             renderDrawerContent={() => (
-              contentMounted ? (
+              contentMounted && (taskStateReady || daemon.phase !== 'connected') ? (
                 <TaskDrawerContent
                   drawerRowWidth={drawerWidth - 24}
                   selectedSessionId={selectedSessionId}
