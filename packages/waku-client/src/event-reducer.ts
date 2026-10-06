@@ -2,10 +2,15 @@ import type {
   ActivityItem,
   ActivityKind,
   AgentSession,
+  BackgroundWorkItem,
+  BackgroundWorkKey,
+  ComputerUseState,
+  PlanUsage,
   ProviderResumeCursor,
   ReportedCommand,
   SequencedEvent,
   ThreadGoal,
+  TodoItem,
   TranscriptBlock,
   TurnStatus,
 } from './generated'
@@ -35,6 +40,21 @@ export interface RuntimeEventResult {
   settled: boolean
   removeRuntime: boolean
   error?: string
+  /** Harness background work (subagents, processes, monitors) announced by
+   *  this event. Clients keep their own registry keyed by work id. */
+  backgroundWorkUpsert?: BackgroundWorkItem | null
+  /** A work item to remove (stop outcome), or a reconcile marker whose
+   *  `backgroundWorkReconcile` replaces the client's whole registry. */
+  backgroundWorkRemove?: BackgroundWorkKey | null
+  backgroundWorkReconcile?: BackgroundWorkItem[] | null
+  backgroundWorkStopFailed?: { key: BackgroundWorkKey; message: string } | null
+  /** Computer-use session state (target, phase, latest frame). */
+  computerUseState?: ComputerUseState
+  /** Provider plan limits/rate state. */
+  planUsage?: PlanUsage
+  /** The agent rewrote its own task list. Already mirrored onto
+   *  `session.todos` — this flag tells clients a list they render changed. */
+  todosChanged?: boolean
 }
 
 export interface ReducerClock {
@@ -294,6 +314,66 @@ export function reduceRuntimeEvent(
       result.userInput = null
       result.removeRuntime = true
       break
+    case 'todoUpdated': {
+      // The agent owns this list and republishes all of it, so a change
+      // replaces rather than merges. An empty payload clears the panel.
+      const todos = Array.isArray(payload)
+        ? (payload as TodoItem[])
+        : null
+      if (todos) {
+        session.todos = todos
+        result.todosChanged = true
+      }
+      break
+    }
+    case 'backgroundWork': {
+      // Harness background work (subagents, processes, monitors). The event
+      // is a level-plus-edge stream: upserts announce, reconciles are
+      // authoritative snapshots, stop outcomes confirm. Clients mirror the
+      // desktop's registry semantics; remove signals deletion by key. The
+      // serde `type` tag is stripped so clients see clean shapes.
+      const value = asRecord(payload)
+      if (!value) break
+      const { type, ...rest } = value
+      if (type === 'upsert') {
+        result.backgroundWorkUpsert = rest as unknown as BackgroundWorkItem
+      } else if (type === 'reconcileLive' || type === 'reconcileProcesses') {
+        result.backgroundWorkRemove = { reconcile: true } as unknown as BackgroundWorkKey
+        result.backgroundWorkUpsert = null
+        // Reconcile items ride on the result for the client to replace with.
+        result.backgroundWorkReconcile = Array.isArray(value.items)
+          ? (value.items as BackgroundWorkItem[])
+          : []
+      } else if (type === 'stopRequested' || type === 'stopFailed') {
+        // The key fields sit inline on a tagged envelope; drop the tag.
+        const raw = asRecord(value.key) ?? asRecord(value)
+        const key = raw
+          ? { kind: raw.kind, providerId: raw.providerId } as unknown as BackgroundWorkKey
+          : null
+        if (key && typeof key.kind === 'string' && typeof key.providerId === 'string') {
+          result.backgroundWorkStopFailed =
+            type === 'stopFailed'
+              ? { key: key as unknown as BackgroundWorkKey, message: typeof value.message === 'string' ? value.message : '' }
+              : null
+          result.backgroundWorkRemove = key
+        }
+      }
+      break
+    }
+    case 'computerUseUpdated': {
+      const value = asRecord(payload)
+      if (value) {
+        result.computerUseState = value as unknown as ComputerUseState
+      }
+      break
+    }
+    case 'planUsageUpdated': {
+      const value = asRecord(payload)
+      if (value) {
+        result.planUsage = value as unknown as PlanUsage
+      }
+      break
+    }
     default:
       break
   }

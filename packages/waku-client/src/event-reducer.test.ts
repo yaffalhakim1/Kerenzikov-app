@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 
 import { reduceRuntimeEvent } from './event-reducer'
-import type { AgentSession, SequencedEvent } from './generated'
+import type {
+  AgentSession,
+  BackgroundWorkItem,
+  BackgroundWorkKey,
+  ComputerUseState,
+  PlanUsage,
+  SequencedEvent,
+  TodoItem,
+} from './generated'
 
 const clock = {
   nowSeconds: () => 200,
@@ -262,5 +270,84 @@ describe('pending control requests', () => {
       options: [],
     }), clock)
     expect(result.permission).toMatchObject({ requestId: 'perm-2' })
+  })
+})
+
+describe('harness surfaces', () => {
+  const todos: TodoItem[] = [
+    { content: 'Read the driver', status: 'completed', priority: 'high' },
+    { content: 'Add the event', status: 'in_progress', priority: 'high' },
+  ]
+
+  test('todoUpdated replaces the agent task list and flags the change', () => {
+    const result = reduceRuntimeEvent(idleSession(), event('todoUpdated', todos), clock)
+    expect(result.session.todos).toEqual(todos)
+    expect(result.todosChanged).toBe(true)
+  })
+
+  test('an empty todo list clears the panel', () => {
+    const session = idleSession()
+    session.todos = [{ content: 'old', status: 'pending', priority: 'low' }]
+    const result = reduceRuntimeEvent(session, event('todoUpdated', []), clock)
+    expect(result.session.todos).toEqual([])
+    expect(result.todosChanged).toBe(true)
+  })
+
+  test('backgroundWork upsert announces one item through the result', () => {
+    const item: BackgroundWorkItem = {
+      key: { kind: 'subagent', providerId: 'agent-1' },
+      title: 'Research worker',
+      detail: null,
+      command: null,
+      cwd: null,
+      output: null,
+      outputTruncated: false,
+      startedAtMs: 1,
+      updatedAtMs: 2,
+      durationMs: null,
+      exitCode: null,
+      background: true,
+      canStop: true,
+      controlId: null,
+      originActivityId: null,
+      role: null,
+      model: null,
+      parentId: null,
+      status: 'running',
+    }
+    const result = reduceRuntimeEvent(idleSession(), event('backgroundWork', { type: 'upsert', ...item }), clock)
+    expect(result.backgroundWorkUpsert).toEqual(item)
+  })
+
+  test('backgroundWork reconcile replaces and stopRequested removes', () => {
+    const result = reduceRuntimeEvent(
+      idleSession(),
+      event('backgroundWork', { type: 'reconcileLive', items: [] }),
+      clock,
+    )
+    expect(result.backgroundWorkReconcile).toEqual([])
+
+    const key: BackgroundWorkKey = { kind: 'process', providerId: 'bash-7' }
+    const stopped = reduceRuntimeEvent(
+      idleSession(),
+      event('backgroundWork', { type: 'stopRequested', kind: key.kind, providerId: key.providerId }),
+      clock,
+    )
+    expect(stopped.backgroundWorkRemove).toEqual(key)
+  })
+
+  test('computerUseUpdated and planUsageUpdated surface their payloads', () => {
+    const state: ComputerUseState = {
+      phase: 'running',
+      target: null,
+      visible: true,
+      imageUrl: null,
+    }
+    const result = reduceRuntimeEvent(idleSession(), event('computerUseUpdated', state), clock)
+    expect(result.computerUseState).toEqual(state)
+
+    const plan: PlanUsage = { provider: 'claude', limit: 0.4 } as unknown as PlanUsage
+    const usage = reduceRuntimeEvent(idleSession(), event('planUsageUpdated', plan), clock)
+    expect(usage.planUsage).toEqual(plan)
   })
 })
