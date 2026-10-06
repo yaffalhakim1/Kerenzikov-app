@@ -780,11 +780,7 @@ fn desired_access_mode(
             .id
             .clone()
     } else if provider == ProviderKind::Fx {
-        let desired = if mode.is_read_only() {
-            "ask"
-        } else {
-            "code"
-        };
+        let desired = if mode.is_read_only() { "ask" } else { "code" };
         modes
             .available_modes
             .iter()
@@ -1775,6 +1771,13 @@ fn handle_session_update(
         }
         Some("tool_call" | "tool_call_update") => tool_activity(&update, events, state),
         Some("plan") => {
+            // The ACP `plan` update carries the agent's whole task list in
+            // `entries`, which is the same shape every other transport publishes,
+            // so it feeds the task-list panel directly. The activity row is kept
+            // so the transcript still marks the moment the plan changed.
+            let _ = events.send(DriverEvent::TodoUpdated(activity::todo_items(
+                update.get("entries"),
+            )));
             let _ = events.send(DriverEvent::Activity {
                 id: Some("acp-plan".into()),
                 kind: ActivityKind::Plan,
@@ -2487,6 +2490,47 @@ mod tests {
             DriverEvent::UsageUpdated {
                 context_tokens: Some(9677),
                 context_window: Some(500000),
+            }
+        ));
+    }
+
+    /// The ACP `plan` update carries the whole task list in `entries`; it must
+    /// reach the task-list panel as `TodoUpdated` while still marking the
+    /// transcript with a plan activity.
+    #[test]
+    fn plan_updates_feed_the_task_list_and_the_transcript() {
+        let (events, event_rx) = crossbeam_channel::unbounded();
+        let mut state = AcpStreamState::default();
+        let update = serde_json::from_value(json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                {"content": "Read the driver", "priority": "high", "status": "completed"},
+                {"content": "Write the panel", "priority": "medium", "status": "in_progress"},
+            ]
+        }))
+        .unwrap();
+        handle_session_update(
+            ProviderKind::Cursor,
+            SessionNotification::new("s", update),
+            &events,
+            &mut state,
+        )
+        .unwrap();
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let DriverEvent::TodoUpdated(todos) = &seen[0] else {
+            panic!("a plan update must feed the task list, got {:?}", seen[0]);
+        };
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[0].priority, "high");
+        assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
+        assert!(matches!(
+            &seen[1],
+            DriverEvent::Activity {
+                kind: ActivityKind::Plan,
+                ..
             }
         ));
     }

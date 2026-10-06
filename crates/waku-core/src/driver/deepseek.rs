@@ -741,6 +741,10 @@ fn handle_session_event(
         Some("tool/result") => handle_tool_result(data, view, events, state),
         Some("todo/write") => {
             let todos = data.get("todos").cloned().unwrap_or_else(|| json!([]));
+            // The agent's task list is panel state, not transcript output: it
+            // goes to the same `todoUpdated` channel every other provider uses,
+            // so the panel renders it instead of burying it in an activity row.
+            let _ = events.send(DriverEvent::TodoUpdated(activity::todo_items(Some(&todos))));
             let item = activity::tool_activity(
                 Some(format!("deepseek-todo-{seq}")),
                 ActivityKind::Plan,
@@ -1472,6 +1476,40 @@ mod tests {
         assert!(!legacy_read_only_mode_active(Some(&json!({
             "plan": {"active": false, "pending": false}
         }))));
+    }
+
+    /// `todo/write` carries the agent's task list; it belongs on the same
+    /// `todoUpdated` channel every other provider uses rather than buried in an
+    /// activity row's output.
+    #[test]
+    fn todo_write_feeds_the_task_list() {
+        let (events, event_rx, mut state) = harness();
+        handle_session_event(
+            &json!({
+                "seq": 1,
+                "type": "todo/write",
+                "data": {"todos": [
+                    {"content": "Read the driver", "status": "completed"},
+                    {"content": "Write the panel", "status": "in_progress"},
+                ]}
+            }),
+            None,
+            &events,
+            &mut state,
+        );
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let DriverEvent::TodoUpdated(todos) = seen
+            .iter()
+            .find(|event| matches!(event, DriverEvent::TodoUpdated(_)))
+            .expect("todo/write must feed the task list")
+        else {
+            unreachable!()
+        };
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
     }
 
     #[test]

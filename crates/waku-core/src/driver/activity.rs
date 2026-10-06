@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use serde_json::Value;
 
-use crate::model::{ActivityItem, ActivityKind};
+use crate::model::{ActivityItem, ActivityKind, TodoItem, TodoStatus};
 
 const MAX_ACTIVITY_CHARS: usize = 16_000;
 
@@ -51,6 +51,82 @@ pub(super) fn tool_activity(
         .with_failed(failed)
 }
 
+/// One entry of a provider-pushed task list, normalized.
+///
+/// Every transport that publishes a plan spells the status differently - OpenCode
+/// and ACP use `snake_case`, Codex ships its own enum, and Oh My Pi adds
+/// `abandoned` - so the mapping lives here once instead of in each driver. An
+/// unrecognized status degrades to `Pending`: a provider that grows a new state
+/// must show the task as outstanding rather than losing it, and `Cancelled` is
+/// reserved for the one terminal state that means the agent gave up on it.
+///
+/// Blank content is rejected because it would render as an empty row.
+pub(super) fn todo_status(status: &str) -> TodoStatus {
+    match status {
+        "in_progress" | "inProgress" => TodoStatus::InProgress,
+        "completed" => TodoStatus::Completed,
+        "cancelled" | "canceled" | "abandoned" => TodoStatus::Cancelled,
+        _ => TodoStatus::Pending,
+    }
+}
+
+/// Build a task-list entry, or `None` when the provider sent no usable content.
+pub(super) fn todo_item(
+    content: &str,
+    status: Option<&str>,
+    priority: Option<&str>,
+) -> Option<TodoItem> {
+    let content = content.trim();
+    if content.is_empty() {
+        return None;
+    }
+    Some(TodoItem {
+        content: content.to_owned(),
+        status: status.map(todo_status).unwrap_or_default(),
+        priority: priority.unwrap_or_default().to_owned(),
+    })
+}
+
+/// Parse a provider task list from a JSON array of entries.
+///
+/// The `content` and `status` field names are shared by OpenCode, ACP, Codex and
+/// Oh My Pi; `priority` is optional everywhere. `merge` (Oh My Pi) is
+/// deliberately ignored: every provider here republishes the whole list, and the
+/// clients replace rather than merge, so treating a partial list as complete is
+/// the same contract the rest of the pipe already assumes.
+pub(super) fn todo_items(entries: Option<&Value>) -> Vec<TodoItem> {
+    entries
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let content = entry
+                .get("content")
+                .or_else(|| entry.get("step"))
+                .and_then(Value::as_str)?;
+            todo_item(
+                content,
+                entry.get("status").and_then(Value::as_str),
+                entry.get("priority").and_then(Value::as_str),
+            )
+        })
+        .collect()
+}
+
+/// A plan-tool call's task list, if the tool actually carries one.
+///
+/// Some providers expose the task list as a tool call rather than a dedicated
+/// event - Claude Code's and Amp's `TodoWrite`, Pi's and Oh My Pi's `todo` - and
+/// put it under `todos` (Oh My Pi also accepts `plan` on the result). Returns
+/// `None` when neither field is present, so a tool that merely classifies as
+/// `Plan` does not emit a spurious empty list; a present-but-empty list is
+/// `Some(vec![])`, which is how a finished plan is cleared. Codex is not a
+/// caller: it publishes the list on its own `turn/plan/updated` notification.
+pub(super) fn plan_input_todos(input: &Value) -> Option<Vec<TodoItem>> {
+    let entries = input.get("todos").or_else(|| input.get("plan"))?;
+    Some(todo_items(Some(entries)))
+}
+
 pub(super) fn input_title(value: Option<&Value>) -> Option<String> {
     let value = value?;
     value
@@ -89,6 +165,71 @@ mod tests {
             })))
             .as_deref(),
             Some("Verify Grok bridge")
+        );
+    }
+
+    /// Every provider spells the status differently and each spelling must land
+    /// on the same enum. `abandoned` is Oh My Pi's word for a task the agent gave
+    /// up on, so it is cancelled - never left outstanding.
+    #[test]
+    fn statuses_from_every_provider_map_onto_the_shared_enum() {
+        assert_eq!(todo_status("pending"), TodoStatus::Pending);
+        assert_eq!(todo_status("in_progress"), TodoStatus::InProgress);
+        assert_eq!(todo_status("inProgress"), TodoStatus::InProgress);
+        assert_eq!(todo_status("completed"), TodoStatus::Completed);
+        assert_eq!(todo_status("cancelled"), TodoStatus::Cancelled);
+        assert_eq!(todo_status("abandoned"), TodoStatus::Cancelled);
+        // An unknown state keeps the task visible as outstanding rather than
+        // dropping it, which is what a provider growing a new status looks like.
+        assert_eq!(todo_status("blocked"), TodoStatus::Pending);
+    }
+
+    /// OpenCode, ACP and Oh My Pi share `content`; Codex calls it `step`.
+    /// Blank entries are dropped, priority is optional, and an absent status
+    /// defaults to pending.
+    #[test]
+    fn todo_items_read_both_content_spellings_and_skip_blanks() {
+        let todos = todo_items(Some(&serde_json::json!([
+            {"content": "Read the driver", "status": "completed", "priority": "high"},
+            {"step": "Write the panel", "status": "in_progress"},
+            {"content": "   ", "status": "pending"},
+            {"content": "No status"},
+        ])));
+
+        assert_eq!(todos.len(), 3, "a blank entry must not become a row");
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[0].status, TodoStatus::Completed);
+        assert_eq!(todos[0].priority, "high");
+        assert_eq!(todos[1].content, "Write the panel");
+        assert_eq!(todos[1].status, TodoStatus::InProgress);
+        assert_eq!(todos[1].priority, "");
+        assert_eq!(todos[2].status, TodoStatus::Pending);
+    }
+
+    /// A present-but-empty list is how a finished plan is cleared, so it must
+    /// come back as an empty vector rather than `None`.
+    #[test]
+    fn an_empty_list_is_a_clear_not_a_miss() {
+        assert_eq!(todo_items(Some(&serde_json::json!([]))), Vec::new());
+        assert_eq!(todo_items(None), Vec::new());
+    }
+
+    /// A tool that merely classifies as a plan but carries no list must not
+    /// emit a spurious clear; a present empty list must.
+    #[test]
+    fn plan_input_only_reports_a_list_the_tool_actually_carried() {
+        assert!(plan_input_todos(&serde_json::json!({"title": "Plan"})).is_none());
+        assert_eq!(
+            plan_input_todos(&serde_json::json!({"todos": []})),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            plan_input_todos(&serde_json::json!({"plan": [{"step": "a", "status": "pending"}]})),
+            Some(vec![TodoItem {
+                content: "a".into(),
+                status: TodoStatus::Pending,
+                priority: String::new(),
+            }])
         );
     }
 }

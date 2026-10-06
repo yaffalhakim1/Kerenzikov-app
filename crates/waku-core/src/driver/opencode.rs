@@ -30,7 +30,7 @@ use crate::driver::{
 use crate::http_wire::{Endpoint, StreamControl, open_event_stream};
 use crate::model::{
     ActivityKind, DriverEvent, PermissionOption, ProviderResumeCursor, ReportedCommand,
-    RuntimeMode, TodoItem, TodoStatus, UserInputAnswer, UserInputOption, UserInputQuestion,
+    RuntimeMode, UserInputAnswer, UserInputOption, UserInputQuestion,
 };
 use crate::opencode_pool::PooledServer;
 use crate::opencode_session::{
@@ -1020,54 +1020,13 @@ fn handle_event(
         "question.asked" => request_user_input(properties, events),
         "question.replied" | "question.rejected" => {}
         "todo.updated" => {
-            let _ = events.send(DriverEvent::TodoUpdated(todo_items(properties)));
+            let _ = events.send(DriverEvent::TodoUpdated(activity::todo_items(
+                properties.get("todos"),
+            )));
         }
         // `session.created`, `session.diff`, and the plugin/catalog/reference
         // chatter are not transcript content.
         _ => {}
-    }
-}
-
-/// The agent's own task list, as `todo.updated` carries it.
-///
-/// The payload is `{sessionID, todos: [{content, status, priority}]}`. An
-/// entry with no content is dropped rather than rendered as a blank row, and
-/// an unrecognized status degrades to `Pending` so a provider that grows a
-/// new state shows the task as outstanding instead of losing it.
-fn todo_items(properties: &Value) -> Vec<TodoItem> {
-    properties
-        .get("todos")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|todo| {
-            let content = todo.get("content").and_then(Value::as_str)?.trim();
-            if content.is_empty() {
-                return None;
-            }
-            Some(TodoItem {
-                content: content.to_owned(),
-                status: todo
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .map(todo_status)
-                    .unwrap_or_default(),
-                priority: todo
-                    .get("priority")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned(),
-            })
-        })
-        .collect()
-}
-
-fn todo_status(status: &str) -> TodoStatus {
-    match status {
-        "in_progress" => TodoStatus::InProgress,
-        "completed" => TodoStatus::Completed,
-        "cancelled" => TodoStatus::Cancelled,
-        _ => TodoStatus::Pending,
     }
 }
 
@@ -1347,6 +1306,7 @@ fn tool_activity(part: &Value, events: &impl DriverEventSink, state: &mut OpenCo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::TodoStatus;
 
     #[test]
     fn native_commands_preserve_provider_arguments_and_model_options() {
