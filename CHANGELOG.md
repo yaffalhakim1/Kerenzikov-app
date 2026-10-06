@@ -12,6 +12,20 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.50]
+
+### Mobile
+
+- **The task list scrolls smoothly again.** Scrolling it stuttered whenever a
+  task was running — a settled task was fine. Every streamed chunk of the
+  running turn was rebuilding the whole list, so the app was re-grouping and
+  re-drawing it many times a second while your finger was on the screen. A
+  running turn no longer touches the list at all.
+- **The working spinner is lighter.** The little grid that marks a running task
+  is now a single pulsing square in the same accent colour and the same
+  rhythm. It does the same job with a ninth of the drawing work, which is what
+  the list and the streaming tail were paying for on every running row.
+
 ## [0.1.49]
 
 ### Desktop
