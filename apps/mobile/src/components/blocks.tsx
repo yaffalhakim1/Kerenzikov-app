@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
 import {
-  StyleSheet,
-  View,
   type ColorValue,
   type StyleProp,
   type ViewStyle,
@@ -13,72 +11,43 @@ import Animated, {
   useSharedValue,
   withRepeat,
   withTiming,
-  type SharedValue,
 } from 'react-native-reanimated';
 
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 
 /**
- * The house loading indicator: a 3x3 grid of squares that shrink to nothing
- * and grow back in a diagonal sweep (loading.dev's `blocks`). It replaces the
- * native `ActivityIndicator` everywhere a loader marks "working", so every
- * client shows the same brand-coloured motion.
+ * The house loading indicator: one rounded square that pulses, tinted with the
+ * brand accent. It replaces the native `ActivityIndicator` everywhere a loader
+ * marks "working", so every client shows the same brand-coloured motion.
  *
- * The whole grid is driven by one shared value read on the UI thread; each
- * block derives its own phase from the diagonal step, so nine blocks cost one
- * animation and nothing runs on the JS thread per frame.
+ * It was a 3x3 grid of squares shrinking and growing in a diagonal sweep
+ * (loading.dev's `blocks`). That cost nine `useAnimatedStyle` subscriptions and
+ * a three-deep view tree *per mounted loader*, which is what the sidebar paid:
+ * one loader per running task row, each re-applying nine transforms on the UI
+ * thread while the list scrolled. A single view keeps the same accent-coloured
+ * "working" signal at a ninth of the per-frame cost, which matters because
+ * loaders live on the scrolling surfaces (the task list, the transcript tail).
+ *
+ * One shared value drives it on the UI thread, so nothing runs on JS per frame.
  */
 
-const SIDE = 3;
-const SWEEP = SIDE * 2 - 1;
 const DURATION = 1300;
-const CELLS = Array.from({ length: SIDE * SIDE }, (_, index) => ({
-  col: index % SIDE,
-  row: Math.floor(index / SIDE),
-}));
+/** Floor and ceiling of the pulse, as a scale. Wide enough to read as motion
+ *  at 14px without the square disappearing. */
+const MIN_SCALE = 0.55;
+const MAX_SCALE = 1;
 
-/** The blocks keyframe curve: scale 1 to 0 by 35% of the cycle, back to 1 by
- * 70%, then held. `ease-in-out` is applied per segment, as the CSS does. */
-function blocksScale(phase: number) {
+/** The pulse keyframe curve: shrink to `MIN_SCALE` by 35% of the cycle, back
+ *  to `MAX_SCALE` by 70%, then hold — the timing the grid used, so the loader
+ *  still breathes at the same rhythm. `ease-in-out` per segment, as the CSS. */
+function pulseScale(phase: number) {
   'worklet';
   const easeInOut = (t: number) =>
     t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
-  if (phase < 0.35) return 1 - easeInOut(phase / 0.35);
-  if (phase < 0.7) return easeInOut((phase - 0.35) / 0.35);
-  return 1;
-}
-
-function Block({
-  cell,
-  color,
-  progress,
-  radius,
-  reducedMotion,
-  step,
-}: {
-  cell: number;
-  color: ColorValue;
-  progress: SharedValue<number>;
-  radius: number;
-  reducedMotion: boolean;
-  step: number;
-}) {
-  // A negative CSS `animation-delay`, expressed as a phase lead:
-  // `(sweep - step) / sweep`.
-  const lead = (SWEEP - step) / SWEEP;
-  const animatedStyle = useAnimatedStyle(() => {
-    if (reducedMotion) return { transform: [{ scale: 0.8 }] };
-    return { transform: [{ scale: blocksScale((progress.value + lead) % 1) }] };
-  });
-  return (
-    <Animated.View
-      style={[
-        { backgroundColor: color, borderRadius: radius, height: cell, width: cell },
-        animatedStyle,
-      ]}
-    />
-  );
+  if (phase < 0.35) return MAX_SCALE - (MAX_SCALE - MIN_SCALE) * easeInOut(phase / 0.35);
+  if (phase < 0.7) return MIN_SCALE + (MAX_SCALE - MIN_SCALE) * easeInOut((phase - 0.35) / 0.35);
+  return MAX_SCALE;
 }
 
 export function Blocks({
@@ -88,7 +57,7 @@ export function Blocks({
 }: {
   /** Tint; defaults to the brand accent. */
   color?: ColorValue;
-  /** Overall grid edge, in pixels. */
+  /** Overall edge, in pixels. */
   size?: number;
   style?: StyleProp<ViewStyle>;
 }) {
@@ -111,36 +80,20 @@ export function Blocks({
     return () => cancelAnimation(progress);
   }, [progress, reducedMotion]);
 
-  const gap = size * 0.1;
-  const cell = (size - gap * (SIDE - 1)) / SIDE;
-  const radius = size * 0.0625;
+  const radius = size * 0.1875;
   const tint = color ?? theme.accent;
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: reducedMotion ? 0.8 : pulseScale(progress.value % 1) }],
+  }));
 
   return (
-    <View
+    <Animated.View
       accessibilityRole="progressbar"
-      style={[{ gap, height: size, width: size }, style]}>
-      {[0, 1, 2].map((row) => (
-        <View key={row} style={[styles.row, { gap }]}>
-          {CELLS.filter((cell) => cell.row === row).map(({ col }) => (
-            <Block
-              cell={cell}
-              color={tint}
-              key={`${row}-${col}`}
-              progress={progress}
-              radius={radius}
-              reducedMotion={reducedMotion}
-              step={row + col}
-            />
-          ))}
-        </View>
-      ))}
-    </View>
+      style={[
+        { backgroundColor: tint, borderRadius: radius, height: size, width: size },
+        animatedStyle,
+        style,
+      ]}
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-  },
-});

@@ -13,10 +13,12 @@ import {
   runtimeEventIsDeferrable,
   runtimeEventTouchesSession,
   runtimeSnapshotIsAtLeastAsNew,
+  sameListSummary,
   sessionBusy,
   sessionCwd,
   sessionHasActiveProviderTurn,
   sessionIsRunning,
+  sessionListSummary,
   shouldApplyRuntimeEvent,
 } from './mobile-runtime';
 
@@ -281,6 +283,57 @@ describe('mobile runtime projection', () => {
     expect(cleared.reasoning_effort).toBeNull();
     expect(cleared.service_tier).toBe('fast');
     expect(cleared.context_window).toBe('1m');
+  });
+});
+
+describe('task-list summaries', () => {
+  // The sidebar keys its rows on these summaries so a stream commit cannot
+  // invalidate the list. The projection is the guard: if it ever grows a field
+  // that changes per commit (a transcript slice, a token count), every commit
+  // becomes a new list object and the sidebar re-groups mid-scroll again.
+  test('the projection carries only the fields the list draws', () => {
+    const summary = sessionListSummary(session({
+      title: 'Fix the race',
+      status: 'working',
+      last_reply_at: 7,
+      messages: [{ id: 'm1' } as never],
+      transcript_blocks: [{ after_message: 1 } as never],
+      turns: [{ id: 't1' } as never],
+    }));
+
+    expect(summary).toEqual({
+      id: 'session',
+      title: 'Fix the race',
+      auto_title: null,
+      project_id: 'p',
+      provider: 'codex',
+      model: undefined,
+      status: 'working',
+      created_at: 1,
+      last_reply_at: 7,
+      archived_at: undefined,
+    });
+    // Transcript detail must never reach the list.
+    expect('messages' in summary).toBe(false);
+    expect('transcript_blocks' in summary).toBe(false);
+    expect('turns' in summary).toBe(false);
+  });
+
+  test('a transcript-only change compares equal, so the list keeps its identity', () => {
+    const before = sessionListSummary(session());
+    const after = sessionListSummary(session({
+      messages: [{ id: 'm1' } as never],
+      transcript_blocks: [{ after_message: 1 } as never],
+    }));
+
+    expect(sameListSummary(before, after)).toBe(true);
+  });
+
+  test('a drawn field change compares unequal', () => {
+    const idle = sessionListSummary(session());
+    expect(sameListSummary(idle, sessionListSummary(session({ status: 'working' })))).toBe(false);
+    expect(sameListSummary(idle, sessionListSummary(session({ title: 'Renamed' })))).toBe(false);
+    expect(sameListSummary(idle, sessionListSummary(session({ last_reply_at: 9 })))).toBe(false);
   });
 });
 
