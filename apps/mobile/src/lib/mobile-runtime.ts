@@ -298,15 +298,15 @@ export function shouldApplyRuntimeEvent(
 }
 
 /**
- * Event kinds that reach `reduceRuntimeEvent`'s `default: break`.
+ * Whether folding this event can change the session the transcript draws.
  *
- * The mobile app has no background-work, todo or plan-usage surface, so these
- * carry no projection this client draws. Cloning the session for them is pure
- * waste — measured at 4ms per clone on a 1.3MB transcript — and `backgroundWork`
- * arrives as often as the model streams (a 15s sample of one live turn: 2026
- * reasoningDelta + 90 backgroundWork events, 137/sec).
+ * `todoUpdated`, `backgroundWork` and `planUsageUpdated` are projected now
+ * (the harness surfaces they feed exist on this client), so only truly
+ * unseen kinds stay unprojected. The empty set remains as the seam: a kind
+ * the phone genuinely cannot render goes here instead of being special-cased
+ * in the reducer.
  */
-const UNPROJECTED_RUNTIME_EVENTS = new Set(['todoUpdated', 'planUsageUpdated', 'backgroundWork']);
+const UNPROJECTED_RUNTIME_EVENTS = new Set<string>([]);
 
 /** Whether folding this event can change the session the transcript draws. */
 export function runtimeEventTouchesSession(event: SequencedEvent): boolean {
@@ -314,9 +314,9 @@ export function runtimeEventTouchesSession(event: SequencedEvent): boolean {
 }
 
 /** Stream-rate kinds that wait for the commit tick instead of flushing the
- * buffer. `backgroundWork` belongs here because it is conversation meta with no
- * consumer in this app: flushing per event cost one deep clone and one
- * task-state cache write each, and it arrives at stream cadence. */
+ * buffer immediately. Background-work upserts can arrive near stream cadence
+ * (one per subagent turn/output delta); they mutate only the work registry,
+ * so coalescing them with the stream commit costs nothing visible. */
 export function runtimeEventIsDeferrable(event: SequencedEvent): boolean {
   const kind = event.event.kind;
   return kind === 'textDelta'

@@ -1,6 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
 import type {
   AgentSession,
+  BackgroundWorkItem,
+  BackgroundWorkKey,
+  ComputerUseState,
   MessageAttachment,
   PendingPermission,
   PendingUserInput,
@@ -10,6 +13,7 @@ import type {
   UserInputAnswer,
 } from '@waku/client';
 import { reduceRuntimeEvent } from '@waku/client/event-reducer';
+import type { RuntimeEventResult } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
 import * as Crypto from 'expo-crypto';
 import {
@@ -107,10 +111,15 @@ const RUNTIME_ATTACH_RETRY_MS = 250;
 
 
 interface RuntimeContextValue {
-  runtimes: Record<string, MobileRuntime | undefined>;
-  permissions: Record<string, PendingPermission | undefined>;
-  userInputs: Record<string, PendingUserInput | undefined>;
-  errors: Record<string, string | undefined>;
+  runtimes: Record<string, MobileRuntime | undefined>
+  permissions: Record<string, PendingPermission | undefined>
+  userInputs: Record<string, PendingUserInput | undefined>
+  /** Harness background work per session (subagents, processes, monitors). */
+  backgroundWork: Record<string, BackgroundWorkItem[] | undefined>
+  stopBackgroundWork: (sessionId: string, key: BackgroundWorkKey) => Promise<void>
+  /** Computer-use state per session (phase, target, latest frame). */
+  computerUse: Record<string, ComputerUseState | undefined>
+  errors: Record<string, string | undefined>
   attachSession: (session: AgentSession) => Promise<boolean>;
   sendPrompt: (
     session: AgentSession,
@@ -171,7 +180,31 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [runtimes, setRuntimes] = useState<Record<string, MobileRuntime | undefined>>({});
   const [permissions, setPermissions] = useState<Record<string, PendingPermission | undefined>>({});
   const [userInputs, setUserInputs] = useState<Record<string, PendingUserInput | undefined>>({});
+  /** Harness background work per session (subagents, processes, monitors):
+   *  insertion-ordered lists, so the sheet reads like the desktop panel. */
+  const [backgroundWork, setBackgroundWork] = useState<
+    Record<string, BackgroundWorkItem[] | undefined>
+  >({});
+  /** Computer-use session state per session (phase, target, latest frame
+   *  reference), so the session screen can show what the harness is doing
+   *  on the host's screen. */
+  const [computerUse, setComputerUse] = useState<
+    Record<string, ComputerUseState | undefined>
+  >({});
   const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  /** Stops one background work item: asks the harness, then the stop
+   *  outcome (or failure) arrives through the ordinary event stream. */
+  const stopBackgroundWork = useCallback(
+    async (sessionId: string, key: BackgroundWorkKey) => {
+      const client = daemon.client;
+      if (!client) throw new Error('Kerenzikov daemon is disconnected');
+      await client.request(
+        { type: 'stopBackgroundWork', key, controlId: `mobile-${Date.now()}` },
+        sessionId,
+      );
+    },
+    [daemon.client],
+  );
   const hasRecoveredDisconnectError = daemon.phase === 'connected'
     && Object.values(errors).some(isDaemonDisconnectError);
   const entries = useRef(new Map<string, RuntimeEntry>());
@@ -297,6 +330,54 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     persistTimers.current.set(sessionId, timer);
   }, [daemon.activeProfile?.id, persistOrdered, queryClient]);
 
+  /** Mirrors the desktop's background-work registry: upserts announce,
+   *  reconciles replace authoritatively, stop outcomes settle or remove.
+   *  Keyed by `${kind}:${providerId}` so ordering is stable across renders. */
+  const workKey = (key: BackgroundWorkKey) => `${key.kind}:${key.providerId}`;
+  const applyBackgroundWork = useCallback(
+    (
+      sessionId: string,
+      result: RuntimeEventResult,
+    ) => {
+      if (
+        result.backgroundWorkUpsert === undefined
+        && result.backgroundWorkRemove === undefined
+        && result.backgroundWorkReconcile === undefined
+      ) return;
+      setBackgroundWork((current) => {
+        const existing = current[sessionId] ?? [];
+        let next = existing;
+        if (result.backgroundWorkReconcile) {
+          next = result.backgroundWorkReconcile;
+        }
+        if (result.backgroundWorkUpsert) {
+          const item = result.backgroundWorkUpsert;
+          const key = workKey(item.key);
+          const index = next.findIndex((entry) => workKey(entry.key) === key);
+          next = index >= 0
+            ? next.map((entry, position) => (position === index ? item : entry))
+            : [...next, item];
+        }
+        if (result.backgroundWorkRemove) {
+          const key = workKey(result.backgroundWorkRemove);
+          // A stop failure restores the pre-stop status rather than removing.
+          if (result.backgroundWorkStopFailed) {
+            next = next.map((entry) => (
+              workKey(entry.key) === key
+                ? { ...entry, status: entry.status === 'stopping' ? 'running' : entry.status }
+                : entry
+            ));
+          } else {
+            next = next.filter((entry) => workKey(entry.key) !== key);
+          }
+        }
+        if (next === existing) return current;
+        return { ...current, [sessionId]: next.length ? next : undefined };
+      });
+    },
+    [],
+  );
+
   const removeRuntime = useCallback((sessionId: string) => {
     const entry = entries.current.get(sessionId);
     entry?.unsubscribe();
@@ -403,6 +484,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       if (result.userInput !== undefined) {
         setUserInputs((values) => ({ ...values, [session.id]: result.userInput ?? undefined }));
       }
+      applyBackgroundWork(session.id, result);
+      if (result.computerUseState !== undefined) {
+        setComputerUse((values) => ({
+          ...values,
+          [session.id]: result.computerUseState,
+        }));
+      }
       if (result.error) setErrors((values) => ({ ...values, [session.id]: result.error }));
       if (result.settled) state.settled = true;
       if (result.removeRuntime) state.removeRuntime = true;
@@ -506,7 +594,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (entries.current.get(session.id) === entry) entry.unsubscribe = teardown;
     else teardown();
     return entry;
-  }, [cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, queryClient, removeRuntime, schedulePersist]);
+  }, [applyBackgroundWork, cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, queryClient, removeRuntime, schedulePersist]);
 
 
   /**
@@ -1226,6 +1314,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     setRuntimes({});
     setPermissions({});
     setUserInputs({});
+    setBackgroundWork({});
+    setComputerUse({});
     setErrors({});
     revalidatedConnections.current = 0;
     return () => {
@@ -1245,6 +1335,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       runtimes,
       permissions,
       userInputs,
+      backgroundWork,
+      stopBackgroundWork,
+      computerUse,
       errors,
       attachSession,
       sendPrompt,

@@ -315,13 +315,12 @@ const attachment: MessageAttachment = {
 };
 
 describe('runtime event pump classification', () => {
-  test('conversation meta the reducer does not project never touches the session', () => {
-    // These kinds reach the reducer's `default: break`. Mobile has no
-    // background-work, todo or plan-usage surface, so re-cloning the whole
-    // session (and rewriting the task-state cache) for them is pure waste —
-    // measured at 4ms per clone on a 1.3MB transcript.
+  test('harness meta the reducer now projects touches the session', () => {
+    // These kinds feed real surfaces on this client (todo strip, background
+    // work registry, plan usage) — they must reach the reducer, not be
+    // skipped as unprojected.
     for (const kind of ['todoUpdated', 'planUsageUpdated', 'backgroundWork']) {
-      expect(runtimeEventTouchesSession(event(kind))).toBe(false);
+      expect(runtimeEventTouchesSession(event(kind))).toBe(true);
     }
   });
 
@@ -331,6 +330,7 @@ describe('runtime event pump classification', () => {
       'promptSubmitted', 'turnStarted', 'turnParked', 'textDelta', 'reasoningDelta',
       'activity', 'richActivity', 'permission', 'userInputRequested', 'usageUpdated',
       'goalUpdated', 'turnFinished', 'error', 'processExited',
+      'todoUpdated', 'planUsageUpdated', 'backgroundWork', 'computerUseUpdated',
     ]) {
       expect(runtimeEventTouchesSession(event(kind))).toBe(true);
     }
@@ -345,14 +345,19 @@ describe('runtime event pump classification', () => {
     }
   });
 
-  test('advancing the cursor over an ignored event keeps the transcript identity', () => {
+  test('advancing the cursor over a projectless event keeps the transcript identity', () => {
     const current = session({
       status: 'working',
       messages: [{ id: 'm', turn_id: null, role: 'user', content: 'hi', created_at: 1, streaming: false }],
       transcript_blocks: [{ after_message: 1, turn_id: null, content: { kind: 'activities', data: [] } }],
       runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 4 },
     });
-    const next = advanceRuntimeEventCursor(current, event('backgroundWork', 5));
+    // No kind is unprojected today; drive the seam directly with one the
+    // list would name if a future wire kind had no surface here.
+    const next = advanceRuntimeEventCursor(
+      current,
+      event('__never_projected__', 5),
+    );
     expect(next.runtime_event_cursor).toEqual({
       runtime_id: 'runtime', epoch: 'epoch', sequence: 5,
     });
@@ -436,8 +441,10 @@ describe('reload reconstruction', () => {
     for (const kind of ['textDelta', 'reasoningDelta', 'turnFinished', 'error', 'permission']) {
       expect(runtimeEventCarriesTranscript(event(kind))).toBe(true);
     }
+    // Now projected on this client (they feed the todo strip and the
+    // background-work registry), so they carry transcript weight too.
     for (const kind of ['backgroundWork', 'todoUpdated', 'planUsageUpdated']) {
-      expect(runtimeEventCarriesTranscript(event(kind))).toBe(false);
+      expect(runtimeEventCarriesTranscript(event(kind))).toBe(true);
     }
   });
 

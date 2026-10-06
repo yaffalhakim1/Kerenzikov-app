@@ -6,6 +6,11 @@ use ts_rs::{Config, TS};
 use waku_protocol::{
     ClientMessage, DaemonReady, MAX_WIRE_MESSAGE_BYTES, PROTOCOL_VERSION, ServerMessage,
 };
+use waku_protocol::model::{
+    BackgroundWorkEvent, BackgroundWorkItem, BackgroundWorkKey, BackgroundWorkKind,
+    BackgroundWorkStatus,
+};
+use waku_protocol::computer_use::ComputerUseState;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = generated_output();
@@ -36,6 +41,15 @@ fn export_to(output: &Path) -> Result<(), Box<dyn std::error::Error>> {
     ClientMessage::export_all(&config)?;
     ServerMessage::export_all(&config)?;
     DaemonReady::export_all(&config)?;
+    // Harness surfaces carried inside `WireDriverEvent`'s untyped payload.
+    // The reducer switches on the kind string, so these structs never appear
+    // in generated types through the normal dependency walk.
+    BackgroundWorkEvent::export_all(&config)?;
+    BackgroundWorkItem::export_all(&config)?;
+    BackgroundWorkKey::export_all(&config)?;
+    BackgroundWorkKind::export_all(&config)?;
+    BackgroundWorkStatus::export_all(&config)?;
+    ComputerUseState::export_all(&config)?;
     strip_trailing_whitespace(output)?;
     fs::write(
         output.join("constants.ts"),

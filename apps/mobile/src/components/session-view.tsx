@@ -21,6 +21,7 @@ import {
 import { ActivitySheetHost } from '@/components/activity-sheet';
 import { ConnectionBanner } from '@/components/connection-banner';
 import { ContextGaugeButton } from '@/components/context-gauge';
+import { BackgroundWorkBar, ComputerUseChip, TodoStrip } from '@/components/harness-surfaces';
 import { MobileComposer } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
 import {
@@ -119,6 +120,14 @@ export function SessionView({
   const [renaming, setRenaming] = useState(false);
   const [turnTarget, setTurnTarget] = useState<'rewind' | 'fork' | null>(null);
   const [mountedTranscriptSessionId, setMountedTranscriptSessionId] = useState<string | null>(null);
+  // The harness surfaces sit between the transcript and the composer: the
+  // agent's task list and any live background work. Both are cheap reads of
+  // runtime state; neither re-renders on stream deltas unless the data
+  // changed.
+  const backgroundWorkItems = session
+    ? (runtime.backgroundWork[session.id] ?? [])
+    : [];
+  const computerUse = session ? runtime.computerUse[session.id] : undefined;
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<TranscriptListHandle>(null);
   const headerInset = useScreenHeaderInset();
@@ -524,6 +533,19 @@ export function SessionView({
         )}
       </View>
       {session && (
+        <View style={styles.harnessSurfaces}>
+          {session.todos && session.todos.length > 0 && (
+            <TodoStrip todos={session.todos} />
+          )}
+          {backgroundWorkItems.length > 0 && (
+            <BackgroundWorkBar items={backgroundWorkItems} sessionId={session.id} />
+          )}
+          {computerUse && computerUse.visible && (
+            <ComputerUseChip state={computerUse} />
+          )}
+        </View>
+      )}
+      {session && (
         <MobileComposer
           key={`composer:${session.id}`}
           session={session}
@@ -629,6 +651,7 @@ function useDevProbe(enabled: boolean) {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { flex: 1 },
+  harnessSurfaces: { paddingHorizontal: 12 },
   placeholder: { alignItems: 'center', flex: 1, justifyContent: 'center', paddingHorizontal: 32 },
   linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 30 },
   devBadge: {

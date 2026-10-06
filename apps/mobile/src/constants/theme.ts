@@ -75,6 +75,7 @@ export const Colors = {
 } as const;
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+/** One resolved appearance palette — what `useTheme()` returns. */
 
 /** System tint for interactive affordances (back rows, checkmarks, active
  * toggles, text carets) so controls read native instead of branded. */
@@ -155,3 +156,8 @@ export const Radius = {
 } as const;
 
 export const MaxContentWidth = 800;
+
+/** A palette with the shared key set and string values (either appearance). */
+export type Theme = { [K in keyof (typeof Colors)['light']]: string } & {
+  [K in keyof (typeof Colors)['dark']]: string;
+};
