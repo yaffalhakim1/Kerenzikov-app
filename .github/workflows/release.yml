@@ -182,9 +182,14 @@ jobs:
     outputs:
       version-code: ${{ steps.apk.outputs.version_code }}
     steps:
+      # No `ref:` override: actions/checkout already checks out the triggering
+      # ref, which is the tag on a `v*` push and the branch on a manual
+      # dispatch. Pinning it to the resolved tag broke every manual run, since
+      # a dispatch creates no tag until the draft release at the end - the
+      # checkout failed with "couldn't find remote ref v<version>" before a
+      # single build step ran.
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.version.outputs.tag }}
           clean: false
 
       - uses: oven-sh/setup-bun@v2
