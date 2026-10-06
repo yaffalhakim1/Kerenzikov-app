@@ -21,6 +21,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -61,10 +62,12 @@ import {
   runtimeEventIsDeferrable,
   runtimeEventTouchesSession,
   runtimeSnapshotIsAtLeastAsNew,
+  sameListSummary,
   sessionBusy,
   sessionCwd,
   sessionHasActiveProviderTurn,
   sessionIsRunning,
+  sessionListSummary,
   shouldApplyRuntimeEvent,
   submittedTurnIdentity,
   type NewSessionOptions,
@@ -236,16 +239,30 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   >(null);
 
   /** Writes a session into the query cache without advancing its
-   * generation: the daemon's echo of a snapshot this client already holds. */
+   * generation: the daemon's echo of a snapshot this client already holds.
+   *
+   * The task-state list is updated through the session *summary* rather than
+   * the whole session. The list draws only title/provider/project/recency, and
+   * a stream commit replaces this entry up to ~8 times a second; handing it a
+   * full transcript made every commit a new `TaskState` object, which
+   * re-rendered the sidebar and re-grouped every row mid-scroll. Writing the
+   * summary keeps that object identical across commits, so a streamed delta
+   * cannot reach the list at all. */
   const writeSessionCache = useCallback((session: AgentSession) => {
     const profileId = daemon.activeProfile?.id;
     if (!profileId) return;
     queryClient.setQueryData(daemonKeys.session(profileId, session.id), session);
     queryClient.setQueryData<TaskState>(daemonKeys.taskState(profileId), (current) => {
       if (!current) return current;
-      const sessions = current.sessions.some((item) => item.id === session.id)
-        ? current.sessions.map((item) => item.id === session.id ? session : item)
-        : [...current.sessions, session];
+      const summary = sessionListSummary(session);
+      const index = current.sessions.findIndex((item) => item.id === session.id);
+      if (index < 0) return { ...current, sessions: [...current.sessions, session] };
+      const previous = current.sessions[index]!;
+      // Leave the object identity alone when nothing the list draws changed.
+      if (sameListSummary(previous, summary)) return current;
+      const sessions = current.sessions.map((item) => (
+        item.id === session.id ? { ...item, ...summary } : item
+      ));
       return { ...current, sessions };
     });
   }, [daemon.activeProfile?.id, queryClient]);
@@ -1330,34 +1347,70 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     };
   }, [daemon.activeProfile?.id, daemon.client]);
 
+  // The value is memoized because React context compares identity, not fields:
+  // a fresh object literal here re-renders *every* consumer on each render of
+  // this provider, and this provider renders on every stream commit. The
+  // sidebar is a consumer, so an unmemoized value re-rendered the whole task
+  // list ~8x/second while a turn streamed, which is what made scrolling it
+  // drop frames — and only while a turn was running, since a settled task
+  // produces no commits. Every handler below is `useCallback`-stable, so the
+  // six state slices are the only real inputs.
+  const value = useMemo<RuntimeContextValue>(() => ({
+    runtimes,
+    permissions,
+    userInputs,
+    backgroundWork,
+    stopBackgroundWork,
+    computerUse,
+    errors,
+    attachSession,
+    sendPrompt,
+    steerPrompt,
+    createTask,
+    cancel,
+    respond,
+    respondUserInput,
+    updateSessionOptions,
+    renameSession,
+    deleteSession,
+    archiveSession,
+    removeQueuedMessage,
+    steerQueuedMessage,
+    reloadSession,
+    rewindSession,
+    forkSession,
+    resumeProviderSession,
+    dismissError,
+  }), [
+    runtimes,
+    permissions,
+    userInputs,
+    backgroundWork,
+    stopBackgroundWork,
+    computerUse,
+    errors,
+    attachSession,
+    sendPrompt,
+    steerPrompt,
+    createTask,
+    cancel,
+    respond,
+    respondUserInput,
+    updateSessionOptions,
+    renameSession,
+    deleteSession,
+    archiveSession,
+    removeQueuedMessage,
+    steerQueuedMessage,
+    reloadSession,
+    rewindSession,
+    forkSession,
+    resumeProviderSession,
+    dismissError,
+  ]);
+
   return (
-    <RuntimeContext.Provider value={{
-      runtimes,
-      permissions,
-      userInputs,
-      backgroundWork,
-      stopBackgroundWork,
-      computerUse,
-      errors,
-      attachSession,
-      sendPrompt,
-      steerPrompt,
-      createTask,
-      cancel,
-      respond,
-      respondUserInput,
-      updateSessionOptions,
-      renameSession,
-      deleteSession,
-      archiveSession,
-      removeQueuedMessage,
-      steerQueuedMessage,
-      reloadSession,
-      rewindSession,
-      forkSession,
-      resumeProviderSession,
-      dismissError,
-    }}>
+    <RuntimeContext.Provider value={value}>
       {children}
     </RuntimeContext.Provider>
   );

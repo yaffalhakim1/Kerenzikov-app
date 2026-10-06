@@ -13,7 +13,7 @@ import type {
 import { turnAnswerStart, turnFoldLabel } from '@waku/client/transcript-presentation';
 
 import type { MarkdownBlock } from '../md/parse';
-import type { SessionListSummary } from './mobile-runtime';
+import { sameListSummary, type SessionListSummary } from './mobile-runtime';
 import { TranscriptMarkdownCache } from '../md/transcript-cache';
 
 export type SessionGroupId = 'today' | 'yesterday' | 'week' | 'month' | 'year' | 'more';
@@ -288,7 +288,7 @@ export function stabilizeSessionSummaries(
   let changed = previous.length !== next.length;
   const out = next.map((session, index) => {
     const before = byId.get(session.id);
-    if (before && sameSummary(before, session)) {
+    if (before && sameListSummary(before, session)) {
       if (previous[index] !== before) changed = true;
       return before;
     }
@@ -298,17 +298,7 @@ export function stabilizeSessionSummaries(
   return changed ? out : (previous as SessionListSummary[]);
 }
 
-function sameSummary(a: SessionListSummary, b: SessionListSummary): boolean {
-  if (a === b) return true;
-  const left = a as unknown as Record<string, unknown>;
-  const right = b as unknown as Record<string, unknown>;
-  const keys = Object.keys(left);
-  if (keys.length !== Object.keys(right).length) return false;
-  for (const key of keys) {
-    if (left[key] !== right[key]) return false;
-  }
-  return true;
-}
+
 
 /** Hide archived tasks unless the user asked to see them. Archiving is a
  *  daemon-side flag, so this is a view filter over synced state, not a local

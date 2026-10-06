@@ -229,6 +229,25 @@ export function sessionListSummary(session: AgentSession): SessionListSummary {
   };
 }
 
+/** Whether two summaries draw identically, so a list can keep its old entry.
+ *
+ *  Compares the projected fields only, by identity: the summary holds strings,
+ *  numbers and nulls, so `!==` is exact and costs nothing. Callers use this to
+ *  leave the list's object identity alone when a stream commit changed nothing
+ *  the list actually draws. */
+export function sameListSummary(a: SessionListSummary, b: SessionListSummary): boolean {
+  return a.id === b.id
+    && a.title === b.title
+    && a.auto_title === b.auto_title
+    && a.project_id === b.project_id
+    && a.provider === b.provider
+    && a.model === b.model
+    && a.status === b.status
+    && a.created_at === b.created_at
+    && a.last_reply_at === b.last_reply_at
+    && a.archived_at === b.archived_at;
+}
+
 /** Mirror of the desktop's `session_has_active_provider_turn`
  * (`src/app/runtime.rs`): a steer only lands once the provider has actually
  * opened the turn. Status alone is not enough — the daemon reports `working`
