@@ -12,6 +12,27 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.49]
+
+### Desktop
+
+- **The agent's task list now works with every provider.** The task-list panel
+  above the composer was fed by OpenCode alone; it stayed empty for everyone
+  else. Codex, Claude Code, Amp, Cursor, Copilot CLI, Grok Build, Kimi Code,
+  Fx, Pi, Oh My Pi and the DeepSeek Harness all publish a plan already — that
+  list now reaches the panel, with each provider's own wording for a step
+  (`abandoned` reads as cancelled) and an unknown state shown as outstanding
+  rather than dropped.
+
+### Mobile
+
+- **The phone shows the same task list.** `TodoStrip` mirrors whatever the agent
+  published, so the task list you see on the desktop is the one on your phone.
+- **Fixed a crash on launch.** The app exited immediately on start in debug
+  builds because `expo-device` had drifted onto a version that did not match
+  the rest of the SDK. Every Expo package is now aligned, so the app launches
+  and stays up.
+
 ## [0.1.48]
 
 ### Desktop
