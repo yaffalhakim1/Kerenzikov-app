@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test'
 
 import { reduceRuntimeEvent } from './event-reducer'
-import type { AgentSession, SequencedEvent } from './generated'
+import type {
+  AgentSession,
+  BackgroundWorkItem,
+  BackgroundWorkKey,
+  ComputerUseState,
+  PlanUsage,
+  SequencedEvent,
+  TodoItem,
+} from './generated'
 
 const clock = {
   nowSeconds: () => 200,
@@ -266,11 +274,12 @@ describe('pending control requests', () => {
 })
 
 describe('harness surfaces', () => {
+  const todos: TodoItem[] = [
+    { content: 'Read the driver', status: 'completed', priority: 'high' },
+    { content: 'Add the event', status: 'in_progress', priority: 'high' },
+  ]
+
   test('todoUpdated replaces the agent task list and flags the change', () => {
-    const todos = [
-      { content: 'Read the driver', status: 'completed', priority: 'high' },
-      { content: 'Add the event', status: 'in_progress', priority: 'high' },
-    ]
     const result = reduceRuntimeEvent(idleSession(), event('todoUpdated', todos), clock)
     expect(result.session.todos).toEqual(todos)
     expect(result.todosChanged).toBe(true)
@@ -285,7 +294,7 @@ describe('harness surfaces', () => {
   })
 
   test('backgroundWork upsert announces one item through the result', () => {
-    const item = {
+    const item: BackgroundWorkItem = {
       key: { kind: 'subagent', providerId: 'agent-1' },
       title: 'Research worker',
       detail: null,
@@ -299,6 +308,7 @@ describe('harness surfaces', () => {
       exitCode: null,
       background: true,
       canStop: true,
+      controlId: null,
       originActivityId: null,
       role: null,
       model: null,
@@ -317,7 +327,7 @@ describe('harness surfaces', () => {
     )
     expect(result.backgroundWorkReconcile).toEqual([])
 
-    const key = { kind: 'process', providerId: 'bash-7' }
+    const key: BackgroundWorkKey = { kind: 'process', providerId: 'bash-7' }
     const stopped = reduceRuntimeEvent(
       idleSession(),
       event('backgroundWork', { type: 'stopRequested', kind: key.kind, providerId: key.providerId }),
@@ -327,11 +337,16 @@ describe('harness surfaces', () => {
   })
 
   test('computerUseUpdated and planUsageUpdated surface their payloads', () => {
-    const state = { phase: 'running', target: null, visible: true, imageUrl: null }
+    const state: ComputerUseState = {
+      phase: 'running',
+      target: null,
+      visible: true,
+      imageUrl: null,
+    }
     const result = reduceRuntimeEvent(idleSession(), event('computerUseUpdated', state), clock)
     expect(result.computerUseState).toEqual(state)
 
-    const plan = { provider: 'claude', limit: 0.4 }
+    const plan: PlanUsage = { provider: 'claude', limit: 0.4 } as unknown as PlanUsage
     const usage = reduceRuntimeEvent(idleSession(), event('planUsageUpdated', plan), clock)
     expect(usage.planUsage).toEqual(plan)
   })
