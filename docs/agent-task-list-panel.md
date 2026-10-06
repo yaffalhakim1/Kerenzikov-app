@@ -3,6 +3,14 @@
 A walkthrough of the change that was implemented. Read it top to bottom and you
 will have followed the same path through the codebase.
 
+> **Since this was written.** The walkthrough below is OpenCode-specific because
+> OpenCode was the first provider wired to the panel. The pipe it describes is
+> provider-neutral and every other transport that publishes a task list now feeds
+> it the same way — see [providers.md](providers.md#the-agents-task-list) for the
+> per-provider source events and status vocabularies. The single OpenCode-shaped
+> parser described in Step 2 has since moved to `activity::todo_items`, shared by
+> all of them.
+
 ## What was built
 
 OpenCode's agent maintains its own task list — it writes down what it intends to

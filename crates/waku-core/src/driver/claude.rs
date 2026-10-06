@@ -1487,6 +1487,14 @@ fn handle_message(
                                 (kind, title.clone(), wire_title.clone(), command),
                             );
                         }
+                        // `TodoWrite` carries the agent's whole task list, so it
+                        // feeds the panel in addition to the transcript row.
+                        if kind == ActivityKind::Plan
+                            && let Some(input) = block.get("input")
+                            && let Some(todos) = activity::plan_input_todos(input)
+                        {
+                            let _ = events.send(DriverEvent::TodoUpdated(todos));
+                        }
                         let _ = events.send(DriverEvent::RichActivity(activity::tool_activity(
                             id,
                             kind,
@@ -2457,6 +2465,44 @@ mod tests {
             panic!("the tool call should surface an activity");
         };
         assert_eq!(item.title, "Map right panel + UI stack");
+    }
+
+    /// Claude Code's `TodoWrite` carries the whole task list in its input, so it
+    /// must feed the task-list panel as well as the transcript row.
+    #[test]
+    fn todo_write_feeds_the_task_list() {
+        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
+        handle_message(
+            &json!({"type": "assistant", "message": {"content": [{
+                "type": "tool_use",
+                "id": "toolu-todo",
+                "name": "TodoWrite",
+                "input": {"todos": [
+                    {"content": "Read the driver", "status": "completed", "activeForm": "Reading"},
+                    {"content": "Write the panel", "status": "in_progress", "activeForm": "Writing"},
+                    {"content": "Ship it", "status": "pending", "activeForm": "Shipping"},
+                ]}
+            }]}}),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            true,
+            &mut state,
+        );
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let DriverEvent::TodoUpdated(todos) = &seen[0] else {
+            panic!("TodoWrite must feed the task list, got {:?}", seen[0]);
+        };
+        assert_eq!(todos.len(), 3);
+        assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
+        assert_eq!(todos[2].status, crate::model::TodoStatus::Pending);
+        assert!(matches!(
+            &seen[1],
+            DriverEvent::RichActivity(item) if item.kind == ActivityKind::Plan
+        ));
     }
 
     #[test]

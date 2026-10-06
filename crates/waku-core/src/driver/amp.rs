@@ -470,6 +470,14 @@ fn handle_message(
                             if let Some(id) = &id {
                                 state.tools.insert(id.clone(), (kind, title.clone()));
                             }
+                            // Amp shares Claude's wire format, so its task-list
+                            // tool carries the whole list the same way.
+                            if kind == ActivityKind::Plan
+                                && let Some(input) = block.get("input")
+                                && let Some(todos) = activity::plan_input_todos(input)
+                            {
+                                let _ = events.send(DriverEvent::TodoUpdated(todos));
+                            }
                             let _ =
                                 events.send(DriverEvent::RichActivity(activity::tool_activity(
                                     id,
@@ -691,6 +699,38 @@ mod tests {
             text.contains("BANANA"),
             "the steered instruction should shape the same turn's reply, got {text:?}"
         );
+    }
+
+    /// Amp shares Claude's wire format, so its task-list tool feeds the panel
+    /// the same way `TodoWrite` does on Claude.
+    #[test]
+    fn todo_tool_feeds_the_task_list() {
+        let (events, event_rx) = unbounded();
+        let turn = Mutex::new(true);
+        let mut state = AmpStreamState::default();
+        handle_message(
+            &json!({"type":"assistant","message":{"content":[
+                {"type":"tool_use","id":"toolu_todo","name":"TodoWrite","input":{"todos":[
+                    {"content":"Read the driver","status":"completed"},
+                    {"content":"Write the panel","status":"in_progress"},
+                ]}}
+            ],"stop_reason":"tool_use"}}),
+            &events,
+            &turn,
+            &mut state,
+        );
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let DriverEvent::TodoUpdated(todos) = seen
+            .iter()
+            .find(|event| matches!(event, DriverEvent::TodoUpdated(_)))
+            .expect("the todo tool must feed the task list")
+        else {
+            unreachable!()
+        };
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
     }
 
     #[test]

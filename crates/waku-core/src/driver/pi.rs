@@ -1455,6 +1455,17 @@ fn handle_pi_message(
             };
             let complete = event_type == "tool_execution_end";
             let failed = value.get("isError").and_then(Value::as_bool) == Some(true);
+            // Pi's and Oh My Pi's `todo` tool carries the agent's whole task
+            // list: the arguments on start, and (Oh My Pi) the resulting list
+            // under `result.todos`. Both are the same panel payload.
+            if kind == ActivityKind::Plan {
+                let plan = arguments
+                    .and_then(activity::plan_input_todos)
+                    .or_else(|| output.and_then(activity::plan_input_todos));
+                if let Some(todos) = plan {
+                    let _ = events.send(DriverEvent::TodoUpdated(todos));
+                }
+            }
             let item = activity::tool_activity(
                 id.clone(),
                 kind,
@@ -1712,6 +1723,68 @@ mod tests {
             receiver,
             PiStreamState::default(),
         )
+    }
+
+    /// Pi's and Oh My Pi's `todo` tool carries the agent's whole task list. The
+    /// arguments arrive on start and (Oh My Pi) the resulting list under
+    /// `result.todos`; both must reach the task-list panel.
+    #[test]
+    fn todo_tool_feeds_the_task_list() {
+        let (pending, commands, _command_rx, mut state) = harness();
+        let (events, event_rx) = unbounded();
+        for value in [
+            json!({"type": "agent_start"}),
+            json!({"type": "tool_execution_start", "toolCallId": "todo-1", "toolName": "todo",
+            "args": {"todos": [
+                {"content": "Read the driver", "status": "completed"},
+                {"content": "Write the panel", "status": "in_progress"},
+            ]}}),
+        ] {
+            handle_pi_message(
+                PiFlavor::Pi,
+                value,
+                &pending,
+                &commands,
+                &events,
+                &mut state,
+            );
+        }
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let DriverEvent::TodoUpdated(todos) = seen
+            .iter()
+            .find(|event| matches!(event, DriverEvent::TodoUpdated(_)))
+            .expect("the todo tool must feed the task list")
+        else {
+            unreachable!()
+        };
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
+    }
+
+    /// A `todo` tool that carries no list must not emit a spurious clear, and a
+    /// tool that is not the task list must not either.
+    #[test]
+    fn non_todo_tools_do_not_clear_the_task_list() {
+        let (pending, commands, _command_rx, mut state) = harness();
+        let (events, event_rx) = unbounded();
+        handle_pi_message(
+            PiFlavor::Pi,
+            json!({"type": "tool_execution_start", "toolCallId": "read-1", "toolName": "read",
+                   "args": {"filePath": "a.txt"}}),
+            &pending,
+            &commands,
+            &events,
+            &mut state,
+        );
+
+        assert!(
+            event_rx
+                .try_iter()
+                .all(|event| !matches!(event, DriverEvent::TodoUpdated(_)))
+        );
     }
 
     /// Drives the installed Pi RPC through one real provider turn. Ignored by

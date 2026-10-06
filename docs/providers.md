@@ -62,6 +62,33 @@ provider-agnostic rows. Tool titles prefer a `title` argument when the tool
 supplies one, then fall back to the command, the query, or a de-camel-cased
 tool name.
 
+### The agent's task list
+
+A plan is a *structured list*, not a transcript row, so it travels on its own
+event — `DriverEvent::TodoUpdated(Vec<TodoItem>)` — and renders in the desktop
+composer's task-list panel and the phone's `TodoStrip`. Every provider that
+publishes such a list already did; the drivers only had to carry it. The list is
+provider state that the agent rewrites wholesale, so an empty list clears the
+panel rather than merging.
+
+| Provider(s) | Source event | Entries | Status vocabulary |
+| --- | --- | --- | --- |
+| OpenCode | `todo.updated` (SSE) | `todos[].{content,status,priority}` | `pending`, `in_progress`, `completed`, `cancelled` |
+| Copilot CLI, Cursor, Fx, Grok Build, Kimi Code | ACP `sessionUpdate: "plan"` | `entries[].{content,priority,status}` | `pending`, `in_progress`, `completed` |
+| Codex CLI | `turn/plan/updated` | `plan[].{step,status}` (+ `explanation`) | `pending`, `in_progress`, `completed` |
+| Claude Code | `TodoWrite` tool call | `input.todos[].{content,status,activeForm}` | `pending`, `in_progress`, `completed` |
+| Amp | `TodoWrite` tool call (Claude wire format) | `input.todos[].{content,status}` | `pending`, `in_progress`, `completed` |
+| Pi, Oh My Pi | `todo` tool call (`tool_execution_*`) | `args.todos[]` / `result.todos[]` | `pending`, `in_progress`, `completed`, `abandoned` |
+| DeepSeek Harness | `todo/write` | `todos[].{content,status}` | `pending`, `in_progress`, `completed` |
+
+OpenCode 2 has no task-list event on the adopted service stream; the panel stays
+empty there until the service grows one.
+
+`activity::todo_status` folds every vocabulary onto one enum, mapping Oh My Pi's
+`abandoned` to `Cancelled` and degrading an unknown status to `Pending` so a
+provider that grows a new state shows the task as outstanding instead of losing
+it. Blank entries are dropped, and `priority` is optional everywhere.
+
 ### Runtime lifetime in the app
 
 A driver is created lazily per session by `ensure_driver`
@@ -227,6 +254,7 @@ retained because `thread/fork` needs a `lastTurnId`.
 | `item/agentMessage/delta` | `TextDelta` |
 | `item/reasoning/summaryTextDelta`, `item/reasoning/textDelta` | `ReasoningDelta` |
 | `item/started`, `item/completed` | `RichActivity` (command, patch, web search, plan, MCP tool) |
+| `turn/plan/updated` | `TodoUpdated` — the agent task list, from `plan[].{step,status}` |
 | `turn/completed` | `TurnFinished { success: status == "completed" }` |
 | `error`, `mcpServer/startupStatus/updated` (failed) | `Error` |
 | `*requestApproval*` (a request, has an `id`) | `Permission` |
@@ -665,7 +693,7 @@ or not the account can currently serve a request.
 | `agent_message_chunk` | `TextDelta` |
 | `agent_thought_chunk` | `ReasoningDelta` |
 | `tool_call`, `tool_call_update` | `RichActivity`, correlated by `toolCallId` |
-| `plan` | a plan activity |
+| `plan` | `TodoUpdated` (the agent task list) plus a plan activity row |
 | `usage_update` | `UsageUpdated` — the context gauge, not transcript content |
 | `available_commands_update` | `AvailableCommands` — the composer's slash-command list |
 | `session_info_update` | `AutoTitleUpdated` when it carries a `title` |

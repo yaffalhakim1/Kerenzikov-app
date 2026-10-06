@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 #[cfg(test)]
 use uuid::Uuid;
 
+use super::activity;
 use super::computer_use as computer_use_runtime;
 use crate::computer_use;
 use crate::driver::{
@@ -245,9 +246,10 @@ impl CodexDriver {
         let mut command = crate::command_env::command(&binary);
         command.args(["app-server", "--stdio"]);
         if let Some(instructions) = agent_preset_instructions(agent_preset.as_deref()) {
-            command
-                .arg("-c")
-                .arg(format!("developer_instructions={}", toml_string(&instructions)));
+            command.arg("-c").arg(format!(
+                "developer_instructions={}",
+                toml_string(&instructions)
+            ));
         }
         configure_computer_use_command(&mut command, computer_use.as_ref());
         let command = command
@@ -944,7 +946,9 @@ fn toml_string(value: &str) -> String {
 /// a user who deleted the file should get a plain Codex session, not a driver
 /// that refuses to start.
 fn agent_preset_instructions(agent_preset: Option<&str>) -> Option<String> {
-    let name = agent_preset.map(str::trim).filter(|name| !name.is_empty())?;
+    let name = agent_preset
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
     let home = std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|home| home.join(".codex")))?;
@@ -963,7 +967,12 @@ fn agent_preset_instructions(agent_preset: Option<&str>) -> Option<String> {
         };
         // `name` is the source of truth, so a file whose name does not match
         // its `name` field is still found by the field.
-        if parsed.get("name").and_then(toml::Value::as_str).map(str::trim) != Some(name) {
+        if parsed
+            .get("name")
+            .and_then(toml::Value::as_str)
+            .map(str::trim)
+            != Some(name)
+        {
             continue;
         }
         let instructions = parsed
@@ -1966,6 +1975,16 @@ fn handle_codex_message(
                 }
             }
         }
+        "turn/plan/updated" => {
+            // Codex publishes its plan as `{explanation, plan: [{step, status}]}`
+            // on this notification, separate from the item stream. The steps map
+            // straight onto the task-list panel; `explanation` is the agent's
+            // prose rationale and is not part of the list. An empty `plan` is how
+            // a finished one is cleared, so it travels rather than being dropped.
+            let _ = events.send(DriverEvent::TodoUpdated(activity::todo_items(
+                params.get("plan"),
+            )));
+        }
         "turn/completed" => {
             stream_state.citation_buffer.clear();
             *turn_id.lock() = None;
@@ -2638,9 +2657,8 @@ Stay in exploration mode.
         // Shares `waku-core`'s test binary with `model_catalog`'s CODEX_HOME
         // tests, so it has to take the same lock rather than set the variable
         // beside them.
-        let (user, built_in, missing, absent, blank) = crate::model_catalog::tests::with_codex_home(
-            &home,
-            || {
+        let (user, built_in, missing, absent, blank) =
+            crate::model_catalog::tests::with_codex_home(&home, || {
                 (
                     agent_preset_instructions(Some("pr_explorer")),
                     agent_preset_instructions(Some("explorer")),
@@ -2648,8 +2666,7 @@ Stay in exploration mode.
                     agent_preset_instructions(None),
                     agent_preset_instructions(Some("   ")),
                 )
-            },
-        );
+            });
 
         assert_eq!(user.as_deref(), Some("Stay in exploration mode."));
         assert!(built_in.unwrap().contains("exploration"));
@@ -2965,6 +2982,43 @@ Stay in exploration mode.
             harness.received.try_recv(),
             Ok(DriverEvent::GoalUpdated(None))
         ));
+    }
+
+    /// Codex publishes its plan on `turn/plan/updated` as
+    /// `{explanation, plan: [{step, status}]}`. The steps must reach the task
+    /// list, and an empty plan must clear it rather than being dropped.
+    #[test]
+    fn plan_updates_feed_the_task_list_and_clear_on_an_empty_plan() {
+        let harness = GoalHarness::new();
+        harness.handle(json!({
+            "method": "turn/plan/updated",
+            "params": {
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "explanation": "Two steps",
+                "plan": [
+                    {"step": "Read the driver", "status": "completed"},
+                    {"step": "Write the panel", "status": "in_progress"},
+                ]
+            }
+        }));
+
+        let DriverEvent::TodoUpdated(todos) = harness.received.try_recv().unwrap() else {
+            panic!("turn/plan/updated must feed the task list");
+        };
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
+
+        harness.handle(json!({
+            "method": "turn/plan/updated",
+            "params": {"threadId": "thread-1", "turnId": "turn-1", "plan": []}
+        }));
+        let DriverEvent::TodoUpdated(todos) = harness.received.try_recv().unwrap() else {
+            panic!("an empty plan must still reach the client to clear the list");
+        };
+        assert!(todos.is_empty());
     }
 
     #[test]
