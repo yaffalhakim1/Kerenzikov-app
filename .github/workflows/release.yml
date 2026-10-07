@@ -363,22 +363,41 @@ jobs:
       # single APK even with several ABI filters — so there is no per-arch
       # suffix to add.
       #
-      # The build number is not read here. `draft-release` reads it back out
-      # of this same APK when it writes the update manifest, so the published
-      # manifest cannot disagree with the binary it points at, and reading it
-      # twice would only create a second place for the two to drift.
+      # The build number is read back out of the APK here, in the job that
+      # built it, rather than in `draft-release`. That job would need a working
+      # `aapt2` and `$ANDROID_HOME`, which it has no other reason to set up —
+      # this job runs Gradle, so its Android SDK is proven present. The value
+      # travels to `draft-release` as an artifact so the manifest still cannot
+      # disagree with the binary it points at.
       - name: Name the APK
         env:
           VERSION: ${{ needs.version.outputs.version }}
         run: |
           dir="apps/mobile/android/app/build/outputs/apk/release"
           mv "$dir/app-release.apk" "$dir/Kerenzikov-${VERSION}-universal.apk"
-          ls -lah "$dir/Kerenzikov-${VERSION}-universal.apk"
+          # Anchored to the `package:` line rather than matching versionCode
+          # anywhere: a build-tools release has added other versionCode-bearing
+          # fields before, and the first line is the manifest's own.
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          code=$("$tools/aapt2" dump badging "$dir/Kerenzikov-${VERSION}-universal.apk" \
+            | sed -n "s/^package: name='[^']*' versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          if [ -z "$code" ]; then
+            echo "::error::Could not read versionCode from the assembled APK"
+            exit 1
+          fi
+          echo "Read versionCode=$code"
+          # Carried in the artifact rather than a job output: the manifest job
+          # downloads every artifact anyway, so this keeps the build number
+          # attached to the APK it describes instead of passing it separately.
+          printf '%s\n' "$code" > "$dir/version-code.txt"
+          ls -lah "$dir/Kerenzikov-${VERSION}-universal.apk" "$dir/version-code.txt"
 
       - uses: actions/upload-artifact@v7
         with:
           name: android-apk
-          path: apps/mobile/android/app/build/outputs/apk/release/Kerenzikov-*-universal.apk
+          path: |
+            apps/mobile/android/app/build/outputs/apk/release/Kerenzikov-*-universal.apk
+            apps/mobile/android/app/build/outputs/apk/release/version-code.txt
           if-no-files-found: error
 
   # Joins every platform job, including the ones that were skipped: a job that
@@ -457,13 +476,6 @@ jobs:
           # What the website's Windows download resolves "latest" to.
           echo "$VERSION" > artifacts/latest-windows.txt
 
-      # Before `Generate the mobile update manifest`: that step shells out to
-      # `aapt2` from `$ANDROID_HOME`, which this action is what installs.
-      - uses: android-actions/setup-android@v4
-        if: steps.platforms.outputs.mobile == 'true'
-        with:
-          packages: platform-tools
-
       # The Android app reads this over raw.githubusercontent, so an update
       # offer is a checked-in file rather than a bucket object. Written from
       # the assembled APK — which download-artifact placed in `artifacts/` —
@@ -472,27 +484,25 @@ jobs:
       # manifest that landed first would point every installed app at a URL
       # that 404s.
       #
-      # The build number is read back out of the APK rather than out of
-      # build.gradle: it is the value the installed app reports, so it is the
-      # one the update check compares against. `scripts/mobile-manifest.ts`
-      # refuses the pair when it disagrees with the version being released,
-      # which is the check that would have caught the frozen `versionCode`
-      # that made v0.1.49 and v0.1.50 un-offerable.
+      # The build number comes from `version-code.txt`, written by the job that
+      # built the APK and read back out of the binary there — so it is still
+      # the value the installed app reports, without this job needing an
+      # Android SDK of its own. `scripts/mobile-manifest.ts` refuses the pair
+      # when it disagrees with the version being released, which is the check
+      # that would have caught the frozen `versionCode` that made v0.1.49 and
+      # v0.1.50 un-offerable.
       - name: Generate the mobile update manifest
         if: steps.platforms.outputs.mobile == 'true'
         env:
           VERSION: ${{ needs.version.outputs.version }}
           WAKU_MOBILE_RELEASE_BASE: https://github.com/${{ github.repository }}/releases/download
         run: |
-          apk="artifacts/Kerenzikov-${VERSION}-universal.apk"
-          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          code=$("$tools/aapt2" dump badging "$apk" \
-            | sed -n "s/^package: name='[^']*' versionCode='\([0-9]*\)'.*/\1/p" | head -1)
-          if [ -z "$code" ]; then
-            echo "::error::Could not read versionCode from the assembled APK"
+          if [ ! -f artifacts/version-code.txt ]; then
+            echo "::error::version-code.txt missing; the APK job did not publish a build number"
             exit 1
           fi
-          echo "Read versionCode=$code"
+          code=$(tr -d '[:space:]' < artifacts/version-code.txt)
+          echo "Build number from the APK: $code"
           bun scripts/mobile-manifest.ts artifacts "$code" "$VERSION"
 
       - name: Generate Windows appcasts
@@ -592,6 +602,7 @@ jobs:
           files: |
             artifacts/*
             !artifacts/mobile-latest.json
+            !artifacts/version-code.txt
 
       # Last, so the URL the manifest names is live by the time the app can
       # read it. The file must land on main because that is the ref
