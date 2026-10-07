@@ -79,7 +79,8 @@ panel rather than merging.
 | Claude Code | `TodoWrite` tool call (pre-v2.1.268) | `input.todos[].{content,status,activeForm}` | `pending`, `in_progress`, `completed` |
 | Claude Code | `TaskCreate` / `TaskUpdate` / `TaskList` tool calls (v2.1.268+) | one task per call; `subject`, `activeForm` on create, `taskId` + `status` on update | `pending`, `in_progress`, `completed`, `deleted` |
 | Amp | `TodoWrite` tool call (Claude wire format) | `input.todos[].{content,status}` | `pending`, `in_progress`, `completed` |
-| Pi, Oh My Pi | `todo` tool call (`tool_execution_*`) | `args.todos[]` / `result.todos[]` | `pending`, `in_progress`, `completed`, `abandoned` |
+| Pi | `todo` tool call (`tool_execution_*`) | `args.todos[]` / `result.todos[]` | `pending`, `in_progress`, `completed`, `abandoned` |
+| Oh My Pi | `todo` tool call (`tool_execution_*`) | `result.details.phases[].tasks[].{content,status}` | `pending`, `in_progress`, `completed`, `abandoned`, `blocked` |
 | DeepSeek Harness | `todo/write` | `todos[].{content,status}` | `pending`, `in_progress`, `completed` |
 
 Claude Code is the one transport that publishes its list **one task at a time**.

@@ -113,18 +113,51 @@ pub(super) fn todo_items(entries: Option<&Value>) -> Vec<TodoItem> {
         .collect()
 }
 
+/// Parse a task list that arrives as named phases rather than a flat array.
+///
+/// Oh My Pi groups its tasks (`TodoPhase { name, tasks }`) and returns the whole
+/// phase set from every `todo` operation, under the tool result's `details`
+/// rather than the root. The phases are flattened into the one list the panel
+/// draws; the phase names are dropped because no client renders them, and
+/// inventing a heading row for a shape only one provider sends would cost every
+/// other transport a concept it never has.
+pub(super) fn todo_phases(entries: Option<&Value>) -> Vec<TodoItem> {
+    entries
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|phase| phase.get("tasks").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|task| {
+            todo_item(
+                task.get("content").and_then(Value::as_str)?,
+                task.get("status").and_then(Value::as_str),
+                None,
+            )
+        })
+        .collect()
+}
+
 /// A plan-tool call's task list, if the tool actually carries one.
 ///
 /// Some providers expose the task list as a tool call rather than a dedicated
 /// event - Claude Code's and Amp's `TodoWrite`, Pi's and Oh My Pi's `todo` - and
-/// put it under `todos` (Oh My Pi also accepts `plan` on the result). Returns
-/// `None` when neither field is present, so a tool that merely classifies as
+/// put it under `todos` (Oh My Pi also accepts `plan` on the result). Oh My Pi
+/// sends neither: it returns `details.phases`, a phased list one level below the
+/// root, which is why the key lookup alone left its panel permanently empty.
+///
+/// Returns `None` when no field is present, so a tool that merely classifies as
 /// `Plan` does not emit a spurious empty list; a present-but-empty list is
 /// `Some(vec![])`, which is how a finished plan is cleared. Codex is not a
 /// caller: it publishes the list on its own `turn/plan/updated` notification.
 pub(super) fn plan_input_todos(input: &Value) -> Option<Vec<TodoItem>> {
-    let entries = input.get("todos").or_else(|| input.get("plan"))?;
-    Some(todo_items(Some(entries)))
+    if let Some(entries) = input.get("todos").or_else(|| input.get("plan")) {
+        return Some(todo_items(Some(entries)));
+    }
+    let phases = input
+        .get("phases")
+        .or_else(|| input.get("details").and_then(|details| details.get("phases")))?;
+    Some(todo_phases(Some(phases)))
 }
 
 /// A task list rebuilt from providers that publish it one task at a time.
@@ -364,6 +397,105 @@ mod tests {
             plan_input_todos(&serde_json::json!({"plan": [{"step": "a", "status": "pending"}]})),
             Some(vec![TodoItem {
                 content: "a".into(),
+                status: TodoStatus::Pending,
+                priority: String::new(),
+            }])
+        );
+    }
+
+    /// Oh My Pi returns its list as `details.phases` on the tool result, nested
+    /// one level below the root and grouped into named phases. The root lookup
+    /// alone missed it, which left its panel permanently empty.
+    #[test]
+    fn oh_my_pi_phases_flatten_from_the_result_details() {
+        // Verbatim shape from @oh-my-pi/pi-coding-agent 18.4.5:
+        // TodoToolDetails { op, phases: TodoPhase[], storage }.
+        let result = serde_json::json!({
+            "content": [{"type": "text", "text": "1/3 done"}],
+            "details": {
+                "op": "done",
+                "storage": "session",
+                "phases": [
+                    {
+                        "name": "Investigate",
+                        "tasks": [
+                            {"content": "Read the driver", "status": "completed"},
+                            {"content": "Trace the wire", "status": "in_progress"}
+                        ]
+                    },
+                    {
+                        "name": "Ship",
+                        "tasks": [
+                            {"content": "Write the fix", "status": "pending"},
+                            {"content": "Drop this idea", "status": "abandoned"},
+                            {"content": "Waiting on review", "status": "blocked",
+                             "blocker": "needs an ack"}
+                        ]
+                    }
+                ]
+            },
+            "isError": false
+        });
+
+        assert_eq!(
+            plan_input_todos(&result),
+            Some(vec![
+                TodoItem {
+                    content: "Read the driver".into(),
+                    status: TodoStatus::Completed,
+                    priority: String::new(),
+                },
+                TodoItem {
+                    content: "Trace the wire".into(),
+                    status: TodoStatus::InProgress,
+                    priority: String::new(),
+                },
+                TodoItem {
+                    content: "Write the fix".into(),
+                    status: TodoStatus::Pending,
+                    priority: String::new(),
+                },
+                TodoItem {
+                    content: "Drop this idea".into(),
+                    status: TodoStatus::Cancelled,
+                    priority: String::new(),
+                },
+                // `blocked` is outstanding, not cancelled: the agent has not
+                // given up on it, so it must stay open in the panel.
+                TodoItem {
+                    content: "Waiting on review".into(),
+                    status: TodoStatus::Pending,
+                    priority: String::new(),
+                },
+            ])
+        );
+    }
+
+    /// `phases` is accepted at the root too, so a caller that unwraps `details`
+    /// before parsing keeps working, and an empty phase set clears the panel
+    /// the same way an empty flat list does.
+    #[test]
+    fn oh_my_pi_phases_clear_and_tolerate_a_bare_root() {
+        assert_eq!(
+            plan_input_todos(&serde_json::json!({"phases": []})),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            plan_input_todos(&serde_json::json!({"details": {"op": "view", "phases": []}})),
+            Some(Vec::new())
+        );
+        // A phase whose tasks are missing or malformed must not panic, and a
+        // task with no usable content is dropped rather than rendered blank.
+        assert_eq!(
+            plan_input_todos(&serde_json::json!({
+                "phases": [
+                    {"name": "Empty"},
+                    {"name": "Kept", "tasks": [{"content": "  ", "status": "pending"},
+                                               {"content": "real", "status": "pending"}]}
+                ]
+            })),
+            Some(vec![TodoItem {
+                content: "real".into(),
                 status: TodoStatus::Pending,
                 priority: String::new(),
             }])

@@ -11,17 +11,28 @@ import { AppPressable } from '@/components/app-pressable';
 import { useTheme } from '@/hooks/use-theme';
 import { type Theme } from '@/constants/theme';
 import { useRuntime } from '@/lib/runtime-context';
+import {
+  todoProgress,
+  visibleTodoWindow,
+} from '@/lib/todo-strip';
 
 /**
  * The agent's own task list, mirrored from the harness's `todoUpdated`
  * stream — the desktop's task-list panel, sized for a phone. Sits above
  * the composer, so what the agent intends and where it stands is visible
  * without scrolling into the transcript.
+ *
+ * A plan longer than {@link TODO_STRIP_LIMIT} windows around the step being
+ * worked on rather than rendering every row: a twenty-task plan would
+ * otherwise push the composer off screen, and the rows that matter are the
+ * current one and its neighbours.
  */
 export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] }) {
   const theme = useTheme();
   if (!todos.length) return null;
-  const done = todos.filter((todo) => todo.status === 'completed').length;
+  const [done, total] = todoProgress(todos);
+  const { start, end, hiddenBefore, hiddenAfter } = visibleTodoWindow(todos);
+  const visible = todos.slice(start, end);
   return (
     <View style={[styles.todoCard, { backgroundColor: theme.raised }]}>
       <View style={styles.todoHeader}>
@@ -32,10 +43,13 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
         />
         <Text style={[styles.todoTitle, { color: theme.textTertiary }]}>Tasks</Text>
         <Text style={[styles.todoCount, { color: theme.textTertiary }]}>
-          {done}/{todos.length}
+          {done}/{total}
         </Text>
       </View>
-      {todos.map((todo) => (
+      {hiddenBefore > 0 ? (
+        <TodoOverflowRow label={`${hiddenBefore} earlier`} theme={theme} />
+      ) : null}
+      {visible.map((todo) => (
         <View key={todo.content} style={styles.todoRow}>
           <AppSymbol
             name={
@@ -69,6 +83,34 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
           </Text>
         </View>
       ))}
+      {hiddenAfter > 0 ? (
+        <TodoOverflowRow label={`${hiddenAfter} later`} theme={theme} />
+      ) : null}
+    </View>
+  );
+});
+
+/**
+ * The `N earlier` / `N later` edge row that marks hidden entries, so a windowed
+ * plan never reads as the whole plan.
+ */
+const TodoOverflowRow = memo(function TodoOverflowRow({
+  label,
+  theme,
+}: {
+  label: string;
+  theme: Theme;
+}) {
+  return (
+    <View style={styles.todoRow}>
+      <AppSymbol
+        name={{ ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' }}
+        size={13}
+        tintColor={theme.textTertiary}
+      />
+      <Text numberOfLines={1} style={[styles.todoText, { color: theme.textTertiary }]}>
+        {label}
+      </Text>
     </View>
   );
 });
