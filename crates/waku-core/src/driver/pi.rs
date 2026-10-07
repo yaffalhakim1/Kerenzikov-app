@@ -1455,9 +1455,10 @@ fn handle_pi_message(
             };
             let complete = event_type == "tool_execution_end";
             let failed = value.get("isError").and_then(Value::as_bool) == Some(true);
-            // Pi's and Oh My Pi's `todo` tool carries the agent's whole task
-            // list: the arguments on start, and (Oh My Pi) the resulting list
-            // under `result.todos`. Both are the same panel payload.
+            // Pi's `todo` tool carries the agent's whole task list in its
+            // arguments. Oh My Pi's carries neither a `todos` nor a `plan` key:
+            // every operation returns the full phase set under
+            // `result.details.phases`, so the list is only ever on the result.
             if kind == ActivityKind::Plan {
                 let plan = arguments
                     .and_then(activity::plan_input_todos)
@@ -1761,6 +1762,56 @@ mod tests {
         assert_eq!(todos.len(), 2);
         assert_eq!(todos[0].content, "Read the driver");
         assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
+    }
+
+    /// Oh My Pi's `todo` tool carries no `todos` key at all: every operation
+    /// returns the full phase set under `result.details.phases`, so the list is
+    /// only ever on the result. Verbatim shape from pi-coding-agent 18.4.5.
+    #[test]
+    fn oh_my_pi_phases_reach_the_task_list() {
+        let (pending, commands, _command_rx, mut state) = harness();
+        let (events, event_rx) = unbounded();
+        for value in [
+            json!({"type": "agent_start"}),
+            json!({"type": "tool_execution_start", "toolCallId": "todo-1", "toolName": "todo",
+                   "args": {"op": "start", "task": "Trace the wire"}}),
+            json!({"type": "tool_execution_end", "toolCallId": "todo-1", "toolName": "todo",
+                   "isError": false,
+                   "result": {
+                       "content": [{"type": "text", "text": "1/2 done"}],
+                       "details": {
+                           "op": "start",
+                           "storage": "session",
+                           "phases": [{"name": "Investigate", "tasks": [
+                               {"content": "Read the driver", "status": "completed"},
+                               {"content": "Trace the wire", "status": "in_progress"},
+                           ]}]
+                       }
+                   }}),
+        ] {
+            handle_pi_message(
+                PiFlavor::OhMyPi,
+                value,
+                &pending,
+                &commands,
+                &events,
+                &mut state,
+            );
+        }
+
+        let seen = event_rx.try_iter().collect::<Vec<_>>();
+        let DriverEvent::TodoUpdated(todos) = seen
+            .iter()
+            .find(|event| matches!(event, DriverEvent::TodoUpdated(_)))
+            .expect("Oh My Pi's phase result must feed the task list")
+        else {
+            unreachable!()
+        };
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].content, "Read the driver");
+        assert_eq!(todos[0].status, crate::model::TodoStatus::Completed);
+        assert_eq!(todos[1].content, "Trace the wire");
         assert_eq!(todos[1].status, crate::model::TodoStatus::InProgress);
     }
 
