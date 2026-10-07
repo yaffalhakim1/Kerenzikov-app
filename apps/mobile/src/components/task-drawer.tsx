@@ -62,6 +62,7 @@ import {
   foldGroups,
   groupSessions,
   messageSearchRows,
+  paginateSections,
   providerLabel,
   sessionStatusBadge,
   stabilizeSessionSummaries,
@@ -268,6 +269,20 @@ function TaskDrawerContent({
     });
   }, []);
   const foldedGroups = useMemo(() => new Set(prefs.folded), [prefs.folded]);
+  // Sections the user expanded past the page limit. View-local and ephemeral:
+  // it re-pages on the next launch so a once-busy project does not open long
+  // forever.
+  const [expandedSections, setExpandedSections] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const expandSection = useCallback((sectionId: string) => {
+    setExpandedSections((current) => {
+      if (current.has(sectionId)) return current;
+      const next = new Set(current);
+      next.add(sectionId);
+      return next;
+    });
+  }, []);
   // Summaries, not full sessions: the list draws only title, provider, project
   // and recency, and holding the full objects here would rebuild every row on
   // each streamed delta the runtime writes back into task state.
@@ -289,11 +304,23 @@ function TaskDrawerContent({
     });
   }, [listSessions, prefs.showArchived, search, taskState.data?.projects]);
   const sections = useMemo(() => {
-    const built = taskState.data
-      ? groupSessions(taskState.data.projects, visibleSessions, new Date(), prefs)
+    const projects = taskState.data?.projects;
+    const built = projects
+      ? groupSessions(projects, visibleSessions, new Date(), prefs)
       : [];
     return foldGroups(built, foldedGroups);
-  }, [taskState.data, visibleSessions, prefs, foldedGroups]);
+    // `projects` and `visibleSessions`, not the whole `taskState.data`: the
+    // runtime writes every streamed delta back into that object, so depending
+    // on it regrouped and re-rendered the whole list ~8x/second — invisible
+    // with a couple of rows, jank in a group with many.
+  }, [taskState.data?.projects, visibleSessions, prefs, foldedGroups]);
+  // The list is paged after folding: a folded group already shows nothing, and
+  // paging before folding would count rows the user cannot see. `hiddenCounts`
+  // drives the "See more" footer per section.
+  const paged = useMemo(
+    () => paginateSections(sections, expandedSections),
+    [sections, expandedSections],
+  );
   const pinnedIds = useMemo(() => new Set(prefs.pinned), [prefs.pinned]);
   const messageRows = useMemo(
     () => (messageQuery.trim() && messageSearch.data)
@@ -500,7 +527,7 @@ function TaskDrawerContent({
       {drawerToolbar}
 
       <SectionList
-        sections={sections}
+        sections={paged.sections}
         keyExtractor={(item) => item.session.id}
         contentContainerStyle={[
           styles.listContent,
@@ -550,6 +577,27 @@ function TaskDrawerContent({
                 </Text>
               )}
               <AppSymbol name={chevron} size={13} tintColor={theme.textTertiary} />
+            </AppPressable>
+          );
+        }}
+        renderSectionFooter={({ section }) => {
+          const hidden = paged.hidden.get(section.id) ?? 0;
+          if (hidden === 0) return null;
+          return (
+            <AppPressable
+              accessibilityLabel={`Show ${hidden} more ${hidden === 1 ? 'task' : 'tasks'}`}
+              accessibilityRole="button"
+              onPress={() => {
+                tapHaptic();
+                expandSection(section.id);
+              }}
+              style={({ pressed }) => [
+                styles.sectionMore,
+                { opacity: pressed ? 0.55 : 1 },
+              ]}>
+              <Text style={[styles.sectionMoreText, { color: theme.accent }]}>
+                See {hidden} more
+              </Text>
             </AppPressable>
           );
         }}
@@ -1131,6 +1179,16 @@ const styles = StyleSheet.create({
     paddingRight: 12,
     paddingVertical: 10,
   },
+  // The "See more" row sits under its group's rows, indented to the row's text
+  // column and sized to the 48dp tap target. It is a control, not a task, so it
+  // carries no card background or segmented corners.
+  sectionMore: {
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingLeft: 24,
+    paddingRight: 14,
+  },
+  sectionMoreText: { fontSize: 14, fontWeight: '500' },
   // Same rounded square as the drawer's other toolbar controls, so the row
   // reads as one unit rather than a pill beside a lone glyph.
   filterButton: { borderRadius: Radius.small, height: 50, width: 50 },

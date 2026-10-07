@@ -16,6 +16,7 @@ import {
   foldGroups,
   groupSessions,
   messageSearchRows,
+  paginateSections,
   relativeSessionTime,
   sessionDateGroup,
   sessionHasStarted,
@@ -215,6 +216,37 @@ describe('mobile session presentation', () => {
     const folded = foldGroups(sections, new Set(['today']));
     expect(folded[0]).toMatchObject({ id: 'today', title: 'Today', data: [] });
     expect(folded[1]!.data).toHaveLength(1);
+  });
+
+  test('pages a long group and leaves a short one untouched', () => {
+    const long = {
+      id: 'project',
+      title: 'waku',
+      data: Array.from({ length: 9 }, (_, i) => ({ session: { id: `s${i}` } })),
+    } as never;
+    const short = {
+      id: 'today',
+      title: 'Today',
+      data: [{ session: { id: 'a' } }],
+    } as never;
+    const sections = [long, short];
+
+    const { sections: paged, hidden } = paginateSections(sections, new Set(), 6);
+    expect(paged[0]!.data).toHaveLength(6);
+    expect(hidden.get('project')).toBe(3);
+    // The short section keeps its identity so its rows stay memoized.
+    expect(paged[1]).toBe(short);
+  });
+
+  test('an expanded group shows every row and hides nothing', () => {
+    const section = {
+      id: 'project',
+      title: 'waku',
+      data: Array.from({ length: 9 }, (_, i) => ({ session: { id: `s${i}` } })),
+    } as never;
+    const { sections, hidden } = paginateSections([section], new Set(['project']), 6);
+    expect(sections[0]!.data).toHaveLength(9);
+    expect(hidden.size).toBe(0);
   });
 
   test('formats compact recency labels', () => {    expect(relativeSessionTime(1_000, 1_030_000)).toBe('Now');

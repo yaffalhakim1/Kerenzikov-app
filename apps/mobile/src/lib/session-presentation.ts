@@ -328,6 +328,35 @@ export function foldGroups(
   );
 }
 
+/** How many rows a section shows before it offers "See more". Every mounted
+ *  row is work the list re-does on each stream commit, so a long group is
+ *  paged rather than drawn whole. */
+export const SECTION_PAGE_SIZE = 6;
+
+/** The rows actually drawn per section, and how many each section hides.
+ *
+ *  Sections are trimmed to `pageSize` unless their id is in `expanded`, so a
+ *  busy project stops mounting every task while a task streams. The hidden
+ *  counts drive the "See more" footer; a section with nothing hidden is left
+ *  exactly as it was, keeping its array identity and its rows' memoization. */
+export function paginateSections(
+  sections: SessionGroup[],
+  expanded: ReadonlySet<string>,
+  pageSize = SECTION_PAGE_SIZE,
+): { sections: SessionGroup[]; hidden: Map<string, number> } {
+  const hidden = new Map<string, number>();
+  let changed = false;
+  const paged = sections.map((section) => {
+    if (expanded.has(section.id) || section.data.length <= pageSize) {
+      return section;
+    }
+    changed = true;
+    hidden.set(section.id, section.data.length - pageSize);
+    return { ...section, data: section.data.slice(0, pageSize) };
+  });
+  return { sections: changed ? paged : sections, hidden };
+}
+
 export function sessionDateGroup(timestamp: number, now = new Date()): SessionGroupId {  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const day = new Date(timestamp * 1_000);
   const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
