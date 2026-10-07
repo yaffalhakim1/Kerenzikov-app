@@ -76,10 +76,27 @@ panel rather than merging.
 | OpenCode | `todo.updated` (SSE) | `todos[].{content,status,priority}` | `pending`, `in_progress`, `completed`, `cancelled` |
 | Copilot CLI, Cursor, Fx, Grok Build, Kimi Code | ACP `sessionUpdate: "plan"` | `entries[].{content,priority,status}` | `pending`, `in_progress`, `completed` |
 | Codex CLI | `turn/plan/updated` | `plan[].{step,status}` (+ `explanation`) | `pending`, `in_progress`, `completed` |
-| Claude Code | `TodoWrite` tool call | `input.todos[].{content,status,activeForm}` | `pending`, `in_progress`, `completed` |
+| Claude Code | `TodoWrite` tool call (pre-v2.1.268) | `input.todos[].{content,status,activeForm}` | `pending`, `in_progress`, `completed` |
+| Claude Code | `TaskCreate` / `TaskUpdate` / `TaskList` tool calls (v2.1.268+) | one task per call; `subject`, `activeForm` on create, `taskId` + `status` on update | `pending`, `in_progress`, `completed`, `deleted` |
 | Amp | `TodoWrite` tool call (Claude wire format) | `input.todos[].{content,status}` | `pending`, `in_progress`, `completed` |
 | Pi, Oh My Pi | `todo` tool call (`tool_execution_*`) | `args.todos[]` / `result.todos[]` | `pending`, `in_progress`, `completed`, `abandoned` |
 | DeepSeek Harness | `todo/write` | `todos[].{content,status}` | `pending`, `in_progress`, `completed` |
+
+Claude Code is the one transport that publishes its list **one task at a time**.
+`TaskCreate` names only a `subject`, and the id it assigns comes back on the
+paired `tool_result` as `tool_use_result.task.id`; `TaskUpdate` then patches a
+task by that id and uses `status: "deleted"` to drop one. Nothing carries the
+whole list, so `activity::TodoAccumulator` rebuilds it across calls and re-emits
+the full list after each mutation — which is why the rest of the pipe can go on
+treating the list as replace-only. Field names are read defensively
+(`taskId` ?? `id` ?? `task_id`, `activeForm` ?? `active_form`) because the CLI
+repairs those spellings before execution but **not** in the stream. Note that
+`Task`, `TaskOutput` and `TaskStop` are the subagent tool and its bookkeeping,
+and classify as `Tool` rather than `Plan`.
+
+Aliases that classify as `Plan` but carry no list are ignored rather than
+clearing the panel: `plan_input_todos` returns `None` when neither `todos` nor
+`plan` is present, and `Some(vec![])` only for a present-but-empty list.
 
 OpenCode 2 has no task-list event on the adopted service stream; the panel stays
 empty there until the service grows one.

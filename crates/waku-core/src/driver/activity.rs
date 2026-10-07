@@ -127,6 +127,143 @@ pub(super) fn plan_input_todos(input: &Value) -> Option<Vec<TodoItem>> {
     Some(todo_items(Some(entries)))
 }
 
+/// A task list rebuilt from providers that publish it one task at a time.
+///
+/// Claude Code v2.1.268 replaced the whole-list `TodoWrite` with `TaskCreate`,
+/// `TaskUpdate`, `TaskGet` and `TaskList`. Those carry a single task per call:
+/// `TaskCreate` has a `subject` but no id (the id arrives on the paired
+/// `tool_result` as `tool_use_result.task.id`), and `TaskUpdate` patches one
+/// task by id. Every other transport still republishes the whole list, so this
+/// accumulator is only needed where the incremental shape is used.
+///
+/// State is per driver session and never crosses the wire: the driver emits
+/// [`Self::snapshot`] after each mutation, so the rest of the pipe keeps
+/// treating the list as replace-only.
+#[derive(Default)]
+pub(super) struct TodoAccumulator {
+    /// Insertion-ordered so the list reads in the order the agent wrote it.
+    tasks: Vec<(String, TodoItem)>,
+    /// Task creates whose `tool_result` has not named them yet.
+    staged: Vec<(String, String, Option<String>)>,
+}
+
+impl TodoAccumulator {
+    /// A whole-list payload replaces everything, keeping the pipe's contract.
+    pub(super) fn replace(&mut self, todos: Vec<TodoItem>) -> Vec<TodoItem> {
+        self.tasks = todos
+            .into_iter()
+            .enumerate()
+            .map(|(index, todo)| (format!("index-{index}"), todo))
+            .collect();
+        self.snapshot()
+    }
+
+    /// Records a `TaskCreate` under its tool-call id until the result names it.
+    pub(super) fn stage_create(
+        &mut self,
+        tool_call_id: &str,
+        subject: &str,
+        active_form: Option<&str>,
+    ) {
+        if subject.trim().is_empty() {
+            return;
+        }
+        let entry = (
+            tool_call_id.to_owned(),
+            subject.trim().to_owned(),
+            active_form.map(str::trim).filter(|f| !f.is_empty()).map(str::to_owned),
+        );
+        match self.staged.iter_mut().find(|(id, ..)| id == tool_call_id) {
+            Some(slot) => *slot = entry,
+            None => self.staged.push(entry),
+        }
+    }
+
+    /// The paired `tool_result` names the created task; promote it into the list.
+    pub(super) fn resolve_create(&mut self, tool_call_id: &str, task_id: &str) -> Vec<TodoItem> {
+        let index = self
+            .staged
+            .iter()
+            .position(|(id, ..)| id == tool_call_id);
+        let Some(index) = index else {
+            return self.snapshot();
+        };
+        let (_, subject, _) = self.staged.remove(index);
+        // A freshly created task is pending, so it reads as its subject. Its
+        // active form belongs to the in-progress state, which arrives later.
+        self.insert(task_id, &subject, TodoStatus::Pending);
+        self.snapshot()
+    }
+
+    /// `TaskUpdate` patches one task; `status: "deleted"` removes it.
+    ///
+    /// Field names are read defensively because Claude Code repairs
+    /// `id`/`task_id` to `taskId` before execution but *not* in the stream.
+    pub(super) fn apply_update(&mut self, input: &Value) -> Vec<TodoItem> {
+        let Some(task_id) = input
+            .get("taskId")
+            .or_else(|| input.get("id"))
+            .or_else(|| input.get("task_id"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            return self.snapshot();
+        };
+        let status = input.get("status").and_then(Value::as_str);
+        if status == Some("deleted") {
+            self.tasks.retain(|(id, _)| id != task_id);
+            return self.snapshot();
+        }
+        let subject = input
+            .get("subject")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let active_form = input
+            .get("activeForm")
+            .or_else(|| input.get("active_form"))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+
+        let existing = self
+            .tasks
+            .iter()
+            .position(|(id, _)| id == task_id)
+            .map(|index| self.tasks[index].1.content.clone());
+        // An update addresses a task the list already holds. One naming an
+        // unknown id is not a create, so it must not add a row.
+        let Some(existing) = existing else {
+            return self.snapshot();
+        };
+        // The display string follows the status: an in-progress task reads as
+        // its active form, anything else as its subject. Fall back to whatever
+        // the entry already showed when this update carries neither.
+        let content = active_form.or(subject).unwrap_or(&existing);
+        self.insert(task_id, content, status.map(todo_status).unwrap_or(TodoStatus::Pending));
+        self.snapshot()
+    }
+
+    fn insert(&mut self, task_id: &str, content: &str, status: TodoStatus) {
+        let Some(todo) = todo_item(content, None, None).map(|todo| TodoItem { status, ..todo })
+        else {
+            return;
+        };
+        match self.tasks.iter_mut().find(|(id, _)| id == task_id) {
+            Some((_, slot)) => *slot = todo,
+            None => self.tasks.push((task_id.to_owned(), todo)),
+        }
+    }
+
+    pub(super) fn snapshot(&self) -> Vec<TodoItem> {
+        self.tasks
+            .iter()
+            .map(|(_, todo)| todo.clone())
+            .collect()
+    }
+}
+
 pub(super) fn input_title(value: Option<&Value>) -> Option<String> {
     let value = value?;
     value
@@ -231,6 +368,150 @@ mod tests {
                 priority: String::new(),
             }])
         );
+    }
+
+    fn contents(todos: &[TodoItem]) -> Vec<(&str, TodoStatus)> {
+        todos
+            .iter()
+            .map(|todo| (todo.content.as_str(), todo.status))
+            .collect()
+    }
+
+    /// The whole-list path keeps replacing, which is what every transport other
+    /// than Claude Code's task tools relies on.
+    #[test]
+    fn replace_swaps_the_whole_list() {
+        let mut accumulator = TodoAccumulator::default();
+        accumulator.stage_create("toolu_1", "first", None);
+        accumulator.resolve_create("toolu_1", "1");
+
+        let todos = accumulator.replace(vec![TodoItem {
+            content: "only".into(),
+            status: TodoStatus::InProgress,
+            priority: String::new(),
+        }]);
+        assert_eq!(
+            contents(&todos),
+            vec![("only", TodoStatus::InProgress)],
+            "a whole-list payload must not merge with accumulated state"
+        );
+    }
+
+    /// The reason the accumulator exists: `TaskCreate` names no id, so the
+    /// entry can only join the list once the paired result reports one.
+    #[test]
+    fn create_waits_for_the_result_to_name_the_task() {
+        let mut accumulator = TodoAccumulator::default();
+        accumulator.stage_create("toolu_1", "Read the driver", Some("Reading the driver"));
+        assert!(
+            accumulator.snapshot().is_empty(),
+            "a staged create is not in the list until its result names it"
+        );
+
+        let todos = accumulator.resolve_create("toolu_1", "task-1");
+        assert_eq!(
+            contents(&todos),
+            vec![("Read the driver", TodoStatus::Pending)],
+            "a created task is pending, and its subject is the display string"
+        );
+
+        // A second resolve for the same tool call must not duplicate the entry.
+        let again = accumulator.resolve_create("toolu_1", "task-1");
+        assert_eq!(again.len(), 1);
+    }
+
+    /// An update addresses a task by id, and an in-progress one reads as its
+    /// active form rather than its subject.
+    #[test]
+    fn update_patches_by_id_and_follows_the_status() {
+        let mut accumulator = TodoAccumulator::default();
+        accumulator.stage_create("toolu_1", "Read the driver", None);
+        accumulator.resolve_create("toolu_1", "task-1");
+        accumulator.stage_create("toolu_2", "Write the panel", None);
+        accumulator.resolve_create("toolu_2", "task-2");
+
+        let todos = accumulator.apply_update(&serde_json::json!({
+            "taskId": "task-1",
+            "status": "in_progress",
+            "activeForm": "Reading the driver",
+        }));
+        assert_eq!(
+            contents(&todos),
+            vec![
+                ("Reading the driver", TodoStatus::InProgress),
+                ("Write the panel", TodoStatus::Pending),
+            ],
+            "order is the order the agent wrote the tasks"
+        );
+    }
+
+    /// Claude Code repairs `id`/`task_id` before execution but not in the
+    /// stream, so the update must read all three spellings.
+    #[test]
+    fn update_accepts_every_id_spelling_and_deletes() {
+        let mut accumulator = TodoAccumulator::default();
+        accumulator.stage_create("t1", "one", None);
+        accumulator.resolve_create("t1", "task-1");
+        accumulator.stage_create("t2", "two", None);
+        accumulator.resolve_create("t2", "task-2");
+
+        let via_id = accumulator.apply_update(&serde_json::json!({
+            "id": "task-1",
+            "status": "completed",
+        }));
+        assert_eq!(via_id[0].status, TodoStatus::Completed);
+
+        let via_snake = accumulator.apply_update(&serde_json::json!({
+            "task_id": "task-2",
+            "status": "completed",
+        }));
+        assert_eq!(via_snake[1].status, TodoStatus::Completed);
+
+        let after_delete = accumulator.apply_update(&serde_json::json!({
+            "taskId": "task-1",
+            "status": "deleted",
+        }));
+        assert_eq!(
+            contents(&after_delete),
+            vec![("two", TodoStatus::Completed)],
+            "a deleted task leaves the list entirely"
+        );
+    }
+
+    /// An update for a task this session never saw must not invent a row, and
+    /// an unknown status must leave the task outstanding rather than dropping it.
+    #[test]
+    fn update_tolerates_unknown_ids_and_statuses() {
+        let mut accumulator = TodoAccumulator::default();
+        accumulator.stage_create("t1", "one", None);
+        accumulator.resolve_create("t1", "task-1");
+
+        let unknown = accumulator.apply_update(&serde_json::json!({
+            "taskId": "task-9",
+            "status": "completed",
+        }));
+        assert_eq!(unknown.len(), 1, "an unrelated id changes nothing");
+
+        let future = accumulator.apply_update(&serde_json::json!({
+            "taskId": "task-1",
+            "status": "deferred_until_tuesday",
+        }));
+        assert_eq!(
+            future[0].status,
+            TodoStatus::Pending,
+            "a status this build does not know leaves the task outstanding"
+        );
+
+        // No id at all is a no-op rather than an error.
+        let idless = accumulator.apply_update(&serde_json::json!({"status": "completed"}));
+        assert_eq!(idless.len(), 1);
+    }
+
+    #[test]
+    fn blank_subjects_are_rejected() {
+        let mut accumulator = TodoAccumulator::default();
+        accumulator.stage_create("t1", "   ", None);
+        assert!(accumulator.resolve_create("t1", "task-1").is_empty());
     }
 }
 

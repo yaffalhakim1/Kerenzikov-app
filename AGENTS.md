@@ -13,6 +13,32 @@
   manually when it is confirmed unavailable.
 - No visual test unless requested.
 
+### Never kill a `waku` process
+
+- **The coding agent is often a child of the app it is working on.** A
+  supervised agent session can run as `waku.exe` → `waku-daemon.exe` →
+  `omp.exe`, so the daemon is not a bystander: killing it kills the session
+  that issued the command, mid-tool-call, and the agent resumes with partial
+  context and no memory of its own recent work. This has happened: a
+  `taskkill /F` on a daemon PID recorded `session_exit {reason: "dispose"}` 221
+  ms later, and the resumed agent then misreported its own completed changes as
+  "someone else's work" and "a different session".
+- Never `taskkill`/`kill` a `waku.exe` or `waku-daemon.exe` process. If one is
+  in the way, report it and stop; do not clear it yourself.
+- Before touching any `waku*` process, answer all three, with evidence:
+  1. **Is it my ancestor?** Walk `ParentProcessId` (`Get-CimInstance
+     Win32_Process`) or `ppid` (macOS/Linux). If the agent process is a
+     descendant, it is the host — never kill it.
+  2. **Debug or release?** A release build is the user's installed app and its
+     daemon; a debug build belongs to the watcher. Neither is disposable.
+  3. **Is it my build?** Compare the process start time against
+     `target/debug/waku.exe`'s mtime. A process older than the binary you just
+     built is not your artifact — that alone rules out killing it.
+- A held port or IPC path is never a reason to kill. Ask the user, or launch
+  against a different port/data directory.
+- Killing the app also stops the watcher, so a "stale process" is usually the
+  live development loop, not debris.
+
 ## Performance
 
 - Treat performance as a product requirement, not a follow-up. Kerenzikov is a native

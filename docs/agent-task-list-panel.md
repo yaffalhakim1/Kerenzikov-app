@@ -10,6 +10,15 @@ will have followed the same path through the codebase.
 > per-provider source events and status vocabularies. The single OpenCode-shaped
 > parser described in Step 2 has since moved to `activity::todo_items`, shared by
 > all of them.
+>
+> **Two later changes.** Claude Code v2.1.268 replaced `TodoWrite` with
+> `TaskCreate` / `TaskUpdate`, which publish one task per call rather than the
+> whole list; `activity::TodoAccumulator` rebuilds the list across calls and the
+> classifier accepts the new names. And the panel gained a **tray** above the
+> composer, so the steps are visible without opening the popover — see
+> [todo-tray.md](todo-tray.md). The popover this walkthrough builds is still
+> there, as the collapsed control's counterpart.
+
 
 ## What was built
 

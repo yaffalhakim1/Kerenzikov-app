@@ -635,6 +635,11 @@ struct ClaudeStreamState {
     last_assistant_model: Option<String>,
     /// Last title copied from Claude's native transcript metadata.
     last_auto_title: Option<String>,
+    /// Claude Code v2.1.268's `TaskCreate`/`TaskUpdate` publish one task per
+    /// call rather than the whole list `TodoWrite` carried, so the task list
+    /// is rebuilt here across calls. Unused, and therefore empty, on a CLI
+    /// old enough to still send `TodoWrite`.
+    todos: activity::TodoAccumulator,
 }
 
 #[derive(Default)]
@@ -1489,11 +1494,40 @@ fn handle_message(
                         }
                         // `TodoWrite` carries the agent's whole task list, so it
                         // feeds the panel in addition to the transcript row.
+                        // Claude Code v2.1.268 replaced it with `TaskCreate` /
+                        // `TaskUpdate`, which carry one task each; those rebuild
+                        // the same list through the accumulator, which re-emits
+                        // the whole list after every call.
                         if kind == ActivityKind::Plan
                             && let Some(input) = block.get("input")
-                            && let Some(todos) = activity::plan_input_todos(input)
                         {
-                            let _ = events.send(DriverEvent::TodoUpdated(todos));
+                            if let Some(todos) = activity::plan_input_todos(input) {
+                                let _ = events.send(DriverEvent::TodoUpdated(
+                                    state.todos.replace(todos),
+                                ));
+                            } else if let Some(tool_id) = id.as_deref() {
+                                let name = ActivityKind::tool_leaf_name(&wire_title);
+                                let todos = match name.as_str() {
+                                    "taskcreate" => {
+                                        let subject = input
+                                            .get("subject")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or_default();
+                                        let active_form = input
+                                            .get("activeForm")
+                                            .or_else(|| input.get("active_form"))
+                                            .and_then(Value::as_str);
+                                        state.todos.stage_create(tool_id, subject, active_form);
+                                        None
+                                    }
+                                    "taskupdate" => Some(state.todos.apply_update(input)),
+                                    _ => None,
+                                };
+                                if let Some(todos) = todos {
+                                    let _ = events
+                                        .send(DriverEvent::TodoUpdated(todos));
+                                }
+                            }
                         }
                         let _ = events.send(DriverEvent::RichActivity(activity::tool_activity(
                             id,
@@ -1546,6 +1580,19 @@ fn handle_message(
                         None,
                     ));
                 let failed = block.get("is_error").and_then(Value::as_bool) == Some(true);
+                // `TaskCreate` returns the id it assigned, and that id is what
+                // later `TaskUpdate` calls address, so the staged entry can only
+                // join the list here.
+                if kind == ActivityKind::Plan
+                    && !failed
+                    && let Some(id) = id.as_deref()
+                    && let Some(task_id) = value
+                        .pointer("/tool_use_result/task/id")
+                        .and_then(Value::as_str)
+                {
+                    let todos = state.todos.resolve_create(id, task_id);
+                    let _ = events.send(DriverEvent::TodoUpdated(todos));
+                }
                 // The result text of an edit is only a confirmation sentence.
                 // The positioned hunks Claude actually applied ride alongside
                 // it, so hand them over as the activity's source and the diff
@@ -1798,6 +1845,19 @@ mod tests {
             Mutex::new(true),
             ClaudeStreamState::default(),
         )
+    }
+
+    /// Drained event channel → the last task list the driver published.
+    fn last_todos(
+        event_rx: &crossbeam_channel::Receiver<DriverEvent>,
+    ) -> Option<Vec<crate::model::TodoItem>> {
+        event_rx
+            .try_iter()
+            .filter_map(|event| match event {
+                DriverEvent::TodoUpdated(todos) => Some(todos),
+                _ => None,
+            })
+            .last()
     }
 
     #[cfg(unix)]
@@ -2503,6 +2563,138 @@ mod tests {
             &seen[1],
             DriverEvent::RichActivity(item) if item.kind == ActivityKind::Plan
         ));
+    }
+
+    /// Claude Code v2.1.268 dropped `TodoWrite` in favour of `TaskCreate` /
+    /// `TaskUpdate`, which publish one task per call and name a created task's
+    /// id only in the paired tool result. This drives that exact shape and
+    /// asserts the list that reaches the panel after each step.
+    #[test]
+    fn claude_task_tools_rebuild_the_task_list() {
+        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
+
+        // Two creates: each is staged, and the list stays empty until its
+        // result reports the id.
+        for (tool_id, subject) in [("toolu_a", "Read the driver"), ("toolu_b", "Write the panel")] {
+            handle_message(
+                &json!({"type": "assistant", "message": {"content": [{
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": "TaskCreate",
+                    "input": {"subject": subject, "activeForm": "Working"},
+                }]}}),
+                "s",
+                &events,
+                &commands,
+                &turn,
+                true,
+                &mut state,
+            );
+        }
+        assert!(
+            event_rx.try_iter().all(|event| !matches!(event, DriverEvent::TodoUpdated(_))),
+            "a TaskCreate carries no id yet, so it must not emit a list"
+        );
+
+        for (tool_id, task_id) in [("toolu_a", "1"), ("toolu_b", "2")] {
+            handle_message(
+                &json!({"type": "user", "message": {"content": [{
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": "Created task",
+                }]}, "tool_use_result": {"task": {"id": task_id, "subject": "x"}}}),
+                "s",
+                &events,
+                &commands,
+                &turn,
+                true,
+                &mut state,
+            );
+        }
+        let created = last_todos(&event_rx).expect("the paired result must publish the list");
+        assert_eq!(created.len(), 2);
+        assert_eq!(created[0].content, "Read the driver");
+        assert_eq!(created[1].content, "Write the panel");
+        assert!(created
+            .iter()
+            .all(|todo| todo.status == crate::model::TodoStatus::Pending));
+
+        // An update addresses the task by the id the result reported.
+        handle_message(
+            &json!({"type": "assistant", "message": {"content": [{
+                "type": "tool_use",
+                "id": "toolu_c",
+                "name": "TaskUpdate",
+                "input": {"taskId": "1", "status": "in_progress", "activeForm": "Reading the driver"},
+            }]}}),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            true,
+            &mut state,
+        );
+        let updated = last_todos(&event_rx).expect("TaskUpdate must publish the list");
+        assert_eq!(updated.len(), 2, "an update patches, it does not append");
+        assert_eq!(updated[0].content, "Reading the driver");
+        assert_eq!(updated[0].status, crate::model::TodoStatus::InProgress);
+        assert_eq!(updated[1].status, crate::model::TodoStatus::Pending);
+
+        // Deletion removes it, and the surviving task keeps its order.
+        handle_message(
+            &json!({"type": "assistant", "message": {"content": [{
+                "type": "tool_use",
+                "id": "toolu_d",
+                "name": "TaskUpdate",
+                "input": {"taskId": "1", "status": "deleted"},
+            }]}}),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            true,
+            &mut state,
+        );
+        let after_delete = last_todos(&event_rx).expect("a deletion must publish the list");
+        assert_eq!(after_delete.len(), 1);
+        assert_eq!(after_delete[0].content, "Write the panel");
+    }
+
+    /// The namespaced spelling an MCP-hosted task tool sends must reach the
+    /// same accumulator, or the panel stays empty for those sessions.
+    #[test]
+    fn namespaced_task_create_still_feeds_the_list() {
+        let (events, event_rx, commands, _command_rx, turn, mut state) = harness();
+        handle_message(
+            &json!({"type": "assistant", "message": {"content": [{
+                "type": "tool_use",
+                "id": "toolu_ns",
+                "name": "mcp__tools__task_create",
+                "input": {"subject": "Namespaced task"},
+            }]}}),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            true,
+            &mut state,
+        );
+        handle_message(
+            &json!({"type": "user", "message": {"content": [{
+                "type": "tool_result",
+                "tool_use_id": "toolu_ns",
+                "content": "ok",
+            }]}, "tool_use_result": {"task": {"id": "7"}}}),
+            "s",
+            &events,
+            &commands,
+            &turn,
+            true,
+            &mut state,
+        );
+        let todos = last_todos(&event_rx).expect("a namespaced TaskCreate must feed the list");
+        assert_eq!(todos.len(), 1);
+        assert_eq!(todos[0].content, "Namespaced task");
     }
 
     #[test]

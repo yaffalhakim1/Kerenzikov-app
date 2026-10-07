@@ -371,6 +371,7 @@ impl Render for Waku {
                     .when(self.selected_project().is_some(), |element| {
                         element
                             .children(self.render_queued_messages(cx))
+                            .children(self.render_todo_tray(cx))
                             .child(self.render_composer(window, cx))
                             .child(self.render_workspace_footer(cx))
                     })

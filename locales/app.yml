@@ -1262,6 +1262,12 @@ todo.more:
   en: "+%{count} more"
 todo.tooltip:
   en: The agent's task list
+todo.all_done:
+  en: All done
+todo.earlier:
+  en: "%{count} earlier"
+todo.later:
+  en: "%{count} later"
 goal.chip_active:
   en: Pursuing goal
 goal.chip_paused:
