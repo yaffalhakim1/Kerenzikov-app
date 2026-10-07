@@ -56,11 +56,20 @@ function UpdateRow() {
     setChecking(true);
     setStatus(null);
     setFailed(false);
+    // Reading the installed build number is inside the `try`: a build that
+    // cannot report one must surface as "could not check" in this row, not
+    // throw during render and take the whole Settings screen down.
+    let current: number;
     try {
-      const found = await checkForUpdateCached(
-        fetch,
-        currentVersionCode(Constants.expoConfig),
-      );
+      current = currentVersionCode(Constants.expoConfig);
+    } catch (cause) {
+      setFailed(true);
+      setStatus(cause instanceof Error ? cause.message : String(cause));
+      setChecking(false);
+      return;
+    }
+    try {
+      const found = await checkForUpdateCached(fetch, current);
       setUpdate(found);
       if (!found) setStatus('Kerenzikov is up to date.');
     } catch (cause) {

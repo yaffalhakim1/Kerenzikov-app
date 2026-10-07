@@ -34,11 +34,28 @@ export interface AvailableUpdate {
 
 /** The installed build's `versionCode`, read from the native bundle by the
  *  caller (Expo surfaces it, and importing it here would drag React Native
- *  into this pure module). A missing value reads 0, which offers any manifest. */
+ *  into this pure module).
+ *
+ *  A missing value must NOT become 0. Zero compares below every manifest, so
+ *  the app would confidently offer "an update" for the version it is already
+ *  running — the opposite failure from the one this module exists to prevent,
+ *  and a worse one, because a same-version install is rejected by Android
+ *  after the user has downloaded the whole file.
+ *
+ *  Throwing hands the problem to `checkForUpdate`'s caller, which already
+ *  distinguishes "up to date" from "could not check" and renders a retry.
+ *  Reporting "could not check" is honest; inventing a build number is not. */
 export function currentVersionCode(expoConfig?: {
   android?: { versionCode?: number | null } | null;
 } | null): number {
-  return expoConfig?.android?.versionCode ?? 0;
+  const versionCode = expoConfig?.android?.versionCode;
+  if (typeof versionCode !== 'number' || !Number.isFinite(versionCode)) {
+    throw new Error(
+      'This build does not report its versionCode, so an update cannot be ' +
+        'checked safely. Reinstall from the latest release.',
+    );
+  }
+  return versionCode;
 }
 
 export function parseManifest(value: unknown): UpdateManifest | null {
