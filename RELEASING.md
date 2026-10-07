@@ -26,22 +26,150 @@ Trigger it either way:
 The draft is never published automatically; publish it from the GitHub UI when
 the artifacts look right.
 
-## Cutting a release
+## The loop
 
-1. **Bump `version` in `Cargo.toml`** — the single source of truth for both the
-   workflow and the artifact names.
-2. **Write the release notes** — add a `## [<version>]` section at the top of
-   [`CHANGELOG.md`](CHANGELOG.md). The `draft-release` job extracts that section
-   as the release body, falling back to commits since the previous `v*` tag when
-   there is no matching section.
-3. **Push the tag** (`git tag v<version> && git push origin v<version>`) or run
-   the workflow manually, then verify before publishing the draft:
-   - `artifacts/` contains `appcast-windows-x86_64.xml` (and `-aarch64` when
-     that leg built).
-   - The bucket contains the new `.exe` plus the feeds (`rclone lsf`).
-   - The XML's `<enclosure url="...">` points at this fork's `r2.dev` URL.
-4. **Publish the draft** in the GitHub UI. The first published feed seeds the
-   bucket; every later install compares against it.
+Every change follows the same five steps. Do not skip one because it looks
+unnecessary — each has bitten this repo at least once.
+
+```
+1. Branch          feat/… or fix/… off a freshly-fetched main
+2. PR              open it, then wait for every check to go green
+3. Squash merge    gh pr merge <n> --squash --delete-branch
+4. Bump            its own commit on main, bumping all five version sites
+5. Release         dispatch the workflow, then publish the draft by hand
+```
+
+A merge into `main` runs **nothing** — `test.yml` is `pull_request` only, on the
+theory that the branch head was already verified. So step 2 is the only place
+tests run. **Never merge a red PR**, and never merge on a "the other jobs are
+probably fine" basis: a skipped job means the diff did not touch that path, not
+that it passed.
+
+```sh
+git fetch origin main && git checkout main && git pull --ff-only origin main
+git checkout -b fix/what-is-wrong
+
+# … work, commit …
+
+gh pr create --base main --title "fix(scope): what changed" --body-file /tmp/body.md
+gh pr checks <n> --watch          # wait for green
+gh pr merge <n> --squash --delete-branch
+
+git checkout main && git pull --ff-only origin main
+```
+
+## Step 4: the bump, and the five version sites
+
+**This is the step that goes wrong.** `Cargo.toml` is not the only version in
+the tree, and the other four do not update themselves. A release that bumps
+only `Cargo.toml` ships a binary whose Settings screen reports a stale number
+and — worse — an Android build the updater will never offer to anyone.
+
+| File | Field | Who reads it | Consequence if stale |
+| --- | --- | --- | --- |
+| `Cargo.toml` | `version` | the release workflow, artifact names | tag mismatch fails the run |
+| `Cargo.lock` | `[[package]] name = "waku"` → `version` | `cargo --locked` | build fails on a locked check |
+| `CHANGELOG.md` | `## [<version>]` section | the release body | notes fall back to raw commit log |
+| `apps/mobile/app.json` | `expo.version` | Settings → **Version** | the app displays an old version |
+| `apps/mobile/android/app/build.gradle` | `versionCode`, `versionName` | the Android updater | **installed apps are never offered the update** |
+
+The last two are the ones nobody remembers. Both were stale at v0.1.50:
+
+- `app.json` sat at `0.1.45`, so Settings said "0.1.45" on a 0.1.50 build.
+- `build.gradle` had `versionCode 22`, unchanged since v0.1.48. The manifest's
+  `versionCode` is read back out of the assembled APK, so it was `22` too, and
+  `app-update.ts` only offers an update when the manifest's number is **strictly
+  greater** than the installed one. `22 <= 22` meant **0.1.49 and 0.1.50 were
+  never offered to anyone already on 0.1.48 or later.**
+
+### `versionCode` must increase every release
+
+It is a monotonic integer, not a display string. It does not track the semver
+and must never repeat. Current convention is a hand-increment:
+
+```
+versionCode 22   ->   versionCode 23
+```
+
+Check what the last release used before choosing a number, because a repeated
+value is invisible: the build succeeds, the release publishes, and the update
+simply never appears.
+
+```sh
+# What does main currently carry? This is the value to increment.
+git fetch origin main
+git show origin/main:apps/mobile/android/app/build.gradle | grep versionCode
+```
+
+Read it from `origin/main`, not from `git describe --tags`: a release's tag
+points at the manifest commit the workflow pushes *after* the bump, so
+`describe` from a local `main` that has not pulled that commit reports the
+previous release and tells you to reuse a number.
+
+### The bump commit
+
+```sh
+# 1. Cargo.toml + Cargo.lock + CHANGELOG.md + the two mobile files.
+#    Write the CHANGELOG for the people downloading the build: what changed for
+#    them, not the commit history. Fold an unreleased feature's fixes into its
+#    own bullet rather than adding separate entries.
+
+# 2. Verify the five sites agree before committing.
+grep '^version' Cargo.toml
+grep -A1 'name = "waku"' Cargo.lock | grep version
+grep -n 'versionCode\|versionName' apps/mobile/android/app/build.gradle
+grep -n '"version"' apps/mobile/app.json
+
+# 3. Confirm the changelog section parses, or the release body silently
+#    becomes the raw commit log.
+bun -e "import { extractReleaseNotes } from './scripts/changelog.ts';
+  const t = await Bun.file('CHANGELOG.md').text();
+  console.log(extractReleaseNotes(t, '0.1.51') ?? 'NULL — would fall back');"
+
+# 4. Confirm the lockfile still resolves.
+cargo check --locked -p waku-core
+
+git add Cargo.toml Cargo.lock CHANGELOG.md apps/mobile/app.json apps/mobile/android/app/build.gradle
+git commit -m "chore: bump version to 0.1.51"
+git push origin main
+```
+
+## Step 5: release and publish
+
+Either trigger works, and they are equivalent for a version not yet published:
+
+```sh
+# No tag needed. Releases whatever Cargo.toml says, as v<version>.
+gh workflow run release.yml --ref main
+```
+
+```sh
+# Or tag the bump commit — the tag must equal Cargo.toml, or the `version` job
+# exits 1 before anything builds.
+git tag -a v0.1.51 -m "Kerenzikov v0.1.51"
+git push origin v0.1.51
+```
+
+A run **skips every job** if that version is already published (drafts do not
+count). Bumping is therefore mandatory: re-dispatching without a bump is a
+no-op, not a rebuild.
+
+Then watch it and publish:
+
+```sh
+gh run watch <run-id> --exit-status
+gh release view v0.1.51 --json isDraft,assets
+gh release edit v0.1.51 --draft=false      # the one manual step
+```
+
+Before publishing, check:
+
+- All five jobs succeeded — `Resolve version`, both Windows legs, `Android APK`,
+  `Draft GitHub release`.
+- The release body is the CHANGELOG section, not a commit list.
+- `appcast-windows-x86_64.xml` carries the new `shortVersionString` and its
+  `<enclosure url>` points at this fork's `r2.dev` bucket.
+- `latest-windows.txt` names the new version.
 
 One-time caveat: builds predating the updater (no feed URL, upstream key)
 never self-update and must be downloaded manually once. Every build since
