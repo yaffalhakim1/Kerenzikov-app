@@ -653,6 +653,48 @@ pub fn http_get(url: &str, headers: &[String]) -> anyhow::Result<(u16, String)> 
     split_status_and_body(&String::from_utf8_lossy(&output.stdout))
 }
 
+/// POST `body` (JSON) to `url`. Headers go on argv because a push token is a
+/// delivery address, not a credential, and the body is written to stdin so it
+/// never appears in the process table. Returns the status code and body.
+pub fn http_post(url: &str, headers: &[String], body: &str) -> anyhow::Result<(u16, String)> {
+    let mut command = crate::command_env::plain_command(CURL_PATH);
+    command.args(["-sS", "--max-time", "15", "-D", "-", "-X", "POST"]);
+    for header in headers {
+        command.args(["-H", header]);
+    }
+    command.args(["--data-binary", "@-", url]);
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context(tr!("usage_error.run_curl"))?;
+    {
+        let stdin = child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| anyhow!(tr!("usage_error.curl_stdin_unavailable")))?;
+        stdin
+            .write_all(body.as_bytes())
+            .context(tr!("usage_error.configure_curl"))?;
+    }
+    let output = child
+        .wait_with_output()
+        .context(tr!("usage_error.curl_did_not_finish"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let error = stderr
+            .lines()
+            .last()
+            .map(str::trim)
+            .filter(|error| !error.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| tr!("usage_error.unknown_error"));
+        return Err(anyhow!(tr!("usage_error.curl_failed", error = error)));
+    }
+    split_status_and_body(&String::from_utf8_lossy(&output.stdout))
+}
+
 /// `-D -` prefixes the body with the response headers; the status code is on
 /// the first line and the body follows the blank separator line.
 fn split_status_and_body(raw: &str) -> anyhow::Result<(u16, String)> {

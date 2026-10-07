@@ -25,6 +25,11 @@ import { TaskDrawerHost, useTaskDrawer } from "@/components/task-drawer";
 import { DaemonProvider, useDaemon } from "@/lib/daemon-context";
 import { RuntimeProvider } from "@/lib/runtime-context";
 import { KeyboardOffsetProvider } from "@/lib/keyboard-offset";
+import {
+  ensureAndroidChannel,
+  showNotificationsInForeground,
+} from "@/lib/push-notifications";
+import { useNotificationDeepLink } from "@/hooks/use-notification-deep-link";
 import { ThemePreferenceProvider } from "@/lib/theme-preference-context";
 
 /** Deep links and state restores keep the new-task home as the stack anchor. */
@@ -57,6 +62,13 @@ const floatingHeader = {
 } satisfies NativeStackNavigationOptions;
 
 export default function RootLayout() {
+  // Notifications need a handler and, on Android 8+, a channel before any can
+  // be shown. Both are process-wide, so they are set once here.
+  useEffect(() => {
+    showNotificationsInForeground();
+    void ensureAndroidChannel();
+  }, []);
+  useNotificationDeepLink();
   return (
     <GestureHandlerRootView style={styles.root}>
       <ThemePreferenceProvider>

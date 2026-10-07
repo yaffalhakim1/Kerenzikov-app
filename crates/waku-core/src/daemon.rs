@@ -66,6 +66,9 @@ pub struct WakuBackend {
     /// Sessions whose next settle must NOT start a queued prompt: the user
     /// pressed Stop. Cleared by any new prompt on the session.
     drain_suppressed: Mutex<HashSet<Uuid>>,
+    /// Mobile devices that asked to be notified while backgrounded. Shared
+    /// with each session's event thread, which sends the pushes.
+    push_registry: crate::push::PushRegistry,
 }
 
 /// One settled turn whose queued prompt the drain worker should consider.
@@ -130,6 +133,7 @@ impl WakuBackend {
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             drain_requests,
             drain_suppressed: Mutex::new(HashSet::new()),
+            push_registry: crate::push::PushRegistry::new(),
         })
     }
 
@@ -292,6 +296,14 @@ impl Backend for WakuBackend {
             Command::GetSettings => Ok(ResponsePayload::Settings {
                 settings: self.settings.get(),
             }),
+            Command::RegisterPushToken {
+                token,
+                platform,
+                foreground,
+            } => {
+                self.push_registry.register(token, platform, foreground);
+                Ok(ResponsePayload::Ack)
+            }
             Command::UpdateSettings { settings } => {
                 self.settings.replace(settings)?;
                 Ok(ResponsePayload::Ack)
@@ -895,6 +907,8 @@ impl Backend for WakuBackend {
                 let drain_requests = self.drain_requests.clone();
                 let drain_driver = handle.clone();
                 let drain_events = events.clone();
+                let push_registry = self.push_registry.clone();
+                let push_state = self.task_state.clone();
                 // Read once at start; a Cancel during the turn flips the
                 // backend's set, but the suppression the drain checks is the
                 // one the worker sees — populated by the request path above.
@@ -911,6 +925,7 @@ impl Backend for WakuBackend {
                                     suppressed,
                                 });
                             }
+                            notify_push_for_event(&push_registry, &push_state, session_id, &event);
                             let wire = event_to_wire(event).unwrap_or_else(|error| {
                                 WireDriverEvent::new(
                                     "error",
@@ -1994,11 +2009,56 @@ fn handle_driver_command(
         // Hub-level (ListConnections) and dispatch-level (Cancel: suppression
         // is applied in `handle`) commands never reach the driver path.
         | Command::ListConnections
+        | Command::RegisterPushToken { .. }
         | Command::Cancel => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }
     Ok(ResponsePayload::Ack)
+}
+
+/// Pushes a notification for the events a backgrounded phone should know
+/// about: a finished turn, a permission request, and a structured-input
+/// request. The device title comes from task state when known, so the notice
+/// reads as the task's name rather than an opaque id. Runs on the session's
+/// event thread, which is allowed to block on the network.
+fn notify_push_for_event(
+    registry: &crate::push::PushRegistry,
+    task_state: &Mutex<PersistedState>,
+    session_id: Uuid,
+    event: &DriverEvent,
+) {
+    if registry.backgrounded().is_empty() {
+        return;
+    }
+    let task = task_state
+        .lock()
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .map(|session| session.title.clone())
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or_else(|| "Kerenzikov task".to_owned());
+    let notice = match event {
+        DriverEvent::TurnFinished { success, summary } => {
+            let mut notice =
+                crate::push::PushNotice::turn_finished(*success, summary.as_deref(), &task);
+            notice.session_id = Some(session_id);
+            notice
+        }
+        DriverEvent::Permission { title, .. } => {
+            let mut notice = crate::push::PushNotice::permission(title, &task);
+            notice.session_id = Some(session_id);
+            notice
+        }
+        DriverEvent::UserInputRequested { .. } => {
+            let mut notice = crate::push::PushNotice::user_input(&task);
+            notice.session_id = Some(session_id);
+            notice
+        }
+        _ => return,
+    };
+    crate::push::notify(registry, &notice);
 }
 
 fn ensure_shell_environment() {

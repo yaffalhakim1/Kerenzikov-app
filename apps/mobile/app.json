@@ -92,6 +92,12 @@
           "microphonePermission": false
         }
       ],
+      [
+        "expo-notifications",
+        {
+          "color": "#c35e0a"
+        }
+      ],
       "./plugins/with-paste-input"
     ],
     "experiments": {

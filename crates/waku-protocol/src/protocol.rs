@@ -279,6 +279,15 @@ pub enum Command {
     /// surfaces this so a hosted session's peers are visible, mirroring the
     /// multi-viewport model where several apps share one engine.
     ListConnections,
+    /// Remember where to reach a mobile client when it is not watching. The
+    /// client sends this after connecting and whenever it moves between the
+    /// foreground and the background; the daemon pushes a notification only
+    /// while `foreground` is false. An empty `token` forgets the device.
+    RegisterPushToken {
+        token: String,
+        platform: String,
+        foreground: bool,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

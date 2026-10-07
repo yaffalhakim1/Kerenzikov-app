@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { PROTOCOL_VERSION, WakuClient, type WebSocketLike } from "@waku/client";
 
-import { DaemonLink, type DaemonLinkOptions } from "./daemon-link";
+import { DaemonLink, PROBE_RETRY_MS, type DaemonLinkOptions } from "./daemon-link";
 
 class FakeSocket implements WebSocketLike {
   readyState = 0;
@@ -285,6 +285,10 @@ describe("DaemonLink", () => {
     const request = JSON.parse(sockets[0]!.sent.at(-1)!) as { command: unknown };
     expect(request.command).toEqual({ type: "getSettings" });
 
+    // The first probe times out; the link retries once before dropping.
+    await realWait(25);
+    expect(link.state.phase).toBe("connected");
+    await clock.advance(PROBE_RETRY_MS);
     await realWait(25);
     expect(link.state.phase).toBe("reconnecting");
     expect(link.state.outage).toMatchObject({
@@ -295,6 +299,30 @@ describe("DaemonLink", () => {
     expect(sockets[0]!.readyState).toBe(3);
     await clock.advance(0);
     expect(sockets).toHaveLength(2);
+  });
+
+  test("a single timed-out probe after a resume keeps the socket", async () => {
+    const { clock, sockets, link } = fixture({ probeTimeoutMs: 5, freshnessMs: 5_000 });
+    const opened = link.open();
+    handshake(sockets[0]!);
+    await opened;
+
+    link.setActive(false);
+    clock.now += 10_000;
+    link.setActive(true);
+    // The first probe times out, as a still-suspended radio would.
+    await realWait(25);
+    // The next request the link sends (the probe retry) is answered at once:
+    // the socket was merely suspended, so it survives.
+    const originalSend = sockets[0]!.send.bind(sockets[0]!);
+    sockets[0]!.send = (data: string) => {
+      originalSend(data);
+      sockets[0]!.answerLast();
+    };
+    await clock.advance(PROBE_RETRY_MS);
+    await realWait(25);
+    expect(link.state.phase).toBe("connected");
+    expect(sockets).toHaveLength(1);
   });
 
   test("a recent message makes the foreground probe unnecessary", async () => {
