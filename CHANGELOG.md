@@ -12,6 +12,24 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.52]
+
+### Desktop
+
+- **The task list shows up for more agents.** The plan an agent keeps while it
+  works was only appearing for some harnesses, and Claude Code was the one
+  people noticed: recent versions of it replaced the single `TodoWrite` tool
+  with four smaller ones that create, update, and list tasks one at a time.
+  Kerenzikov did not recognise any of them, so the list stayed empty. It now
+  understands both shapes — the whole-list form every other harness sends, and
+  the incremental one, which is reassembled across calls as the agent makes
+  them.
+- **The task list sits above the composer while a task runs.** It used to be a
+  small chip you had to click. Now the current step is visible without asking:
+  the tray shows the step in progress and the ones around it, with a count of
+  what came before and after, and collapses back to the chip if you would
+  rather not see it. It renders nothing at all when there is no plan.
+
 ## [0.1.51]
 
 ### Android
