@@ -92,9 +92,13 @@ android {
         applicationId 'sh.waku.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 22
-        versionName "0.1.45"
-
+        versionName rootProject.ext.wakuVersion
+        // Derived, never hand-written: a repeated versionCode is invisible
+        // until an update silently fails to be offered. See
+        // scripts/version-sites.ts — `bun run version:bump --check` fails when
+        // these three lines drift out of that rule.
+        def (wakuMajor, wakuMinor, wakuPatch) = rootProject.ext.wakuVersion.tokenize('.')
+        versionCode wakuMajor.toInteger() * 10000 + wakuMinor.toInteger() * 100 + wakuPatch.toInteger()
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {

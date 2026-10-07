@@ -4,6 +4,9 @@
   "scripts": {
     "dev": "bun ./scripts/dev.ts",
     "release": "bun ./scripts/release.ts",
+    "version:bump": "bun ./scripts/bump-version.ts",
+    "version:check": "bun ./scripts/version-sites.ts",
+    "test:mobile": "bun --filter @waku/mobile test",
     "protocol:generate": "cargo run -p waku-protocol --bin export_types",
     "protocol:check": "cargo run -p waku-protocol --bin export_types -- --check",
     "db:generate": "drizzle-kit generate",

@@ -12,6 +12,23 @@ buildscript {
   }
 }
 
+// The repository's single version, carried in from the repository root's
+// Cargo.toml — the same number the release workflow resolves, the same one
+// `scripts/version-sites.ts` writes into every other site.
+//
+// Reading it at configuration time rather than checking a number in keeps a
+// released APK from ever disagreeing with the manifest it was built beside: a
+// failed read fails the build, because a wrong `versionCode` would publish a
+// release no installed app is ever offered.
+def wakuCargoToml = rootProject.file("../../../Cargo.toml")
+def wakuCargoText = wakuCargoToml.text
+def wakuVersionMatch = (wakuCargoText =~ /(?m)^version = "(\d+\.\d+\.\d+)"$/)
+if (wakuVersionMatch.find()) {
+  rootProject.ext.wakuVersion = wakuVersionMatch.group(1)
+} else {
+  throw new GradleException("No `version = \"x.y.z\"` in ${wakuCargoToml}; cannot version this build.")
+}
+
 allprojects {
   repositories {
     google()

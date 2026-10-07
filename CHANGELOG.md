@@ -12,6 +12,28 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.51]
+
+### Android
+
+- **Updates can reach you again.** Every Android build from 0.1.48 onward
+  reported the same internal build number, and the app only offers an update
+  when the release's number is higher — so 0.1.49 and 0.1.50 were published,
+  downloadable, and never offered to anyone already running 0.1.48 or later.
+  The build number is now derived from the version instead of being maintained
+  by hand, so it cannot repeat. **If you are on 0.1.48 or newer, install this
+  one manually from the release page; from 0.1.52 onward the app will tell you
+  about new versions itself.**
+- **The version in Settings is the version you are running.** It was stuck at
+  whatever number was last typed into the app's configuration file, which was
+  three releases behind.
+
+### Under the hood
+
+- The release workflow builds only what changed: a release that touches just
+  the Android app no longer spends two Windows runners producing installers
+  identical to the previous release's.
+
 ## [0.1.50]
 
 ### Mobile

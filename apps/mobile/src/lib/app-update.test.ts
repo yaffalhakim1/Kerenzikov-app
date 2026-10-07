@@ -75,11 +75,14 @@ describe('app update', () => {
     expect(parsed?.versionName).toBe('12');
   });
 
-  test('reports an installed build number even outside Android', () => {
-    // The value is only used for comparison, so a web/test host reading 0
-    // must not throw.
-    expect(currentVersionCode()).toBe(0);
+  test('reports an installed build number, and refuses to invent one', () => {
+    // Reporting "could not check" is honest; defaulting to 0 would offer an
+    // update for the build already installed, which Android then refuses after
+    // the user downloads the whole APK.
     expect(currentVersionCode({ android: { versionCode: 10 } })).toBe(10);
-    expect(currentVersionCode({ android: null })).toBe(0);
+    expect(() => currentVersionCode()).toThrow();
+    expect(() => currentVersionCode(null)).toThrow();
+    expect(() => currentVersionCode({ android: null })).toThrow();
+    expect(() => currentVersionCode({ android: {} })).toThrow();
   });
 });

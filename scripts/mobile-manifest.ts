@@ -21,6 +21,8 @@
 import { existsSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
+import { deriveVersionCode } from "./version-sites.ts";
+
 const projectRoot = resolve(import.meta.dir, "..");
 
 /** Where tagged release assets live. GitHub puts the tag in the path, so the
@@ -70,6 +72,21 @@ export async function writeMobileManifest(
 ): Promise<string> {
   if (!Number.isInteger(versionCode) || versionCode < 1) {
     throw new Error(`versionCode must be a positive integer, got ${versionCode}`);
+  }
+  // The build number and the version name are read from two different places
+  // (the APK's manifest and Cargo.toml), so they can disagree without anything
+  // looking wrong — the release still builds, publishes, and downloads fine.
+  // What a disagreement costs is silent: the installed app compares this
+  // number against its own and offers nothing when it is not strictly greater,
+  // so every user on the previous build is simply never told. Verify the pair
+  // against the rule that derives one from the other instead.
+  const expected = deriveVersionCode(versionName);
+  if (versionCode !== expected) {
+    throw new Error(
+      `Manifest build number ${versionCode} does not match ${versionName} ` +
+        `(expected ${expected}). The APK's versionCode and Cargo.toml's version ` +
+        "have drifted; installed apps would never be offered this release.",
+    );
   }
   const apk = options.apk ?? apkName(versionName);
   const path = join(assetsDir, apk);

@@ -11,10 +11,43 @@ The release path is [`.github/workflows/release.yml`](.github/workflows/release.
 | Job | Runner | Produces |
 | --- | --- | --- |
 | `version` | ubuntu-latest | reads `version` from `Cargo.toml`, refuses a mismatched `v*` tag |
+| `changes` | ubuntu-latest | diffs against the previous `v*` tag: which platforms this release touched |
 | `windows-x86_64` | windows-latest | `Kerenzikov-<version>-x86_64-Setup.exe`, `kerenzikov-<version>-x86_64-pc-windows-msvc.zip` |
 | `windows-arm64` | windows-11-arm | `Kerenzikov-<version>-aarch64-Setup.exe`, `kerenzikov-<version>-aarch64-pc-windows-msvc.zip` |
 | `android-apk` | ubuntu-22.04 | `Kerenzikov-<version>-universal.apk` |
-| `draft-release` | ubuntu-latest | a **draft** GitHub release with all of the above, plus `latest-windows.txt` and the signed `appcast-windows-*.xml` feeds; mirrors installers + feeds to R2 |
+| `draft-release` | ubuntu-latest | a **draft** GitHub release with whatever the jobs above produced, plus `latest-windows.txt` and the signed `appcast-windows-*.xml` feeds when Windows built; mirrors installers + feeds to R2 |
+
+### A release only builds the platforms it changed
+
+There is no gate to choose: `changes` diffs the release against the previous
+`v*` tag and the platform jobs follow it.
+
+- **Android changes only** → only the APK builds, and the draft release carries
+  just the APK and the refreshed `mobile-latest.json`. The Windows feed is left
+  alone, because republishing it would offer users an installer identical to
+  the one they already have.
+- **Desktop changes** → both Windows legs build, the appcasts are re-signed,
+  and the installers and feeds are mirrored to R2.
+- **Both** → everything, as before.
+
+The desktop filter deliberately excludes `Cargo.toml`, `Cargo.lock`, and
+`CHANGELOG.md`. **Every** release bumps those three, so including them would
+make every release look like a desktop release and defeat the gate entirely —
+which is what was happening: v0.1.50 changed only mobile code and still rebuilt
+both Windows installers. The Android filter keeps them, because a bump is the
+only thing that can publish a new APK.
+
+One consequence worth knowing: v0.1.50 was the last Windows build, and the bump
+to 0.1.51 does not itself trigger a Windows build. The next release that touches
+desktop code produces the Windows installer, and its appcast and
+`latest-windows.txt` — regenerated every Windows release — re-point everything
+correctly then. Both `latest-windows.txt` and the appcast still *name* a version
+older than `Cargo.toml` until that happens, which is the honest description of
+the newest Windows build that exists.
+
+The `changes` job resolves its base from the *previous* tag, not from the
+release's own tag: on a tag run the tag already exists, so diffing it against
+itself would report nothing changed and skip every job.
 
 Trigger it either way:
 
@@ -26,22 +59,159 @@ Trigger it either way:
 The draft is never published automatically; publish it from the GitHub UI when
 the artifacts look right.
 
-## Cutting a release
+### Tests have to be asked for
 
-1. **Bump `version` in `Cargo.toml`** — the single source of truth for both the
-   workflow and the artifact names.
-2. **Write the release notes** — add a `## [<version>]` section at the top of
-   [`CHANGELOG.md`](CHANGELOG.md). The `draft-release` job extracts that section
-   as the release body, falling back to commits since the previous `v*` tag when
-   there is no matching section.
-3. **Push the tag** (`git tag v<version> && git push origin v<version>`) or run
-   the workflow manually, then verify before publishing the draft:
-   - `artifacts/` contains `appcast-windows-x86_64.xml` (and `-aarch64` when
-     that leg built).
-   - The bucket contains the new `.exe` plus the feeds (`rclone lsf`).
-   - The XML's `<enclosure url="...">` points at this fork's `r2.dev` URL.
-4. **Publish the draft** in the GitHub UI. The first published feed seeds the
-   bucket; every later install compares against it.
+`test.yml` runs on `pull_request`, and a merge into `main` runs nothing — so a
+commit that lands on `main` without a PR (a bump, a workflow edit) has no
+checks at all. `Actions → Tests → Run workflow` runs the full matrix against a
+ref on demand; with no pull request to diff, every path filter falls through to
+"run everything".
+
+## The loop
+
+Every change follows the same five steps. Do not skip one because it looks
+unnecessary — each has bitten this repo at least once.
+
+```
+1. Branch          feat/… or fix/… off a freshly-fetched main
+2. PR              open it, then wait for every check to go green
+3. Squash merge    gh pr merge <n> --squash --delete-branch
+4. Bump            its own commit on main, one command: bun run version:bump <next>
+5. Release         dispatch the workflow, then publish the draft by hand
+```
+
+A merge into `main` runs **nothing** — `test.yml` is `pull_request` only, on the
+theory that the branch head was already verified. So step 2 is the only place
+tests run. **Never merge a red PR**, and never merge on a "the other jobs are
+probably fine" basis: a skipped job means the diff did not touch that path, not
+that it passed. Steps 4 and 5 land directly on `main`, so if you want checks on
+them, dispatch `Tests` by hand (see above).
+
+```sh
+git fetch origin main && git checkout main && git pull --ff-only origin main
+git checkout -b fix/what-is-wrong
+
+# … work, commit …
+
+gh pr create --base main --title "fix(scope): what changed" --body-file /tmp/body.md
+gh pr checks <n> --watch          # wait for green
+gh pr merge <n> --squash --delete-branch
+
+git checkout main && git pull --ff-only origin main
+```
+
+## Step 4: the bump, and the five version sites
+
+**This is the step that goes wrong.** `Cargo.toml` is not the only version in
+the tree, and the other four do not update themselves. A release that bumps
+only `Cargo.toml` ships a binary whose Settings screen reports a stale number
+and — worse — an Android build the updater will never offer to anyone.
+
+| File | Field | Who reads it | Consequence if stale |
+| --- | --- | --- | --- |
+| `Cargo.toml` | `version` | the release workflow, artifact names | tag mismatch fails the run |
+| `Cargo.lock` | `[[package]] name = "waku"` → `version` | `cargo --locked` | build fails on a locked check |
+| `CHANGELOG.md` | `## [<version>]` section | the release body | notes fall back to raw commit log |
+| `apps/mobile/app.json` | `expo.version` | Settings → **Version** | the app displays an old version |
+| `apps/mobile/android/app/build.gradle` | `versionCode`, `versionName` | the Android updater | **installed apps are never offered the update** |
+
+The last two are the ones nobody remembers. Both were stale at v0.1.50:
+
+- `app.json` sat at `0.1.45`, so Settings said "0.1.45" on a 0.1.50 build.
+- `build.gradle` had `versionCode 22`, unchanged since v0.1.48. The manifest's
+  `versionCode` is read back out of the assembled APK, so it was `22` too, and
+  `app-update.ts` only offers an update when the manifest's number is **strictly
+  greater** than the installed one. `22 <= 22` meant **0.1.49 and 0.1.50 were
+  never offered to anyone already on 0.1.48 or later.**
+
+### The bump is a script now
+
+Hand-editing five files is what let them drift, so the files are written by
+`scripts/version-sites.ts` and the bump is one command:
+
+```sh
+bun run version:bump 0.1.51          # Cargo.toml, Cargo.lock, app.json, build.gradle
+```
+
+Then add the `## [0.1.51]` section to `CHANGELOG.md` and verify the tree agrees
+before committing:
+
+```sh
+bun run version:bump --check         # one line per site; non-zero on any drift
+bun run test:mobile
+cargo check --locked -p waku-core
+git add -A && git commit -m "chore: bump version to 0.1.51"
+```
+
+`--check` is the guard that would have caught all of the above, and it reads
+the build number the same way the app does. It also runs in CI as part of
+`test.yml`, so a PR that half-bumps the tree fails before it can merge.
+
+### `versionCode` is derived, and cannot be written by hand
+
+`apps/mobile/android/app/build.gradle` no longer contains a number. It reads
+the repository's version at build time:
+
+```gradle
+versionName rootProject.ext.wakuVersion        // from Cargo.toml, in root build.gradle
+versionCode wakuMajor.toInteger() * 10000 + wakuMinor.toInteger() * 100 + wakuPatch.toInteger()
+```
+
+`major * 10000 + minor * 100 + patch` is `1050` for `0.1.50` and `1051` for
+`0.1.51` — strictly increasing by exactly one per release, for any version this
+project will use. It cannot repeat unless a version is reused, which the tag
+check in the release workflow already refuses, and a component reaching 100
+(`0.1.100`) makes the rule ambiguous, so `deriveVersionCode` throws instead of
+encoding it.
+
+`scripts/mobile-manifest.ts` refuses to write a manifest whose build number does
+not match the version being released, so the two cannot disagree silently the
+way they did at v0.1.49 and v0.1.50.
+
+Verify the derived number reaches the APK after a bump, if you want to see it:
+
+```sh
+cd apps/mobile/android && sh gradlew :app:processDebugMainManifest --no-daemon
+grep -o 'android:versionCode="[0-9]*"' \
+  app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml
+```
+
+## Step 5: release and publish
+
+Either trigger works, and they are equivalent for a version not yet published:
+
+```sh
+# No tag needed. Releases whatever Cargo.toml says, as v<version>.
+gh workflow run release.yml --ref main
+```
+
+```sh
+# Or tag the bump commit — the tag must equal Cargo.toml, or the `version` job
+# exits 1 before anything builds.
+git tag -a v0.1.51 -m "Kerenzikov v0.1.51"
+git push origin v0.1.51
+```
+
+A run **skips every job** if that version is already published (drafts do not
+count). Bumping is therefore mandatory: re-dispatching without a bump is a
+no-op, not a rebuild.
+
+Then watch it and publish:
+
+```sh
+gh run watch <run-id> --exit-status
+gh release view v0.1.51 --json isDraft,assets
+gh release edit v0.1.51 --draft=false      # the one manual step
+```
+
+Before publishing, check:
+
+- All five jobs succeeded — `Resolve version`, both Windows legs, `Android APK`,
+  `Draft GitHub release`.
+- The release body is the CHANGELOG section, not a commit list.
+- `appcast-windows-x86_64.xml` carries the new `shortVersionString` and its
+  `<enclosure url>` points at this fork's `r2.dev` bucket.
+- `latest-windows.txt` names the new version.
 
 One-time caveat: builds predating the updater (no feed URL, upstream key)
 never self-update and must be downloaded manually once. Every build since

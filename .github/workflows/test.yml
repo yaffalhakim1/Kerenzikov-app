@@ -1,11 +1,19 @@
 name: Tests
 
-# Pull requests only. A merge into `main` is a squash of a branch whose head
-# already passed this exact matrix, so re-running it on the merge commit tests
-# nothing new — it just burns runners and lands a second, redundant run beside
-# whichever release or deploy the merge was for.
+# Pull requests only, plus a manual dispatch to re-run the matrix on demand.
+# A merge into `main` is a squash of a branch whose head already passed this
+# exact matrix, so re-running it on the merge commit tests nothing new — it
+# just burns runners and lands a second, redundant run beside whichever
+# release or deploy the merge was for.
+#
+# `workflow_dispatch` is here because a merge runs nothing: the only way to
+# check a commit already on `main` — a bump, a workflow edit, a fix applied
+# directly — is to ask for it. Every filter below is written to fall back to
+# running everything when there is no pull request to diff, so a dispatch is
+# the full matrix rather than a silent no-op.
 on:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -19,6 +27,11 @@ jobs:
   # the generated protocol, so desktop sources or the protocol pull in the
   # full matrix; a mobile-only change runs just the mobile checks, and a
   # workflow/docs-only change runs nothing.
+  #
+  # A manual dispatch has no pull request to diff, so `base` is left empty and
+  # paths-filter compares against the repository's default branch — and, when
+  # even that is unavailable, sets every filter to true. Both land on "run
+  # everything", which is what someone asking for a run wants.
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
@@ -31,6 +44,8 @@ jobs:
       mobile: ${{ steps.filter.outputs.mobile }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: dorny/paths-filter@v3
         id: filter
@@ -61,6 +76,26 @@ jobs:
               - 'scripts/**'
               - 'bun.lock'
               - '.github/workflows/test.yml'
+
+  # The version sites are checked on every PR, whatever it touched. This is the
+  # guard for the failure that is invisible in review: `app.json` and
+  # `build.gradle` drifted from `Cargo.toml` for three releases, so Settings
+  # showed a stale version and installed Android builds were never offered an
+  # update. It is cheap — no toolchain, no install — so it is worth running
+  # even on a docs-only change.
+  versions:
+    name: Version sites
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Check every version site against Cargo.toml
+        run: bun run version:check
 
   test:
     name: Rust (${{ matrix.os }})

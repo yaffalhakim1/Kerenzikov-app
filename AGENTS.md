@@ -141,6 +141,28 @@ script" screen. Run all four steps:
 - `adb shell am force-stop` + relaunch is enough to pick up JS changes; a full
   `expo run:android` is only needed after native/config changes.
 
+## Releasing
+
+The full procedure is [RELEASING.md](RELEASING.md). The parts that have gone
+wrong before, and must not be skipped:
+
+- **PR → green checks → squash merge.** `test.yml` runs on `pull_request` only,
+  so a merge into `main` runs nothing. The PR is the only place a change is
+  tested; never merge one with a red or in-progress check.
+- **The version bump is its own commit**, and it touches **five** files:
+  `Cargo.toml`, `Cargo.lock`, `CHANGELOG.md`, `apps/mobile/app.json`, and
+  `apps/mobile/android/app/build.gradle`. The two mobile files are the ones
+  that get forgotten, and each has a user-visible failure: `app.json` is what
+  Settings displays, and `build.gradle`'s `versionCode` is what the Android
+  updater compares against.
+- **`versionCode` must strictly increase every release.** The Android app only
+  offers an update when the manifest's number is greater than the installed
+  build's, so a repeated value ships a release nobody is ever told about.
+- **A release run skips itself if that version is already published.** Bumping
+  is what makes a dispatch do anything.
+- **The release lands as a draft.** Publishing is a manual step; nothing reaches
+  users until it is done.
+
 ## Accessibility
 
 - Treat accessibility as a product requirement too. GPUI does not yet expose a
