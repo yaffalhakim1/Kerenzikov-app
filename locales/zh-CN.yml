@@ -581,6 +581,9 @@ goal.status_complete: 已完成
 todo.title: 任务
 todo.more: "另有 %{count} 项"
 todo.tooltip: 智能体任务列表
+todo.all_done: 全部完成
+todo.earlier: "前 %{count} 项"
+todo.later: "后 %{count} 项"
 goal.chip_active: 正在追求目标
 goal.chip_paused: 目标已暂停
 goal.chip_stalled: 目标已停滞

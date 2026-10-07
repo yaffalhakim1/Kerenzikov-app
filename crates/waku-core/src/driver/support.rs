@@ -534,6 +534,44 @@ mod tests {
         assert_eq!(classify_tool("list_threads"), ActivityKind::Tool);
     }
 
+    /// Claude Code v2.1.268 replaced `TodoWrite` with four task tools, and the
+    /// namespaced spellings are what an MCP-hosted variant sends. Classifying
+    /// them as anything but `Plan` silently empties the task-list panel.
+    #[test]
+    fn claude_task_tools_are_plans() {
+        for name in [
+            "TaskCreate",
+            "TaskUpdate",
+            "TaskList",
+            "TaskGet",
+            "mcp__tools__task_create",
+            "mcp__tools__task_update",
+            "WriteTodos",
+            "write_todos",
+            "ManageTodoList",
+            "manage_todo_list",
+        ] {
+            assert_eq!(
+                classify_tool(name),
+                ActivityKind::Plan,
+                "{name} must classify as a plan"
+            );
+        }
+    }
+
+    /// `Task` is the subagent tool, and its output/stop bookkeeping is not a
+    /// plan. Widening the arm above must not swallow them.
+    #[test]
+    fn subagent_task_tools_are_not_plans() {
+        for name in ["Task", "TaskOutput", "TaskStop", "task_output"] {
+            assert_ne!(
+                classify_tool(name),
+                ActivityKind::Plan,
+                "{name} is subagent traffic, not a plan"
+            );
+        }
+    }
+
     #[test]
     fn opencode_computer_use_config_preserves_existing_inline_config() {
         let content = build_opencode_computer_use_config(

@@ -1944,9 +1944,12 @@ pub enum ActivityKind {
 }
 
 impl ActivityKind {
-    /// Classifies provider tool names without mistaking unrelated MCP tools
-    /// such as `create_thread` or `read_mcp_resource` for file operations.
-    pub fn from_tool_name(name: &str) -> Self {
+    /// The bare tool name a provider tool id reduces to, lowercased and with
+    /// separators removed: `mcp__tools__task_create` → `taskcreate`.
+    ///
+    /// Shared by classification and by any caller that dispatches on a specific
+    /// tool, so the two cannot drift apart on namespaced spellings.
+    pub fn tool_leaf_name(name: &str) -> String {
         let normalized = name.trim().to_ascii_lowercase().replace(['-', ' '], "_");
         let leaf = normalized
             .rsplit("__")
@@ -1955,11 +1958,29 @@ impl ActivityKind {
             .rsplit([':', '.', '/'])
             .next()
             .unwrap_or(&normalized);
-        let compact = leaf.replace('_', "");
+        leaf.replace('_', "")
+    }
+
+    /// Classifies provider tool names without mistaking unrelated MCP tools
+    /// such as `create_thread` or `read_mcp_resource` for file operations.
+    pub fn from_tool_name(name: &str) -> Self {
+        let compact = Self::tool_leaf_name(name);
 
         if matches!(
             compact.as_str(),
             "todo" | "todowrite" | "updateplan" | "plan"
+                // Claude Code v2.1.268 replaced `TodoWrite` with four task
+                // tools. `Task` itself is deliberately absent: it is the
+                // subagent tool, and `TaskOutput`/`TaskStop` are its
+                // bookkeeping, so none of the three is a plan.
+                | "tasklist"
+                | "taskcreate"
+                | "taskupdate"
+                | "taskget"
+                // Other harnesses and MCP servers spell the same idea
+                // differently; these were verified absent before the change.
+                | "writetodos"
+                | "managetodolist"
         ) {
             Self::Plan
         } else if matches!(

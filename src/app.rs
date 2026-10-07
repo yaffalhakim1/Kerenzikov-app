@@ -1314,6 +1314,10 @@ pub struct Waku {
     /// cached attachment metadata; render never probes the filesystem.
     image_preview: Option<image_preview::ImagePreviewState>,
     image_preview_generation: u64,
+    /// Sessions whose task-list tray the user folded down to its one-line
+    /// header. Per session rather than global: a plan is interesting while it
+    /// runs and noise afterwards, and those differ per task.
+    todo_tray_collapsed: HashSet<Uuid>,
     /// In-memory GPUI images for daemon-owned bytes. A missing entry schedules
     /// one background fetch only when a visible row asks to render it; the
     /// desktop never creates another attachment file.
@@ -3009,6 +3013,7 @@ impl Waku {
                 session_rename: None,
                 session_rename_input,
                 sidebar_collapsed_groups: HashSet::new(),
+                todo_tray_collapsed: HashSet::new(),
                 sidebar_project_reveal_counts: HashMap::new(),
                 sidebar_search,
                 daemon_degraded: None,

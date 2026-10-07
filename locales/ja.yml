@@ -610,6 +610,9 @@ goal.status_complete: 完了
 todo.title: タスク
 todo.more: "他 %{count} 件"
 todo.tooltip: エージェントのタスク一覧
+todo.all_done: すべて完了
+todo.earlier: "前の %{count} 件"
+todo.later: "次の %{count} 件"
 goal.chip_active: ゴールを追求中
 goal.chip_paused: ゴール一時停止中
 goal.chip_stalled: ゴール停滞中
