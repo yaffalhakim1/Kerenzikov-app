@@ -213,6 +213,24 @@ Before publishing, check:
   `<enclosure url>` points at this fork's `r2.dev` bucket.
 - `latest-windows.txt` names the new version.
 
+### If `Draft GitHub release` fails, the feed is already live
+
+The R2 mirror runs **before** the release is created, so a failure in the last
+two steps leaves the bucket serving an appcast and `latest-windows.txt` for a
+version whose installers are not yet on a GitHub release. Installed apps read
+that feed on launch.
+
+Recovery is to re-dispatch, not to hand-edit anything: the `version` job does
+not skip while no *published* release exists, every other step is idempotent,
+and the release is created on the same commit. Re-dispatch and confirm with
+`gh release view` before publishing.
+
+This is also why the asset list is computed with `find` rather than written as
+globs — see the comment on `Collect release assets` in `release.yml`.
+`action-gh-release` rejects `!` negations outright (it validates every line as a
+pattern that must match), and fixed patterns cannot cover an Android-only
+release that has no installers.
+
 One-time caveat: builds predating the updater (no feed URL, upstream key)
 never self-update and must be downloaded manually once. Every build since
 trusts only this fork's key and feed.
