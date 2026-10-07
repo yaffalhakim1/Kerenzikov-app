@@ -459,14 +459,14 @@ jobs:
           echo "mobile=$mobile" >> "$GITHUB_OUTPUT"
           echo "Windows: $windows, Android: $mobile"
 
-      # `if-no-files-found: ignore`: when a platform did not build, the
-      # download is expected to be empty, and treating that as an error is
-      # what would make an Android-only release fail at this step.
+      # No `if-no-files-found`: `download-artifact@v8` has no such input, and
+      # does not need one. When a platform did not build there are simply fewer
+      # artifacts, and it logs a zero count rather than failing — which is what
+      # an Android-only release depends on.
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
-          if-no-files-found: ignore
 
       - name: Write the version pointers
         if: steps.platforms.outputs.windows == 'true'
@@ -585,9 +585,40 @@ jobs:
             fi
           } > release-notes.md
 
+      # The asset list is computed rather than written as globs. Two reasons:
+      #
+      # `action-gh-release` does not support `!` negations — it validates every
+      # line as a pattern that must match a file, so excluding
+      # `mobile-latest.json` that way fails the whole step under
+      # `fail_on_unmatched_files`. And fixed patterns (`*.exe`, `*.xml`, …)
+      # would fail the other way on an Android-only release, where no installer
+      # exists to match. Listing what is actually there is the only form that
+      # is correct for both.
+      #
+      # The two internal files are dropped: the manifest is committed to `main`
+      # by the step below, and the build number is an input to it, so neither
+      # belongs in the release's downloads.
+      - name: Collect release assets
+        id: assets
+        run: |
+          files=$(find artifacts -maxdepth 1 -type f \
+            ! -name 'mobile-latest.json' \
+            ! -name 'version-code.txt' \
+            -printf '%p\n' | sort)
+          if [ -z "$files" ]; then
+            echo "::error::No artifacts to release"
+            exit 1
+          fi
+          echo "$files"
+          {
+            echo 'files<<__ASSETS__'
+            echo "$files"
+            echo '__ASSETS__'
+          } >> "$GITHUB_OUTPUT"
+
       # Only the artifacts that exist: an Android-only release lists one APK
-      # and no installers, and `fail_on_unmatched_files` stays true so a
-      # pattern that should have matched and did not is still an error.
+      # and no installers. `fail_on_unmatched_files` stays true, and is
+      # meaningful because every listed path is one `find` just saw.
       - uses: softprops/action-gh-release@v3
         with:
           draft: true
@@ -599,10 +630,7 @@ jobs:
           name: ${{ needs.version.outputs.tag }}
           body_path: release-notes.md
           fail_on_unmatched_files: true
-          files: |
-            artifacts/*
-            !artifacts/mobile-latest.json
-            !artifacts/version-code.txt
+          files: ${{ steps.assets.outputs.files }}
 
       # Last, so the URL the manifest names is live by the time the app can
       # read it. The file must land on main because that is the ref
