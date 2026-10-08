@@ -535,7 +535,7 @@ export function SessionView({
       {session && (
         <View style={styles.harnessSurfaces}>
           {session.todos && session.todos.length > 0 && (
-            <TodoStrip todos={session.todos} />
+            <TodoStrip key={`todo-strip:${session.id}`} todos={session.todos} />
           )}
           {backgroundWorkItems.length > 0 && (
             <BackgroundWorkBar items={backgroundWorkItems} sessionId={session.id} />

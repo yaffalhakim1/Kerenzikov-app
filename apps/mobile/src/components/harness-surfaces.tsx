@@ -29,15 +29,33 @@ import {
  */
 export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] }) {
   const theme = useTheme();
+  // Fold state is per mounted strip, and the caller keys the strip by session,
+  // so switching tasks starts each plan expanded. Mirrors the desktop tray's
+  // `todo_tray_collapsed`, which is likewise session-scoped and kept in memory.
+  const [collapsed, setCollapsed] = useState(false);
   if (!todos.length) return null;
   const [done, total] = todoProgress(todos);
   const { start, end, hiddenBefore, hiddenAfter } = visibleTodoWindow(todos);
   const visible = todos.slice(start, end);
   return (
     <View style={[styles.todoCard, { backgroundColor: theme.raised }]}>
-      <View style={styles.todoHeader}>
+      <AppPressable
+        accessibilityLabel={`Tasks, ${done} of ${total} done`}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: !collapsed }}
+        hitSlop={6}
+        onPress={() => setCollapsed((value) => !value)}
+        style={({ pressed }) => [
+          styles.todoHeader,
+          !collapsed && styles.todoHeaderExpanded,
+          { opacity: pressed ? 0.6 : 1 },
+        ]}>
         <AppSymbol
-          name={{ ios: 'checklist', android: 'checklist', web: 'checklist' }}
+          name={
+            collapsed
+              ? { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }
+              : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
+          }
           size={13}
           tintColor={theme.textTertiary}
         />
@@ -45,47 +63,51 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
         <Text style={[styles.todoCount, { color: theme.textTertiary }]}>
           {done}/{total}
         </Text>
-      </View>
-      {hiddenBefore > 0 ? (
-        <TodoOverflowRow label={`${hiddenBefore} earlier`} theme={theme} />
-      ) : null}
-      {visible.map((todo) => (
-        <View key={todo.content} style={styles.todoRow}>
-          <AppSymbol
-            name={
-              todo.status === 'completed'
-                ? { ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }
-                : todo.status === 'in_progress'
-                  ? { ios: 'circle.dashed', android: 'adjust', web: 'adjust' }
-                  : todo.status === 'cancelled'
-                    ? { ios: 'xmark.circle', android: 'cancel', web: 'cancel' }
-                    : { ios: 'circle', android: 'radio_button_unchecked', web: 'radio_button_unchecked' }
-            }
-            size={13}
-            tintColor={
-              todo.status === 'completed'
-                ? theme.success
-                : todo.status === 'in_progress'
-                  ? theme.accent
-                  : theme.textTertiary
-            }
-          />
-          <Text
-            numberOfLines={2}
-            style={[
-              styles.todoText,
-              {
-                color: todo.status === 'cancelled' ? theme.textTertiary : theme.text,
-                textDecorationLine: todo.status === 'completed' ? 'line-through' : 'none',
-              },
-            ]}>
-            {todo.content}
-          </Text>
-        </View>
-      ))}
-      {hiddenAfter > 0 ? (
-        <TodoOverflowRow label={`${hiddenAfter} later`} theme={theme} />
-      ) : null}
+      </AppPressable>
+      {!collapsed && (
+        <>
+          {hiddenBefore > 0 ? (
+            <TodoOverflowRow label={`${hiddenBefore} earlier`} theme={theme} />
+          ) : null}
+          {visible.map((todo) => (
+            <View key={todo.content} style={styles.todoRow}>
+              <AppSymbol
+                name={
+                  todo.status === 'completed'
+                    ? { ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }
+                    : todo.status === 'in_progress'
+                      ? { ios: 'circle.dashed', android: 'adjust', web: 'adjust' }
+                      : todo.status === 'cancelled'
+                        ? { ios: 'xmark.circle', android: 'cancel', web: 'cancel' }
+                        : { ios: 'circle', android: 'radio_button_unchecked', web: 'radio_button_unchecked' }
+                }
+                size={13}
+                tintColor={
+                  todo.status === 'completed'
+                    ? theme.success
+                    : todo.status === 'in_progress'
+                      ? theme.accent
+                      : theme.textTertiary
+                }
+              />
+              <Text
+                numberOfLines={2}
+                style={[
+                  styles.todoText,
+                  {
+                    color: todo.status === 'cancelled' ? theme.textTertiary : theme.text,
+                    textDecorationLine: todo.status === 'completed' ? 'line-through' : 'none',
+                  },
+                ]}>
+                {todo.content}
+              </Text>
+            </View>
+          ))}
+          {hiddenAfter > 0 ? (
+            <TodoOverflowRow label={`${hiddenAfter} later`} theme={theme} />
+          ) : null}
+        </>
+      )}
     </View>
   );
 });
@@ -349,7 +371,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 8,
   },
-  todoHeader: { alignItems: 'center', flexDirection: 'row', gap: 6, marginBottom: 6 },
+  todoHeader: { alignItems: 'center', flexDirection: 'row', gap: 6 },
+  // Only the expanded header owns the gap to its rows; collapsed, the header
+  // is the whole card and the margin would read as stray padding.
+  todoHeaderExpanded: { marginBottom: 6 },
   todoTitle: { fontSize: 11, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' },
   todoCount: { fontSize: 11, fontVariant: ['tabular-nums'], marginLeft: 'auto' },
   todoRow: { alignItems: 'flex-start', flexDirection: 'row', gap: 8, paddingVertical: 3 },
