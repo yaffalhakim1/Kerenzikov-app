@@ -789,7 +789,7 @@ impl SessionStatus {
 
 /// A follow-up message queued while the agent is busy. It becomes its own
 /// turn once the current turn settles successfully.
-#[derive(Clone, Debug, Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
 pub struct QueuedMessage {
     pub id: Uuid,
     pub content: String,
@@ -1188,6 +1188,12 @@ impl AgentSession {
     /// A daemon can hold hydrated sessions in memory, but catalog refreshes
     /// must never clone or transmit their transcripts. Clients hydrate one
     /// selected session explicitly when they need its detail.
+    ///
+    /// The follow-up queue rides along even though it is session detail: it is
+    /// small, it is control state rather than transcript, and it is the only
+    /// way a client that did not queue the message learns one exists. A queue
+    /// change must be visible to every other client, or a phone's queued
+    /// follow-up stays invisible on the desktop until the turn settles.
     pub fn list_projection(&self) -> Self {
         Self {
             id: self.id,
@@ -1217,7 +1223,7 @@ impl AgentSession {
             messages: Vec::new(),
             transcript_blocks: Vec::new(),
             turns: Vec::new(),
-            queued_messages: Vec::new(),
+            queued_messages: self.queued_messages.clone(),
             detail_loaded: false,
         }
     }
@@ -1257,11 +1263,15 @@ impl AgentSession {
     /// gone until the next store `hydrate` reloads them. The session keeps
     /// its list columns and cursors, and a later save of the skeleton only
     /// touches those columns, never the untouched detail row.
+    ///
+    /// The follow-up queue is kept: it is list-level control state now (it
+    /// rides `list_projection`), and the daemon's drain reads it off the
+    /// resident session. Releasing it would both hide the queue from other
+    /// clients and stop the daemon draining it.
     pub fn release_transcript(&mut self) {
         self.messages = Vec::new();
         self.transcript_blocks = Vec::new();
         self.turns = Vec::new();
-        self.queued_messages = Vec::new();
         self.detail_loaded = false;
     }
 
@@ -1598,12 +1608,19 @@ impl AgentSession {
         message_id: Uuid,
     ) -> bool {
         let now = unix_time();
+        // The daemon drains a queued follow-up by submitting it with the
+        // queued entry's own id as the turn id (ADR 0003), so a client still
+        // holding that entry learns here that it left the queue. Without this
+        // the row lingers as "queued" after the daemon has already run it.
+        let queued_before = self.queued_messages.len();
+        self.queued_messages.retain(|queued| queued.id != turn_id);
+        let queue_changed = self.queued_messages.len() != queued_before;
         if let Some(active) = self.active_turn_id() {
             let has_prompt = self.messages.iter().any(|candidate| {
                 candidate.turn_id == Some(active) && candidate.role == MessageRole::User
             });
             if has_prompt {
-                return false;
+                return queue_changed;
             }
             let mut prompt = Message::new_for_turn(MessageRole::User, message, active);
             prompt.id = message_id;
@@ -5079,6 +5096,27 @@ mod tests {
     }
 
     #[test]
+    fn a_drained_follow_up_leaves_the_queue_when_its_prompt_is_adopted() {
+        // The daemon drains a queued message by submitting it with the queued
+        // entry's own id as the turn id (ADR 0003). A client still holding
+        // that entry must drop it here, or the row lingers as "queued" after
+        // the daemon has already run it.
+        let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        session.begin_turn("first");
+        session.push_message(MessageRole::Assistant, "done");
+        session.finish_active_turn(TurnStatus::Completed);
+        session.status = SessionStatus::Idle;
+        let queued = QueuedMessage::new("follow up");
+        let queued_id = queued.id;
+        session.queued_messages.push(queued);
+
+        assert!(session.adopt_submitted_prompt("follow up", queued_id, queued_id));
+
+        assert!(session.queued_messages.is_empty());
+        assert_eq!(session.active_turn_id(), Some(queued_id));
+    }
+
+    #[test]
     fn the_submitters_own_echo_changes_nothing() {
         let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
         let turn_id = session.begin_turn("first");
@@ -5147,6 +5185,9 @@ mod tests {
         assert!(projection.messages.is_empty());
         assert!(projection.transcript_blocks.is_empty());
         assert!(projection.turns.is_empty());
-        assert!(projection.queued_messages.is_empty());
+        // The queue is control state, not transcript: it rides the projection
+        // so a client that did not queue the message can see it exists.
+        assert_eq!(projection.queued_messages.len(), 1);
+        assert_eq!(projection.queued_messages[0].content, "Follow up");
     }
 }

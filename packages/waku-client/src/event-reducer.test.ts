@@ -120,6 +120,32 @@ describe('promptSubmitted', () => {
     expect(result.session.auto_title).toBe('Add a dark mode toggle to settings')
     expect(result.session.turns.at(-1)?.turn_count).toBe(1)
   })
+
+  test('a drained follow-up leaves the queue when its prompt is adopted', () => {
+    // The daemon drains a queued message by submitting it with the queued
+    // entry's own id as the turn id (ADR 0003). The client still holding that
+    // entry must drop it, or the row lingers as "queued" after it has run.
+    const queuedId = '30000000-0000-4000-8000-000000000003'
+    const session: AgentSession = {
+      ...idleSession(),
+      queued_messages: [
+        {
+          id: queuedId,
+          content: 'follow up',
+          created_at: 150,
+        },
+      ],
+    }
+
+    const result = reduceRuntimeEvent(
+      session,
+      event('promptSubmitted', { message: 'follow up', turnId: queuedId, messageId: queuedId }),
+      clock,
+    )
+
+    expect(result.session.queued_messages).toEqual([])
+    expect(result.session.turns.at(-1)?.id).toBe(queuedId)
+  })
 })
 
 function apply(session: AgentSession, kind: string, payload: unknown) {

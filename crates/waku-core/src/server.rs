@@ -17,7 +17,7 @@ use tungstenite::protocol::WebSocketConfig;
 use tungstenite::{Message, WebSocket, accept_hdr_with_config};
 use uuid::Uuid;
 
-use crate::model::{AgentSession, Project, ProviderKind, SessionStatus};
+use crate::model::{AgentSession, Project, ProviderKind, QueuedMessage, SessionStatus};
 use crate::protocol::MAX_WIRE_MESSAGE_BYTES;
 use crate::model::unix_time;
 use crate::protocol::{
@@ -196,6 +196,10 @@ struct SessionCatalogEntry {
     status: SessionStatus,
     created_at: u64,
     last_reply_at: Option<u64>,
+    /// The follow-up queue, so a queue-only change (a phone queuing a message
+    /// while the desktop watches) counts as a change and broadcasts. Without
+    /// it, `changed` stays false and the other clients are never told.
+    queued_messages: Vec<QueuedMessage>,
 }
 
 impl From<&AgentSession> for SessionCatalogEntry {
@@ -209,6 +213,7 @@ impl From<&AgentSession> for SessionCatalogEntry {
             status: session.status,
             created_at: session.created_at,
             last_reply_at: session.last_reply_at,
+            queued_messages: session.queued_messages.clone(),
         }
     }
 }
