@@ -39,6 +39,9 @@ pub struct PushRegistration {
     pub token: String,
     pub platform: String,
     pub foreground: bool,
+    /// Android channel the device created for these notices; `None` for iOS
+    /// and for clients that predate the field.
+    pub channel_id: Option<String>,
 }
 
 /// The daemon's live set of push registrations, keyed by token so a device
@@ -58,7 +61,13 @@ impl PushRegistry {
     /// Records or updates one device. An empty token clears every
     /// registration, which is how an app that revoked notification permission
     /// tells the daemon to stop pushing.
-    pub fn register(&self, token: String, platform: String, foreground: bool) {
+    pub fn register(
+        &self,
+        token: String,
+        platform: String,
+        foreground: bool,
+        channel_id: Option<String>,
+    ) {
         let mut devices = self.devices.lock();
         if token.is_empty() {
             devices.clear();
@@ -69,6 +78,7 @@ impl PushRegistry {
             token,
             platform,
             foreground,
+            channel_id,
         });
     }
 
@@ -143,6 +153,13 @@ struct ExpoMessage<'a> {
     body: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<serde_json::Value>,
+    /// `high` so a backgrounded phone is woken and shows a heads-up banner
+    /// rather than waiting for the next batched delivery window.
+    priority: &'a str,
+    /// Android only: the device's own channel. Without it the push lands on
+    /// the "Default" channel, whose importance the app cannot control.
+    #[serde(rename = "channelId", skip_serializing_if = "Option::is_none")]
+    channel_id: Option<&'a str>,
 }
 
 /// Sends one notice to every backgrounded device. Best-effort: a push that
@@ -168,6 +185,8 @@ pub fn notify(registry: &PushRegistry, notice: &PushNotice) {
             title: &notice.title,
             body: &notice.body,
             data: data.clone(),
+            priority: "high",
+            channel_id: device.channel_id.as_deref(),
         };
         let Ok(body) = serde_json::to_string(&message) else {
             continue;
@@ -185,21 +204,36 @@ mod tests {
     #[test]
     fn a_registration_replaces_the_same_device_and_forgets_on_empty() {
         let registry = PushRegistry::new();
-        registry.register("tok".into(), "android".into(), false);
-        registry.register("tok".into(), "android".into(), true);
+        registry.register("tok".into(), "android".into(), false, None);
+        registry.register("tok".into(), "android".into(), true, None);
         assert_eq!(registry.backgrounded(), Vec::new());
-        registry.register("tok".into(), "android".into(), false);
+        registry.register("tok".into(), "android".into(), false, None);
         assert_eq!(registry.backgrounded().len(), 1);
 
-        registry.register(String::new(), "android".into(), false);
+        registry.register(String::new(), "android".into(), false, None);
         assert!(registry.backgrounded().is_empty());
+    }
+
+    #[test]
+    fn a_registration_keeps_the_device_channel() {
+        let registry = PushRegistry::new();
+        registry.register(
+            "tok".into(),
+            "android".into(),
+            false,
+            Some("task-events-v2".into()),
+        );
+        assert_eq!(
+            registry.backgrounded()[0].channel_id.as_deref(),
+            Some("task-events-v2")
+        );
     }
 
     #[test]
     fn only_backgrounded_devices_are_notified() {
         let registry = PushRegistry::new();
-        registry.register("foreground".into(), "android".into(), true);
-        registry.register("background".into(), "android".into(), false);
+        registry.register("foreground".into(), "android".into(), true, None);
+        registry.register("background".into(), "android".into(), false, None);
         let backgrounded = registry.backgrounded();
         assert_eq!(backgrounded.len(), 1);
         assert_eq!(backgrounded[0].token, "background");

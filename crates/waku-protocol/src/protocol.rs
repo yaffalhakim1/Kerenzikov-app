@@ -287,6 +287,12 @@ pub enum Command {
         token: String,
         platform: String,
         foreground: bool,
+        /// Android notification channel the device created for these notices.
+        /// The daemon targets it explicitly, because a push that names a
+        /// channel the device does not have is dropped rather than shown on a
+        /// fallback. Absent for clients that predate the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_id: Option<String>,
     },
 }
 

@@ -300,8 +300,10 @@ impl Backend for WakuBackend {
                 token,
                 platform,
                 foreground,
+                channel_id,
             } => {
-                self.push_registry.register(token, platform, foreground);
+                self.push_registry
+                    .register(token, platform, foreground, channel_id);
                 Ok(ResponsePayload::Ack)
             }
             Command::UpdateSettings { settings } => {
@@ -2031,12 +2033,16 @@ fn notify_push_for_event(
     if registry.backgrounded().is_empty() {
         return;
     }
+    // `display_title`, not `title`: an untouched task still carries the
+    // default "New task" as its user title while the provider's auto-title is
+    // what the app actually shows. Reading `title` alone announced "New task
+    // finished" for every fresh task.
     let task = task_state
         .lock()
         .sessions
         .iter()
         .find(|session| session.id == session_id)
-        .map(|session| session.title.clone())
+        .map(|session| session.display_title().to_owned())
         .filter(|title| !title.trim().is_empty())
         .unwrap_or_else(|| "Kerenzikov task".to_owned());
     let notice = match event {

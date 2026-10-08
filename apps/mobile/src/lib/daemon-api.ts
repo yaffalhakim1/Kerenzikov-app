@@ -124,15 +124,24 @@ export async function loadTaskState(client: WakuClient): Promise<TaskState> {
  * Tells the daemon where to reach this device when it is not watching, so a
  * finished turn or a permission request can wake it through Expo push. Sent on
  * every connection and whenever the app moves between the foreground and the
- * background; an empty token clears the registration.
+ * background; an empty token clears the registration. `channelId` names the
+ * Android channel the daemon must target, so the notice pops up instead of
+ * landing on the system "Default" channel.
  */
 export async function registerPushToken(
   client: WakuClient,
   token: string,
   platform: string,
   foreground: boolean,
+  channelId?: string,
 ): Promise<void> {
-  await client.request({ type: 'registerPushToken', token, platform, foreground });
+  await client.request({
+    type: 'registerPushToken',
+    token,
+    platform,
+    foreground,
+    channelId: channelId ?? null,
+  });
 }
 
 export async function hydrateSession(

@@ -16,7 +16,13 @@ import { projectIdFor } from './push-project-id';
  * job in `crates/waku-core/src/push.rs`.
  */
 
-const ANDROID_CHANNEL_ID = 'task-events';
+/**
+ * The Android channel these notifications use. The `-v2` suffix is deliberate:
+ * Android fixes a channel's importance at creation and ignores later changes,
+ * and the first channel shipped as DEFAULT (no heads-up banner). A new id is
+ * the only way to raise it, and the old one is orphaned rather than migrated.
+ */
+const ANDROID_CHANNEL_ID = 'task-events-v2';
 
 /**
  * A notification token, or null when this device cannot receive one: a
@@ -83,14 +89,16 @@ export function showNotificationsInForeground(): void {
 /**
  * The channel Android groups these notifications under. Created once at
  * startup; without a channel Android 8+ drops programmatic notifications.
- * Omitting `sound` means the system default; a filename string is treated as
- * a custom sound and warned about when no such bundled file exists.
+ * HIGH is what makes a backgrounded push pop up as a heads-up banner; DEFAULT
+ * only lands in the tray. Omitting `sound` means the system default; a filename
+ * string is treated as a custom sound and warned about when no such bundled
+ * file exists.
  */
 export async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: 'Task events',
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: Notifications.AndroidImportance.HIGH,
   });
 }
 

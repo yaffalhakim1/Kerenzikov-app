@@ -17,7 +17,7 @@ import { AppState, Platform, type AppStateStatus } from "react-native";
 import { daemonKeys, registerPushToken } from "./daemon-api";
 import { hydratePersistentStorage } from "./composer-preferences-store";
 import { DaemonLink, type DaemonOutage } from "./daemon-link";
-import { cachedPushToken } from "./push-notifications";
+import { androidChannelId, cachedPushToken } from "./push-notifications";
 import {
   normalizeDaemonProfile,
   isPrivateDaemonAddress,
@@ -489,6 +489,7 @@ async function syncPushRegistration(
     token?.token ?? "",
     token?.platform ?? "android",
     foreground,
+    androidChannelId(),
   ).catch(() => {
     // Notifications are a convenience; a failed registration is not an
     // outage and must not disturb the connection phase.
