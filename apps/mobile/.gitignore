@@ -18,6 +18,13 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Firebase service-account key: holds a private key and must never be
+# committed. The client config (android/app/google-services.json) is public
+# and is committed; this is the server credential, uploaded to EAS instead.
+*firebase-adminsdk*.json
+*kerenzikov-fcm*.json
+service-account*.json
+
 # Metro
 .metro-health-check*
 
