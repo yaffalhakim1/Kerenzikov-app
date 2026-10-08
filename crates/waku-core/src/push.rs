@@ -29,7 +29,8 @@ use crate::usage::http_post;
 const EXPO_PUSH_URL: &str = "https://exp.host/--/api/v2/push/send";
 
 /// Where the phone should land when the notification is tapped. Expo Router
-/// maps `waku://` to the app; the task id rides as a path segment.
+/// maps `waku://` to the app; the session id rides as a path segment of the
+/// app's `/session/[id]` route.
 const DEEP_LINK_SCHEME: &str = "waku";
 
 /// One device that asked to be notified. `foreground` is the device's own
@@ -172,7 +173,7 @@ pub fn notify(registry: &PushRegistry, notice: &PushNotice) {
     }
     let data = notice.session_id.map(|session_id| {
         json!({
-            "url": format!("{DEEP_LINK_SCHEME}://task/{session_id}"),
+            "url": format!("{DEEP_LINK_SCHEME}://session/{session_id}"),
             "sessionId": session_id,
         })
     });
