@@ -12,6 +12,17 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.55]
+
+### Desktop
+
+- **The task list is no longer drawn twice.** While an agent worked, its plan
+  could appear in two places at once: the list above the composer and the small
+  count beside the context circle. The count is now hidden while the list is
+  open and comes back when you fold the list away, so the two never show the
+  same plan together. The list also now lines up with the composer below it
+  instead of running the full width of the window.
+
 ## [0.1.54]
 
 ### Desktop and Android
