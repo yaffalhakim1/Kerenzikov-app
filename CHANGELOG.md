@@ -12,6 +12,25 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.54]
+
+### Desktop and Android
+
+- **Tasks waiting on you lead the list.** A task blocked on a permission or a
+  question is the one thing you have to act on, and it was buried in whatever
+  project or date group it belonged to. Every waiting task is now collected into
+  a **Needs you** section at the top of the sidebar, above your pinned tasks and
+  every group. Answer the prompt and the task drops back into its place. Failed
+  tasks stay where they are: a failure is an outcome, not something to answer.
+
+### Android
+
+- **The task list folds away.** The plan an agent keeps sat above the composer at
+  full height for the whole task, so a long one kept pushing the composer down
+  after it had stopped being useful. Tapping its header now collapses it to a
+  single line with the count, and tapping again brings the steps back. It works
+  the same way as the desktop tray.
+
 ## [0.1.53]
 
 ### Android
