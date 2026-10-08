@@ -447,6 +447,12 @@ function adoptSubmittedPrompt(
   clock: ReducerClock,
 ) {
   const now = clock.nowSeconds()
+  // The daemon drains a queued follow-up by submitting it with the queued
+  // entry's own id as the turn id (ADR 0003), so a client still holding that
+  // entry learns here that it left the queue.
+  if (session.queued_messages?.length) {
+    session.queued_messages = session.queued_messages.filter((queued) => queued.id !== turnId)
+  }
   const active = activeTurn(session)
   if (active) {
     const hasPrompt = session.messages.some(

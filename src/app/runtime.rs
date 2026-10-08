@@ -183,6 +183,13 @@ pub(super) fn merge_remote_session_catalog(
             local.model = remote.model;
             local.created_at = remote.created_at;
             local.last_reply_at = remote.last_reply_at;
+            // The queue is daemon-owned control state: the daemon drains it
+            // when a turn settles and a client only observes. Taking it from
+            // the catalog is how a follow-up queued on another client (a phone)
+            // becomes visible here, and how this client learns its own queued
+            // message was drained. The projection carries it even though it is
+            // otherwise detail-free.
+            local.queued_messages = remote.queued_messages;
             if !has_local_runtime(local.id) {
                 local.status = remote.status;
                 local.updated_at = remote.updated_at;

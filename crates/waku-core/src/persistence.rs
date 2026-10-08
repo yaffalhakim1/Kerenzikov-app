@@ -337,10 +337,12 @@ impl PersistedState {
             .iter()
             .enumerate()
             .filter_map(|(index, session)| {
+                // The follow-up queue is list-level control state, not
+                // transcript: `release_transcript` keeps it, so it does not
+                // make a session a release candidate on its own.
                 let has_transcript = !(session.messages.is_empty()
                     && session.transcript_blocks.is_empty()
-                    && session.turns.is_empty()
-                    && session.queued_messages.is_empty());
+                    && session.turns.is_empty());
                 if session.detail_loaded
                     && has_transcript
                     && !self.dirty_sessions.contains(&session.id)
