@@ -279,6 +279,21 @@ pub enum Command {
     /// surfaces this so a hosted session's peers are visible, mirroring the
     /// multi-viewport model where several apps share one engine.
     ListConnections,
+    /// Remember where to reach a mobile client when it is not watching. The
+    /// client sends this after connecting and whenever it moves between the
+    /// foreground and the background; the daemon pushes a notification only
+    /// while `foreground` is false. An empty `token` forgets the device.
+    RegisterPushToken {
+        token: String,
+        platform: String,
+        foreground: bool,
+        /// Android notification channel the device created for these notices.
+        /// The daemon targets it explicitly, because a push that names a
+        /// channel the device does not have is dropped rather than shown on a
+        /// fallback. Absent for clients that predate the field.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        channel_id: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]

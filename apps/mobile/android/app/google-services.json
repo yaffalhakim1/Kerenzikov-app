@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "622720410620",
+    "project_id": "kerenzikov-fcm-591dd",
+    "storage_bucket": "kerenzikov-fcm-591dd.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:622720410620:android:ce2f8ed059a1fcd8344879",
+        "android_client_info": {
+          "package_name": "sh.waku.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB-1CjeWy3VwpRRs8vbqPZcxgycJ5cPktQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

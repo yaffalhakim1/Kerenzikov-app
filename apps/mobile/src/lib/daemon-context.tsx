@@ -14,9 +14,10 @@ import {
 } from "react";
 import { AppState, Platform, type AppStateStatus } from "react-native";
 
-import { daemonKeys } from "./daemon-api";
+import { daemonKeys, registerPushToken } from "./daemon-api";
 import { hydratePersistentStorage } from "./composer-preferences-store";
 import { DaemonLink, type DaemonOutage } from "./daemon-link";
+import { androidChannelId, cachedPushToken } from "./push-notifications";
 import {
   normalizeDaemonProfile,
   isPrivateDaemonAddress,
@@ -123,6 +124,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   const profilesRef = useRef<DaemonProfile[]>([]);
   const activeProfileIdRef = useRef<string | null>(null);
   const linkRef = useRef<DaemonLink | null>(null);
+  const clientRef = useRef<WakuClient | null>(null);
   const generation = useRef(0);
   const bootstrapped = useRef(false);
   const unsubscribeLink = useRef<(() => void) | null>(null);
@@ -141,6 +143,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     unsubscribeTaskState.current = null;
     const current = linkRef.current;
     linkRef.current = null;
+    clientRef.current = null;
     if (updateReactState) setClient(null);
     current?.close();
   }, []);
@@ -233,6 +236,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
         active: inForeground(AppState.currentState),
       });
       linkRef.current = link;
+      clientRef.current = next;
       setClient(next);
       let seenConnections = 0;
       unsubscribeLink.current = link.subscribe((snapshot) => {
@@ -261,6 +265,9 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       });
 
       const connected = await link.open();
+      if (connected) {
+        void syncPushRegistration(next, inForeground(AppState.currentState));
+      }
       return (
         generation.current === attempt && linkRef.current === link && connected
       );
@@ -327,10 +334,14 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
   }, [activate]);
 
   // The link retries and probes only while the app is in the foreground;
-  // returning to it triggers an immediate retry or a liveness probe.
+  // returning to it triggers an immediate retry or a liveness probe. The same
+  // transition tells the daemon whether to push: it must not notify a device
+  // the user is already looking at, and must start again once they leave.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       linkRef.current?.setActive(inForeground(state));
+      const client = clientRef.current;
+      if (client) void syncPushRegistration(client, inForeground(state));
     });
     return () => subscription.remove();
   }, []);
@@ -460,6 +471,29 @@ export function useDaemon() {
  * state at launch must not leave it waiting for a change that never comes. */
 function inForeground(state: AppStateStatus): boolean {
   return state !== "background" && state !== "inactive";
+}
+
+/**
+ * Tells the daemon how to reach this device for push, or clears the
+ * registration when the device cannot receive one. Best-effort: a device with
+ * no token (emulator, declined permission) or a link that dropped mid-call
+ * must not surface as a connection error.
+ */
+async function syncPushRegistration(
+  client: WakuClient,
+  foreground: boolean,
+): Promise<void> {
+  const token = await cachedPushToken();
+  await registerPushToken(
+    client,
+    token?.token ?? "",
+    token?.platform ?? "android",
+    foreground,
+    androidChannelId(),
+  ).catch(() => {
+    // Notifications are a convenience; a failed registration is not an
+    // outage and must not disturb the connection phase.
+  });
 }
 
 function errorMessage(cause: unknown, fallback: string): string {

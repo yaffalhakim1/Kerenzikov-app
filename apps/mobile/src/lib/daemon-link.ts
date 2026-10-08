@@ -51,6 +51,8 @@ export interface DaemonLinkOptions {
 export const DEFAULT_PROBE_TIMEOUT_MS = 8_000;
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 export const DEFAULT_FRESHNESS_MS = 5_000;
+/** Gap before re-probing after a timed-out probe, covering the radio waking up. */
+export const PROBE_RETRY_MS = 1_500;
 
 /**
  * Supervises one client's connection for as long as its daemon stays
@@ -169,27 +171,43 @@ export class DaemonLink {
   probeLiveness(): Promise<boolean> {
     if (this.closed || this.snapshot.phase !== 'connected') return Promise.resolve(false);
     if (this.probe) return this.probe;
-    const probe = (async () => {
-      try {
-        await this.client.request({ type: 'getSettings' }, undefined, undefined, {
-          timeoutMs: this.probeTimeoutMs,
-        });
-        return true;
-      } catch (cause) {
-        // An error reply still proves the daemon is there.
-        if (cause instanceof WakuRpcError) return true;
-        if (this.closed || this.snapshot.phase !== 'connected') return false;
-        this.live = false;
-        this.client.disconnect();
-        this.drop('The daemon stopped responding.');
-        return false;
-      }
-    })();
+    const probe = this.runProbe(0);
     this.probe = probe;
     void probe.finally(() => {
       if (this.probe === probe) this.probe = null;
     });
     return probe;
+  }
+
+  /** A foreground return is not proof of death: iOS suspends the socket and the
+   * first request after resume often times out before the radio is back. Retry
+   * once before dropping, so a socket that was merely suspended survives. */
+  private async runProbe(attempt: number): Promise<boolean> {
+    try {
+      await this.client.request({ type: 'getSettings' }, undefined, undefined, {
+        timeoutMs: this.probeTimeoutMs,
+      });
+      return true;
+    } catch (cause) {
+      // An error reply still proves the daemon is there.
+      if (cause instanceof WakuRpcError) return true;
+      if (this.closed || this.snapshot.phase !== 'connected') return false;
+      if (attempt === 0) {
+        await this.waitProbeRetry();
+        if (this.closed || this.snapshot.phase !== 'connected') return false;
+        return this.runProbe(1);
+      }
+      this.live = false;
+      this.client.disconnect();
+      this.drop('The daemon stopped responding.');
+      return false;
+    }
+  }
+
+  private waitProbeRetry(): Promise<void> {
+    return new Promise((resolve) => {
+      this.setTimer(() => resolve(), PROBE_RETRY_MS);
+    });
   }
 
   /** Tears the link down for good; the client disconnects with it. */
