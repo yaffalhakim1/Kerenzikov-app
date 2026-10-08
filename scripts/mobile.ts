@@ -325,14 +325,23 @@ function relaunchApp(serial: string): void {
  *  `-d` against the `model:` field (`@expo/cli`'s `resolveFromNameAsync`). For
  *  an emulator the serial is the name, but a physical device's serial is a USB
  *  id, so passing it fails with "Could not find device with name". Pass the
- *  model; every adb call still uses the serial. */
-function runNativeBuild(device: Device): void {
+ *  model; every adb call still uses the serial.
+ *
+ *  Gradle output streams live rather than being captured: a first native build
+ *  runs for minutes, and piping it left the terminal silent the whole time
+ *  (looked hung, and nothing was interactable until it returned). */
+async function runNativeBuild(device: Device): Promise<void> {
   console.log(`app: expo run:android on ${device.model} (native rebuild)`);
-  const result = run([
-    "bun", "--filter", "@waku/mobile", "android", "--", "-d", device.model,
-  ]);
-  process.stdout.write(result.out);
-  if (result.code !== 0) throw new Error("expo run:android failed");
+  const proc = Bun.spawn(
+    ["bun", "--filter", "@waku/mobile", "android", "--", "-d", device.model],
+    {
+      env: { ...process.env, ...SDK_ENV, CI: undefined },
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    },
+  );
+  if ((await proc.exited) !== 0) throw new Error("expo run:android failed");
 }
 
 function reportDaemonAddress(device: Device): void {
@@ -373,7 +382,7 @@ async function main(): Promise<void> {
     // them up on force-stop + relaunch (or the terminal's `r`).
     reverseTunnels(device.serial);
     if (useNative) {
-      runNativeBuild(device);
+      await runNativeBuild(device);
     } else {
       relaunchApp(device.serial);
     }
@@ -386,7 +395,7 @@ async function main(): Promise<void> {
   reverseTunnels(device.serial);
 
   if (useNative) {
-    runNativeBuild(device);
+    await runNativeBuild(device);
   } else {
     relaunchApp(device.serial);
   }
