@@ -143,7 +143,6 @@ struct ExpoMessage<'a> {
     body: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     data: Option<serde_json::Value>,
-    sound: &'a str,
 }
 
 /// Sends one notice to every backgrounded device. Best-effort: a push that
@@ -161,12 +160,14 @@ pub fn notify(registry: &PushRegistry, notice: &PushNotice) {
         })
     });
     for device in devices {
+        // No `sound` field: the client's notification channel owns the sound,
+        // and sending the literal "default" makes expo-notifications look for a
+        // custom file by that name and warn when it does not find one.
         let message = ExpoMessage {
             to: &device.token,
             title: &notice.title,
             body: &notice.body,
             data: data.clone(),
-            sound: "default",
         };
         let Ok(body) = serde_json::to_string(&message) else {
             continue;
