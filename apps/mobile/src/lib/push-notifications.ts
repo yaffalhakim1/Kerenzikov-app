@@ -83,13 +83,14 @@ export function showNotificationsInForeground(): void {
 /**
  * The channel Android groups these notifications under. Created once at
  * startup; without a channel Android 8+ drops programmatic notifications.
+ * Omitting `sound` means the system default; a filename string is treated as
+ * a custom sound and warned about when no such bundled file exists.
  */
 export async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: 'Task events',
     importance: Notifications.AndroidImportance.DEFAULT,
-    sound: 'default',
   });
 }
 
