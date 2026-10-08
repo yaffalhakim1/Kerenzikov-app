@@ -98,11 +98,16 @@
           "color": "#c35e0a"
         }
       ],
-      "./plugins/with-paste-input"
+      "./plugins/with-paste-input.cjs"
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "aaf2bb3c-4629-4310-9e96-4c0dabdb84bb"
+      }
     }
   }
 }
