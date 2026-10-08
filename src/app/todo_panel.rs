@@ -1,4 +1,4 @@
-//! The agent's own task list, as a popover off the composer's status row.
+//! The agent's own task list, drawn two ways.
 //!
 //! OpenCode publishes this list itself — `todo.updated` on the session stream,
 //! carrying `{content, status, priority}` per entry — so the panel is a view of
@@ -6,10 +6,11 @@
 //! the whole list each time, which is why an empty payload clears the panel
 //! rather than merging into it.
 //!
-//! It lives behind an icon rather than as a standing panel because the list is
-//! long, changes on the agent's schedule, and is only interesting on demand;
-//! pinning it above the composer would spend the transcript's height on
-//! something read occasionally.
+//! The standing form is the tray above the composer, windowed around the
+//! in-progress step so the current work is visible without asking. The chip
+//! beside the context circle opens the same list as a popover, and is the
+//! folded affordance: it is drawn only while the tray is collapsed, so the two
+//! never show the plan at once.
 //!
 //! Render is reached from the transcript's notify path, so the work here has to
 //! stay proportional to what is on screen: the entries are read straight off
@@ -111,9 +112,20 @@ impl Waku {
         cx.notify();
     }
 
+    /// The chip beside the context circle, which opens the plan as a popover.
+    ///
+    /// Suppressed while the tray is expanded: the tray already shows the plan,
+    /// and a chip beside it is the same list twice. The chip is the folded
+    /// affordance the tray doc describes, so it returns the moment the tray
+    /// folds away and the plan still needs a way back.
     pub(super) fn render_todo_meter(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let todos = self.selected_session()?.todos.clone();
         if todos.is_empty() {
+            return None;
+        }
+        if let Some(session_id) = self.selected_session_id()
+            && !self.todo_tray_collapsed.contains(&session_id)
+        {
             return None;
         }
         let (completed, total) = todo_progress(&todos);
@@ -203,7 +215,23 @@ impl Waku {
                 ));
             }
         }
-        Some(tray.into_any_element())
+        // Match the composer's column exactly — the same 20px gutter and 720px
+        // cap, centered — so the tray's card edges line up with the card below
+        // it rather than running the full width of the pane.
+        Some(
+            div()
+                .flex_none()
+                .px(px(20.0))
+                .pb(px(6.0))
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(px(CONTENT_MAX_WIDTH))
+                        .mx_auto()
+                        .child(tray),
+                )
+                .into_any_element(),
+        )
     }
 
     /// `Tasks · 1/4` plus the disclosure control, which collapses the tray to
