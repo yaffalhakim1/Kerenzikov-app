@@ -12,6 +12,23 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.53]
+
+### Android
+
+- **Notifications when a task finishes while the app is closed.** The phone
+  keeps a direct connection to your desktop daemon, and the system suspends that
+  connection whenever the app goes to the background — so a turn that finished
+  while you were away was invisible until you opened the app again. Kerenzikov
+  now sends a notification through Expo's push service when a turn finishes, a
+  permission is requested, or the agent needs an answer, and only while the app
+  is backgrounded. Tapping it opens the task. The notification names the task
+  and, when the agent gives one, summarises what happened.
+- **A long task list stays smooth while a task streams.** A project with many
+  tasks stuttered when scrolled during a running turn. Each group now shows its
+  first few tasks with a "See more" row, and folding a group resets it back to
+  that first page.
+
 ## [0.1.52]
 
 ### Desktop
