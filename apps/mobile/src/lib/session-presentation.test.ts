@@ -182,6 +182,28 @@ describe('mobile session presentation', () => {
       .toEqual(['today']);
   });
 
+  test('leads with a Needs you section and drops waiting tasks from the groups below', () => {
+    const now = new Date(2026, 7, 31, 12);
+    const projects: Project[] = [{ id: 'project', name: 'Waku', path: '/waku', created_at: 1 }];
+    const waiting = session({ id: 'waiting', status: 'waiting', last_reply_at: epoch(2026, 7, 31, 11) });
+    const pinnedWaiting = session({ id: 'pinned-waiting', status: 'waiting', last_reply_at: epoch(2026, 7, 31, 10) });
+    const idle = session({ id: 'idle', last_reply_at: epoch(2026, 7, 31, 9) });
+    // A waiting task leads even when it is also pinned: answering it is the
+    // action, and a row must never be drawn in two sections at once.
+    const groups = groupSessions(projects, [waiting, pinnedWaiting, idle], now, {
+      pinned: ['pinned-waiting'],
+    });
+    expect(groups.map((group) => ({
+      id: group.id,
+      sessions: group.data.map((item) => item.session.id),
+    }))).toEqual([
+      { id: '__needs_you__', sessions: ['waiting', 'pinned-waiting'] },
+      { id: 'today', sessions: ['idle'] },
+    ]);
+    // With nothing waiting, the section is absent entirely.
+    expect(groupSessions(projects, [idle], now).map((group) => group.id)).toEqual(['today']);
+  });
+
   test('names the settled state a task row should show, and none while running', () => {
     expect(sessionStatusBadge({ status: 'waiting' })).toEqual({ label: 'Input', tone: 'warning' });
     expect(sessionStatusBadge({ status: 'failed' })).toEqual({ label: 'Failed', tone: 'danger' });

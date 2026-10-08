@@ -137,6 +137,10 @@ const GAP_BLOCK = 12;
  *  project literally named "Pinned" cannot collide with it. */
 export const PINNED_GROUP_ID = '__pinned__';
 
+/** Section id for the sessions blocked on the user, distinct for the same
+ *  reason as `PINNED_GROUP_ID`. */
+export const NEEDS_YOU_GROUP_ID = '__needs_you__';
+
 const GROUPS: Array<{ id: SessionGroupId; title: string }> = [
   { id: 'today', title: 'Today' },
   { id: 'yesterday', title: 'Yesterday' },
@@ -209,13 +213,25 @@ export function groupSessions(
     return ordering === 'newest' ? delta : -delta;
   });
 
+  // Sessions blocked on the user lead the list, ahead of even the pinned
+  // section: a task waiting on a permission or a question is the one thing the
+  // user must act on, and it stays put only until they answer. Pulled out of
+  // the sections below so a task is never drawn twice.
+  const needsYou = sorted.filter((session) => session.status === 'waiting');
+  const needsYouIds = new Set(needsYou.map((session) => session.id));
+  const needsYouItems: SessionListItem[] = needsYou.map((session) => ({
+    session,
+    projectName: projectNames.get(session.project_id) || 'Unknown project',
+    timestamp: sessionTimestamp(session),
+  }));
+
   // Pinned tasks form their own leading section, in pin order, and are removed
   // from the groups below so a task is never shown twice. A pinned id that no
   // longer resolves to a live task is simply absent, which is what unbinding
   // a deleted or archived task means.
   const pinnedItems: SessionListItem[] = [];
   for (const session of started) {
-    if (!pinnedRank.has(session.id)) continue;
+    if (!pinnedRank.has(session.id) || needsYouIds.has(session.id)) continue;
     pinnedItems.push({
       session,
       projectName: projectNames.get(session.project_id) || 'Unknown project',
@@ -232,7 +248,7 @@ export function groupSessions(
       const groups: SessionGroup[] = [];
       const indexes = new Map<string, number>();
       for (const session of sorted) {
-        if (pinnedRank.has(session.id)) continue;
+        if (pinnedRank.has(session.id) || needsYouIds.has(session.id)) continue;
         const name = projectNames.get(session.project_id) ?? 'Unknown project';
         const id = session.project_id || 'unknown';
         let index = indexes.get(id);
@@ -252,7 +268,7 @@ export function groupSessions(
 
     const grouped = new Map<SessionGroupId, SessionListItem[]>();
     for (const session of sorted) {
-      if (pinnedRank.has(session.id)) continue;
+      if (pinnedRank.has(session.id) || needsYouIds.has(session.id)) continue;
       const id = sessionDateGroup(sessionTimestamp(session), now);
       const items = grouped.get(id) ?? [];
       items.push({
@@ -269,9 +285,14 @@ export function groupSessions(
     });
   })();
 
-  return pinnedItems.length
-    ? [{ id: PINNED_GROUP_ID, title: 'Pinned', data: pinnedItems }, ...groupedSections]
-    : groupedSections;
+  const leading: SessionGroup[] = [];
+  if (needsYouItems.length) {
+    leading.push({ id: NEEDS_YOU_GROUP_ID, title: 'Needs you', data: needsYouItems });
+  }
+  if (pinnedItems.length) {
+    leading.push({ id: PINNED_GROUP_ID, title: 'Pinned', data: pinnedItems });
+  }
+  return leading.length ? [...leading, ...groupedSections] : groupedSections;
 }
 
 /**

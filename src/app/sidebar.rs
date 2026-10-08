@@ -66,6 +66,9 @@ impl SessionDateGroup {
 /// between Project and Updated grouping.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SidebarGroup {
+    /// Sessions waiting on the user — a permission or a question — collected
+    /// from every project so the one thing that blocks progress leads the list.
+    NeedsYou,
     Updated(SessionDateGroup),
     Project(Uuid),
     Projectless,
@@ -74,6 +77,7 @@ pub(super) enum SidebarGroup {
 impl SidebarGroup {
     fn element_key(self) -> SharedString {
         match self {
+            Self::NeedsYou => "needs-you".into(),
             Self::Updated(group) => format!("updated-{}", group.index()).into(),
             Self::Project(project_id) => format!("project-{project_id}").into(),
             Self::Projectless => "projectless".into(),
@@ -82,6 +86,7 @@ impl SidebarGroup {
 
     fn mix_fingerprint(self, fingerprint: u64) -> u64 {
         match self {
+            Self::NeedsYou => mix(fingerprint, 0x300),
             Self::Updated(group) => mix(fingerprint, group.index() as u64 + 1),
             Self::Project(project_id) => mix_uuid(mix(fingerprint, 0x100), project_id),
             Self::Projectless => mix(fingerprint, 0x200),
@@ -255,6 +260,17 @@ fn sort_sidebar_sessions(sessions: &mut Vec<&AgentSession>, ordering: SidebarOrd
             sessions.sort_by_key(|session| sidebar_session_timestamp(session))
         }
     }
+}
+
+/// Split the sorted history into the sessions blocked on the user and the rest,
+/// both keeping the sort order they arrived in. A waiting session leads the
+/// sidebar; everything else keeps its group.
+fn partition_needs_you<'a>(
+    sessions: Vec<&'a AgentSession>,
+) -> (Vec<&'a AgentSession>, Vec<&'a AgentSession>) {
+    sessions
+        .into_iter()
+        .partition(|session| session.status == SessionStatus::Waiting)
 }
 
 fn project_sidebar_groups(
@@ -1204,6 +1220,20 @@ impl Waku {
             if session.is_archived() {
                 fingerprint = mix(fingerprint, 0xa2c1_1ced);
             }
+            // Status decides whether a session leads the list under Needs you or
+            // sits in its group, so it is part of the row identity: without it a
+            // session becoming Waiting would leave the snapshot stale.
+            fingerprint = mix(
+                fingerprint,
+                match session.status {
+                    SessionStatus::Idle => 1,
+                    SessionStatus::Connecting => 2,
+                    SessionStatus::Working => 3,
+                    SessionStatus::Waiting => 4,
+                    SessionStatus::Background => 5,
+                    SessionStatus::Failed => 6,
+                },
+            );
             fingerprint = mix(fingerprint, sidebar_session_timestamp(session));
             if self.state.sidebar_grouping == SidebarGrouping::Project {
                 fingerprint = mix(
@@ -1270,7 +1300,26 @@ impl Waku {
             .collect::<Vec<_>>();
         sort_sidebar_sessions(&mut sorted_sessions, self.state.sidebar_ordering);
 
+        // Sessions blocked on the user lead the list, pulled out of the groups
+        // below so one task is never drawn twice. A row's element id is its
+        // session id, so a duplicate would collide; the partition is also what
+        // makes "Needs you" an inbox — answer the prompt and the task returns
+        // to its project or date group on the next snapshot.
+        let (needs_you, sorted_sessions) = partition_needs_you(sorted_sessions);
+
         let mut rows = vec![SidebarRow::Search];
+        let needs_you_ids = needs_you
+            .iter()
+            .map(|session| session.id)
+            .collect::<Vec<_>>();
+        append_sidebar_group_rows(
+            &mut rows,
+            SidebarGroup::NeedsYou,
+            &needs_you_ids,
+            self.sidebar_collapsed_groups
+                .contains(&SidebarGroup::NeedsYou),
+            false,
+        );
         match self.state.sidebar_grouping {
             SidebarGrouping::Updated => {
                 let mut grouped_sessions: [Vec<Uuid>; 6] = std::array::from_fn(|_| Vec::new());
@@ -1464,6 +1513,7 @@ impl Waku {
             "icons/folder-open.svg"
         };
         let label = match group {
+            SidebarGroup::NeedsYou => tr!("sidebar.needs_you"),
             SidebarGroup::Updated(group) => group.label(),
             SidebarGroup::Project(project_id) => self
                 .state
@@ -1474,14 +1524,17 @@ impl Waku {
                 .unwrap_or_else(|| tr!("project.no_project_name")),
             SidebarGroup::Projectless => tr!("project.no_project_name"),
         };
-        let updated_chevron = matches!(group, SidebarGroup::Updated(_)).then(|| {
-            icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
-                .when(collapsed, |icon| {
-                    icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(0.75)))
-                })
-                .invisible()
-                .group_hover(group_name.clone(), |icon| icon.visible())
-        });
+        let updated_chevron = matches!(group, SidebarGroup::Updated(_) | SidebarGroup::NeedsYou)
+            .then(|| {
+                icon("icons/chevron-down.svg", 14.0, theme.text_secondary)
+                    .when(collapsed, |icon| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
+                            0.75,
+                        )))
+                    })
+                    .invisible()
+                    .group_hover(group_name.clone(), |icon| icon.visible())
+            });
         let compose = show_folder_icon.then(|| {
             let compose_focus = self
                 .sidebar_group_compose_focuses
@@ -1566,6 +1619,9 @@ impl Waku {
                     .when(show_folder_icon, |element| {
                         element.child(icon(folder_icon, 14.0, theme.text_secondary))
                     })
+                    .when(group == SidebarGroup::NeedsYou, |element| {
+                        element.child(icon("icons/alert.svg", 14.0, theme.warning))
+                    })
                     .child(
                         div()
                             .min_w_0()
@@ -1629,7 +1685,7 @@ impl Waku {
         match group {
             SidebarGroup::Project(project_id) => self.select_project(project_id, cx),
             SidebarGroup::Projectless => self.create_projectless_session(cx),
-            SidebarGroup::Updated(_) => return,
+            SidebarGroup::Updated(_) | SidebarGroup::NeedsYou => return,
         }
         let focus = self.composer_focus(cx);
         window.focus(&focus, cx);
@@ -2513,6 +2569,57 @@ mod tests {
         assert_eq!(
             session_date_group_for_dates(tomorrow, today),
             SessionDateGroup::Today
+        );
+    }
+
+    #[test]
+    fn waiting_sessions_lead_the_sidebar_and_leave_their_group() {
+        let project_id = Uuid::new_v4();
+        let mut idle = AgentSession::new(project_id, ProviderKind::Codex);
+        idle.last_reply_at = Some(10);
+        let mut waiting = AgentSession::new(project_id, ProviderKind::Codex);
+        waiting.last_reply_at = Some(30);
+        waiting.status = SessionStatus::Waiting;
+        let mut failed = AgentSession::new(project_id, ProviderKind::Codex);
+        failed.last_reply_at = Some(20);
+        failed.status = SessionStatus::Failed;
+
+        let (needs_you, rest) = partition_needs_you(vec![&waiting, &idle, &failed]);
+
+        // Only Waiting is an inbox state; Failed is a settled outcome, not a
+        // prompt to answer, so it stays in its group.
+        assert_eq!(
+            needs_you
+                .iter()
+                .map(|session| session.id)
+                .collect::<Vec<_>>(),
+            vec![waiting.id]
+        );
+        assert_eq!(
+            rest.iter().map(|session| session.id).collect::<Vec<_>>(),
+            vec![idle.id, failed.id]
+        );
+    }
+
+    #[test]
+    fn needs_you_rows_are_absent_when_nothing_is_waiting() {
+        let mut rows = Vec::new();
+        append_sidebar_group_rows(&mut rows, SidebarGroup::NeedsYou, &[], false, false);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn needs_you_group_renders_its_header_when_sessions_wait() {
+        let waiting = Uuid::from_u128(1);
+        let mut rows = Vec::new();
+        append_sidebar_group_rows(&mut rows, SidebarGroup::NeedsYou, &[waiting], false, false);
+        assert_eq!(
+            rows,
+            vec![
+                SidebarRow::Header(SidebarGroup::NeedsYou),
+                SidebarRow::Session(waiting),
+                SidebarRow::GroupSpacer,
+            ]
         );
     }
 
