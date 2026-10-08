@@ -62,8 +62,13 @@ per session: a plan is interesting while it runs and noise afterwards, and that
 differs per task. State lives in `Waku::todo_tray_collapsed` and is toggled by
 `Waku::toggle_todo_tray`.
 
-The footer meter is unchanged and stays as the collapsed affordance, so folding
-the tray never removes the only way to reach the list.
+The footer chip is the collapsed affordance, and it is drawn **only while the
+tray is collapsed**. Expanded, the tray is already the plan, and a chip beside
+it is the same list twice; folding the tray brings the chip back, so folding
+never removes the only way to reach the list.
+
+The tray is laid out in the composer's column — the same 20px gutter and 720px
+cap, centered — so its card edges line up with the composer card below it.
 
 ## What the rows say
 
