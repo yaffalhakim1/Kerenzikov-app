@@ -423,10 +423,21 @@ function TaskDrawerContent({
   }, [deleteSession]);
   const toggleGroup = useCallback((groupId: string) => {
     tapHaptic();
+    const folding = !prefs.folded.includes(groupId);
+    // Folding a group forgets that it was expanded, so unfolding it returns to
+    // the paginated first page rather than reopening at full length.
+    if (folding) {
+      setExpandedSections((current) => {
+        if (!current.has(groupId)) return current;
+        const next = new Set(current);
+        next.delete(groupId);
+        return next;
+      });
+    }
     updatePrefs({
-      folded: prefs.folded.includes(groupId)
-        ? prefs.folded.filter((id) => id !== groupId)
-        : [...prefs.folded, groupId],
+      folded: folding
+        ? [...prefs.folded, groupId]
+        : prefs.folded.filter((id) => id !== groupId),
     });
   }, [prefs.folded, updatePrefs]);
 
