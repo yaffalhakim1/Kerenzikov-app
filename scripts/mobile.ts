@@ -321,6 +321,20 @@ function relaunchApp(serial: string): void {
   console.log("app: relaunched (JS-only path, no rebuild)");
 }
 
+/** `expo run:android` targets a device by *name*, not adb serial: it resolves
+ *  `-d` against the `model:` field (`@expo/cli`'s `resolveFromNameAsync`). For
+ *  an emulator the serial is the name, but a physical device's serial is a USB
+ *  id, so passing it fails with "Could not find device with name". Pass the
+ *  model; every adb call still uses the serial. */
+function runNativeBuild(device: Device): void {
+  console.log(`app: expo run:android on ${device.model} (native rebuild)`);
+  const result = run([
+    "bun", "--filter", "@waku/mobile", "android", "--", "-d", device.model,
+  ]);
+  process.stdout.write(result.out);
+  if (result.code !== 0) throw new Error("expo run:android failed");
+}
+
 function reportDaemonAddress(device: Device): void {
   const { out } = run([ADB, "-s", device.serial, "reverse", "--list"]);
   if (!out.includes(`tcp:${DAEMON_PORT}`)) return;
@@ -359,12 +373,7 @@ async function main(): Promise<void> {
     // them up on force-stop + relaunch (or the terminal's `r`).
     reverseTunnels(device.serial);
     if (useNative) {
-      console.log("app: expo run:android (native rebuild)");
-      const result = run([
-        "bun", "--filter", "@waku/mobile", "android", "--", "-d", device.serial,
-      ]);
-      process.stdout.write(result.out);
-      if (result.code !== 0) throw new Error("expo run:android failed");
+      runNativeBuild(device);
     } else {
       relaunchApp(device.serial);
     }
@@ -377,12 +386,7 @@ async function main(): Promise<void> {
   reverseTunnels(device.serial);
 
   if (useNative) {
-    console.log("app: expo run:android (native rebuild)");
-    const result = run([
-      "bun", "--filter", "@waku/mobile", "android", "--", "-d", device.serial,
-    ]);
-    process.stdout.write(result.out);
-    if (result.code !== 0) throw new Error("expo run:android failed");
+    runNativeBuild(device);
   } else {
     relaunchApp(device.serial);
   }
