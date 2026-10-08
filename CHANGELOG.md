@@ -12,6 +12,18 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.56]
+
+### Desktop and Android
+
+- **A queued follow-up now shows up everywhere.** If you queued a message from
+  your phone while an agent was working, the desktop never showed it waiting —
+  and a queued message from the desktop did appear on the phone, so the two
+  disagreed about the same task. The queue is now shared the same way the rest
+  of the task is: queue on one device and every other device shows it, and when
+  the agent finishes and picks the follow-up up, the row leaves the queue on
+  every device instead of lingering as though it were still waiting.
+
 ## [0.1.55]
 
 ### Desktop
