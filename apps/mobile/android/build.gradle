@@ -9,6 +9,11 @@ buildscript {
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+    // Reads android/app/google-services.json into the Firebase config FCM
+    // needs. Wired by hand rather than via `expo.android.googleServicesFile`
+    // because the release workflow runs `gradlew assembleRelease` directly and
+    // never runs the config plugins that would add this.
+    classpath('com.google.gms:google-services:4.4.4')
   }
 }
 

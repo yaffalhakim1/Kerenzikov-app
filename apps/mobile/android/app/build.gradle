@@ -184,3 +184,14 @@ dependencies {
         implementation jscFlavor
     }
 }
+
+// Must be applied after com.android.application. Reads google-services.json
+// into the Firebase config FCM needs. Wired by hand rather than via
+// `expo.android.googleServicesFile` because the release workflow runs
+// `gradlew assembleRelease` directly and never runs the config plugins that
+// would add this. Guarded on the file so a checkout without Firebase config
+// (a contributor without the key, or before it is added) still builds — the
+// app simply cannot receive push until it is present.
+if (file('google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
