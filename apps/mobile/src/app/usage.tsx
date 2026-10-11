@@ -275,7 +275,7 @@ export default function UsageScreen() {
               </>
             )}
 
-            <Text style={[styles.footer, { color: theme.textGhost }]}>
+            <Text style={[styles.footer, { color: theme.textTertiary }]}>
               {scanSummary(history)}
             </Text>
           </>

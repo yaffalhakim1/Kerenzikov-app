@@ -355,7 +355,7 @@ export default function SettingsScreen() {
 
         {Platform.OS === 'android' ? <UpdateRow /> : null}
 
-        <Text style={[styles.footer, { color: theme.textGhost }]}>
+        <Text style={[styles.footer, { color: theme.textTertiary }]}>
           Settings are stored on the daemon and shared by every connected device.
         </Text>
       </ScrollView>

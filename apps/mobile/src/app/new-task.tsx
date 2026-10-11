@@ -577,7 +577,7 @@ export default function NewTaskScreen() {
               already keeps it — one place to answer "what will run this", rather
               than the same name in a setup row and again above the input. */}
           <SelectorRow
-            icon={{ ios: 'laptopcomputer', android: 'laptop_mac', web: 'laptop_mac' }}
+            icon={{ ios: 'externaldrive', android: 'storage', web: 'storage' }}
             label="Workspace"
             value={isolated ? 'Isolated worktree' : 'Work locally'}
             onPress={() => setOpenSheet('workspace')}
@@ -626,7 +626,7 @@ export default function NewTaskScreen() {
                     accessibilityLabel={`Remove ${attachment.name}`}
                     accessibilityRole="button"
                     disabled={submitting}
-                    hitSlop={8}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     onPress={() => {
                       draftSync.markEdited();
                       setAttachments((current) => current.filter((_, item) => item !== index));

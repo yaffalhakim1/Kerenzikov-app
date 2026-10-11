@@ -278,7 +278,10 @@ function BackgroundWorkSheet({
             <View
               key={`${item.key.kind}:${item.key.providerId}`}
               style={[styles.workCard, { backgroundColor: theme.raised }]}>
-              <AppPressable onPress={() => onSelect(item)}>
+              <AppPressable
+                accessibilityLabel={`${item.title || item.key.providerId}, ${item.status}`}
+                accessibilityRole="button"
+                onPress={() => onSelect(item)}>
                 <View style={styles.workCardHeader}>
                   <AppSymbol
                     name={{ ios: 'circle.fill', android: 'circle', web: 'circle' }}

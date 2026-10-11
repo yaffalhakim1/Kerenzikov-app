@@ -143,7 +143,7 @@ export default function DaemonEditorScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={[styles.sectionLabel, { color: colors.secondaryText }]}>
-          CONNECTION
+          Connection
         </Text>
         <View style={[styles.formGroup, { backgroundColor: colors.surface }]}>
           <View style={styles.formRow}>
@@ -346,7 +346,7 @@ export default function DaemonEditorScreen() {
                 { color: colors.secondaryText },
               ]}
             >
-              ACTIONS
+              Actions
             </Text>
             <View
               style={[styles.formGroup, { backgroundColor: colors.surface }]}
@@ -533,9 +533,10 @@ const styles = StyleSheet.create({
   sectionLabel: {
     fontSize: 13,
     fontWeight: "500",
-    letterSpacing: 0.1,
+    letterSpacing: 0.4,
     marginBottom: 7,
     marginHorizontal: 20,
+    textTransform: "uppercase",
   },
   actionsLabel: { marginTop: 28 },
   formGroup: {

@@ -89,14 +89,14 @@ export const TranscriptRowView = memo(function TranscriptRowView({
                   {model ? (
                     <Text
                       numberOfLines={1}
-                      style={[styles.messageFooter, styles.messageFooterModel, { color: theme.textGhost }]}>
+                      style={[styles.messageFooter, styles.messageFooterModel, { color: theme.textTertiary }]}>
                       {model}
                     </Text>
                   ) : null}
                 </>
               ) : null}
               {row.footerTimestamp != null && (
-                <Text style={[styles.messageFooter, { color: theme.textGhost }]}>
+                <Text style={[styles.messageFooter, { color: theme.textTertiary }]}>
                   {formatMessageTime(row.footerTimestamp)}
                 </Text>
               )}
@@ -231,6 +231,8 @@ function UserBubbleInner({ message }: { message: Message }) {
     <View style={styles.userFrame}>
       <AppPressable
         accessibilityHint="Long press to copy"
+        accessibilityLabel={message.display_content ?? message.content}
+        accessibilityRole="button"
         delayLongPress={350}
         onLongPress={() => {
           void Clipboard.setStringAsync(message.content)
@@ -366,7 +368,7 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
       <Blocks color={theme.accent} size={14} />
       <Text style={[styles.workingText, { color: theme.textTertiary }]}>{word}</Text>
       {startedAt != null && session.status !== 'waiting' && (
-        <Text style={[styles.workingElapsed, { color: theme.textGhost }]}>
+        <Text style={[styles.workingElapsed, { color: theme.textTertiary }]}>
           {formatElapsed(elapsed)}
         </Text>
       )}
@@ -389,10 +391,13 @@ export function SessionEmpty({
   loading,
   error,
   missing,
+  onRetry,
 }: {
   loading: boolean;
   error: unknown;
   missing: boolean;
+  /** Refetch offered beside a load error, so the state names its way out. */
+  onRetry?: () => void;
 }) {
   const theme = useTheme();
   if (loading) return <Blocks color={theme.accent} size={24} />;
@@ -405,6 +410,17 @@ export function SessionEmpty({
         <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
           {error instanceof Error ? error.message : String(error)}
         </Text>
+      )}
+      {Boolean(error) && onRetry && (
+        <AppPressable
+          accessibilityRole="button"
+          onPress={onRetry}
+          style={({ pressed }) => [
+            styles.emptyRetry,
+            { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
+          ]}>
+          <Text style={[styles.emptyRetryText, { color: theme.text }]}>Try again</Text>
+        </AppPressable>
       )}
     </View>
   );
@@ -428,7 +444,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     minHeight: 20,
   },
-  messageFooter: { fontSize: 10.5 },
+  messageFooter: { fontSize: 11.5 },
   /** A long model id truncates rather than pushing the timestamp out. */
   messageFooterModel: { flexShrink: 1, minWidth: 0 },
   /** Sits under the bubble on the user's side, mirroring the assistant row. */
@@ -499,4 +515,13 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', paddingHorizontal: 32 },
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   emptyBody: { fontSize: 13.5, lineHeight: 19, marginTop: 8, textAlign: 'center' },
+  emptyRetry: {
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    justifyContent: 'center',
+    marginTop: 16,
+    minHeight: 44,
+    paddingHorizontal: 22,
+  },
+  emptyRetryText: { fontSize: 14, fontWeight: '600' },
 });

@@ -99,6 +99,8 @@ export default function SkillsScreen() {
                 {group.skills.map((entry, index) => (
                   <AppPressable
                     accessibilityHint="Long press to move to the trash"
+                    accessibilityLabel={entry.name}
+                    accessibilityRole="button"
                     delayLongPress={400}
                     key={`${entry.name}:${entry.rowKey}`}
                     onLongPress={() => confirmTrash(entry)}
@@ -150,16 +152,15 @@ export default function SkillsScreen() {
         )}
 
         {skills.data ? (
-          <Text style={[styles.footer, { color: theme.textGhost }]}>
+          <Text style={[styles.footer, { color: theme.textTertiary }]}>
             {skillSummary(skills.data.skills)}
           </Text>
         ) : null}
         {localError ? (
           <Text style={[styles.error, { color: theme.danger }]}>{localError}</Text>
         ) : null}
-        <Text style={[styles.footer, { color: theme.textGhost }]}>
-          Skills live on the daemon host. Long-press one to move it to the trash, which the
-          desktop can undo.
+        <Text style={[styles.footer, { color: theme.textTertiary }]}>
+          Skills live on the daemon host.
         </Text>
       </ScrollView>
     </View>

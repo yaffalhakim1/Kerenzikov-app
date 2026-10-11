@@ -781,7 +781,7 @@ export function MobileComposer({
                     accessibilityLabel={`Remove ${attachment.name}`}
                     accessibilityRole="button"
                     disabled={submitting}
-                    hitSlop={8}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     onPress={() => {
                       draftSync.markEdited();
                       setAttachments((current) => current.filter((_, item) => item !== index));
@@ -1061,8 +1061,8 @@ function UserInputPanel({
               style={({ pressed }) => [
                 styles.questionOption,
                 {
-                  backgroundColor: checked ? theme.accentSoft : theme.surfaceMuted,
-                  borderColor: checked ? theme.accent : 'transparent',
+                  backgroundColor: checked ? NativeTint : theme.surfaceMuted,
+                  borderColor: checked ? NativeTint : 'transparent',
                   opacity: pressed ? 0.65 : 1,
                 },
               ]}>
@@ -1078,7 +1078,7 @@ function UserInputPanel({
                 <AppSymbol
                   name={{ ios: 'checkmark', android: 'check', web: 'check' }}
                   size={14}
-                  tintColor={theme.accent}
+                  tintColor={NativeTint}
                 />
               )}
             </AppPressable>
