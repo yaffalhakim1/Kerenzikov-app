@@ -157,6 +157,17 @@ pub enum Command {
         binary_override: Option<String>,
         cli_version: Option<String>,
     },
+    /// Price one turn's billing-token split against the daemon's model-rate
+    /// table. The desktop accumulates the split live; this prices it on
+    /// demand, so the rate table stays daemon-owned and cached once.
+    PriceSessionTokens {
+        provider: ProviderKind,
+        model: Option<String>,
+        input: u64,
+        output: u64,
+        cache_read: u64,
+        cache_creation: u64,
+    },
     ProbeComputerPermissions {
         prompt: bool,
     },
@@ -428,6 +439,9 @@ pub enum ResponsePayload {
     },
     PlanUsage {
         usage: Option<PlanUsage>,
+    },
+    PricedCost {
+        cost_usd: Option<f64>,
     },
     ComputerPermissions {
         permissions: ComputerPermissions,

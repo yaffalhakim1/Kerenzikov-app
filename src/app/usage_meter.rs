@@ -31,6 +31,105 @@ const PLAN_USAGE_REFRESH_STALE: Duration = Duration::from_secs(30);
 const PLAN_USAGE_RETRY: Duration = Duration::from_secs(90);
 
 impl Waku {
+    /// The selected session's cached live cost, in dollars. `None` when no
+    /// price has landed yet — the panel shows no row rather than a stale one.
+    fn turn_cost_for_selected_session(&self) -> Option<f64> {
+        let session = self.selected_session()?;
+        let accumulator = self
+            .runtimes
+            .get(&session.id)
+            .and_then(|runtime| runtime.turn_usage)?;
+        let total = accumulator.input
+            + accumulator.output
+            + accumulator.cache_read
+            + accumulator.cache_creation;
+        if total == 0 {
+            return None;
+        }
+        let snapshot = accumulator;
+        if let Some((cached, cost)) = &self.turn_cost
+            && *cached == snapshot
+        {
+            return *cost;
+        }
+        None
+    }
+
+    /// Price the selected session's accumulated turn tokens through the
+    /// daemon's rate table when the accumulator has moved past the cached
+    /// price. Fire-and-forget: the answer lands via `drain_turn_cost_events`
+    /// and the panel picks it up on its next render.
+    pub(super) fn maybe_price_turn_usage(&mut self, cx: &mut Context<Self>) {
+        let (snapshot, model, provider) = {
+            let Some(session) = self.selected_session() else {
+                return;
+            };
+            let Some(accumulator) = self
+                .runtimes
+                .get(&session.id)
+                .and_then(|runtime| runtime.turn_usage)
+            else {
+                return;
+            };
+            let total = accumulator.input
+                + accumulator.output
+                + accumulator.cache_read
+                + accumulator.cache_creation;
+            if total == 0 {
+                return;
+            }
+            (accumulator, session.model.clone(), session.provider)
+        };
+        if self
+            .turn_cost
+            .as_ref()
+            .is_some_and(|(cached, _)| *cached == snapshot)
+        {
+            return;
+        }
+        self.turn_cost = Some((snapshot, None));
+        let daemon = self.daemon.client();
+        let event_wake = self.event_wake_tx.clone();
+        let tx = self.turn_cost_tx.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let result = match daemon.request(
+                    Uuid::nil(),
+                    Uuid::nil(),
+                    waku_client::Command::PriceSessionTokens {
+                        provider,
+                        model,
+                        input: snapshot.input,
+                        output: snapshot.output,
+                        cache_read: snapshot.cache_read,
+                        cache_creation: snapshot.cache_creation,
+                    },
+                ) {
+                    Ok(waku_client::ResponsePayload::PricedCost { cost_usd }) => cost_usd,
+                    _ => None,
+                };
+                tx.send((snapshot, result)).ok();
+                signal_event_pump(&event_wake);
+            })
+            .detach();
+    }
+
+    /// Drain priced-cost responses into the entity cache.
+    pub(super) fn drain_turn_cost_events(&mut self) -> bool {
+        let mut changed = false;
+        while let Ok((snapshot, cost)) = self.turn_cost_events.try_recv() {
+            if self
+                .turn_cost
+                .as_ref()
+                .is_none_or(|(cached, _)| *cached == snapshot)
+            {
+                changed |= self.turn_cost.as_ref().and_then(|(_, cost)| *cost) != cost;
+                self.turn_cost = Some((snapshot, cost));
+            }
+        }
+        changed
+    }
+
     /// Start background fetches of any plan meters whose snapshot is due.
     /// The slow maintenance clock and explicit panel-open requests call this;
     /// guards keep it to one in-flight fetch per provider.
@@ -240,6 +339,11 @@ impl Waku {
             Some(percent) if percent >= 80.0 => theme.warning,
             _ => theme.gauge,
         };
+        // Live cost for the session: the accumulated per-turn billing tokens
+        // priced at the model's rate. None when the transport reports no
+        // split (ACP providers) or no model is on record — the panel then
+        // simply has no cost row.
+        let turn_cost = self.turn_cost_for_selected_session();
         let tooltip = match (&error, percent) {
             (Some(error), _) => SharedString::from(tr!("usage.refresh_failed", error = error)),
             (None, Some(percent)) => SharedString::from(tr!(
@@ -276,6 +380,7 @@ impl Waku {
                     handle,
                     provider,
                     context,
+                    turn_cost,
                     plan.clone(),
                     error.as_deref(),
                     plan_loading,
@@ -375,6 +480,7 @@ fn usage_panel(
     handle: &ContextMenuHandle,
     provider: ProviderKind,
     context: Option<ContextUsage>,
+    turn_cost: Option<f64>,
     plan: Option<PlanUsage>,
     error: Option<&str>,
     plan_loading: bool,
@@ -435,6 +541,22 @@ fn usage_panel(
             )
             .child(meter_bar(&theme, percent.unwrap_or(0.0))),
     );
+    if let Some(cost) = turn_cost {
+        panel = panel.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(div().text_color(theme.text_tertiary).child(tr!("usage.session_cost")))
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_tertiary)
+                        .child(SharedString::from(super::usage_page::format_usd(cost))),
+                ),
+        );
+    }
     if plan.is_some() || error.is_some() || plan_loading {
         panel = panel.child(div().h(px(1.0)).flex_none().bg(theme.border));
     }

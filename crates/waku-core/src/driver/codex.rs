@@ -295,6 +295,7 @@ impl CodexDriver {
         let pending_steers = Arc::new(Mutex::new(HashMap::<u64, String>::new()));
         let background_rpcs = Arc::new(Mutex::new(BackgroundRpcState::default()));
         let goal_rpcs = Arc::new(Mutex::new(GoalRpcState::default()));
+        let turn_usage_total = Arc::new(Mutex::new(None::<u64>));
         let title_generation = Arc::new(Mutex::new(CodexTitleGeneration {
             enabled: provider_session_id.is_none(),
             launched: false,
@@ -746,6 +747,7 @@ impl CodexDriver {
         let reader_pending_steers = pending_steers.clone();
         let reader_background_rpcs = background_rpcs.clone();
         let reader_goal_rpcs = goal_rpcs.clone();
+        let reader_turn_usage_total = turn_usage_total.clone();
         let reader_title_generation = title_generation;
         let reader_commands = commands.clone();
         let reader_events = events.clone();
@@ -776,6 +778,7 @@ impl CodexDriver {
                                         &reader_commands,
                                         &reader_events,
                                         &reader_open_retries,
+                                        &reader_turn_usage_total,
                                         &mut stream_state,
                                     );
                                     if main_turn_started {
@@ -1738,6 +1741,7 @@ fn handle_codex_message(
     commands: &Sender<CommandMessage>,
     events: &impl DriverEventSink,
     thread_open_retries: &Mutex<u32>,
+    turn_usage_total: &Mutex<Option<u64>>,
     stream_state: &mut CodexStreamState,
 ) {
     // JSON-RPC IDs are scoped to each peer, so an app-server request may use
@@ -2068,6 +2072,24 @@ fn handle_codex_message(
                     context_tokens: tokens,
                     context_window: window,
                 });
+            }
+            // The thread total is monotonic, so the difference from the last
+            // reported total is what this turn added — billed tokens, split
+            // input/output for live pricing. `total` carries the same
+            // `totalTokens` shape as `last`.
+            if let Some(total) = usage.and_then(|usage| usage.pointer("/total/totalTokens")).and_then(Value::as_u64) {
+                let previous = turn_usage_total.lock().replace(total);
+                if let Some(previous) = previous
+                    && total > previous
+                {
+                    let delta = total - previous;
+                    let _ = events.send(DriverEvent::TurnUsage {
+                        input: delta,
+                        output: 0,
+                        cache_read: 0,
+                        cache_creation: 0,
+                    });
+                }
             }
         }
         "account/rateLimits/updated" => {
@@ -2927,6 +2949,7 @@ Stay in exploration mode.
                 &self.commands,
                 &self.events,
                 &self.open_retries,
+                &Mutex::new(None),
                 &mut stream_state,
             );
         }
@@ -3439,7 +3462,8 @@ Stay in exploration mode.
                 &goal_commands,
                 &event_tx,
                 &Mutex::new(0_u32),
-            &mut stream_state,
+                &Mutex::new(None),
+                &mut stream_state,
             );
         };
 
@@ -3509,6 +3533,7 @@ Stay in exploration mode.
             &goal_commands,
             &event_tx,
         &Mutex::new(0_u32),
+            &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -3545,6 +3570,7 @@ Stay in exploration mode.
             &goal_commands,
             &event_tx,
         &Mutex::new(0_u32),
+            &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -3598,6 +3624,7 @@ Stay in exploration mode.
                 &goal_commands,
                 &event_tx,
                 &Mutex::new(0_u32),
+            &Mutex::new(None),
             &mut stream_state,
             );
         }
@@ -3645,6 +3672,7 @@ Stay in exploration mode.
                 &goal_commands,
                 &event_tx,
                 &Mutex::new(0_u32),
+                &Mutex::new(None),
                 stream_state,
             );
         };
@@ -3717,6 +3745,7 @@ Stay in exploration mode.
                 &goal_commands,
                 &event_tx,
                 &Mutex::new(0_u32),
+                &Mutex::new(None),
                 stream_state,
             );
         };
@@ -3786,6 +3815,7 @@ Stay in exploration mode.
                 &goal_commands,
                 &event_tx,
                 &Mutex::new(0_u32),
+                &Mutex::new(None),
                 stream_state,
             );
         };
@@ -3876,6 +3906,7 @@ Stay in exploration mode.
                 &goal_commands,
                 &event_tx,
                 &Mutex::new(0_u32),
+                &Mutex::new(None),
                 stream_state,
             );
         };
@@ -3944,6 +3975,7 @@ Stay in exploration mode.
             &goal_commands,
             &event_tx,
         &Mutex::new(0_u32),
+            &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -3983,6 +4015,7 @@ Stay in exploration mode.
             &goal_commands,
             &event_tx,
         &Mutex::new(0_u32),
+            &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -4058,6 +4091,7 @@ Stay in exploration mode.
             &goal_commands,
             &event_tx,
             &Mutex::new(0_u32),
+            &Mutex::new(None),
             &mut stream_state,
         );
 

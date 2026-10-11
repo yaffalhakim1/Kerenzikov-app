@@ -2209,6 +2209,22 @@ usage.shortcut:
   en: Usage (%{shortcut})
 usage.context_window:
   en: Context window
+usage.session_cost:
+  en: Session cost
+providers.helper_model:
+  en: Helper model
+providers.helper_model_description:
+  en: Runs Waku's own background steps — commit subjects, memory extraction — on this model instead of the session's. Leave empty for the built-in cheap tier.
+providers.model_fallbacks:
+  en: Fallback models
+providers.model_fallbacks_description:
+  en: Tried in order when a turn fails because the provider is overloaded or rate-limited. Comma-separated model ids; empty means no fallback.
+providers.model_fallbacks_active:
+  en: Fallbacks — %{models}
+input.helper_model_placeholder:
+  en: Built-in cheap tier
+input.model_fallbacks_placeholder:
+  en: None
 usage.plan_limits:
   en: Plan usage limits
 usage.plan_limits_named:

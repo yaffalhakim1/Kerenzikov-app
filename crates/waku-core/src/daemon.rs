@@ -54,7 +54,7 @@ pub struct WakuBackend {
     terminals: Mutex<HashMap<Uuid, (Uuid, crate::terminal::DaemonTerminal)>>,
     #[cfg(all(test, unix))]
     terminal_shell: Option<alacritty_terminal::tty::Shell>,
-    settings: DaemonSettingsStore,
+    settings: std::sync::Arc<DaemonSettingsStore>,
     /// Shared with the queue-drain worker: it dequeues settled turns from
     /// the same state the request handlers read, under the same lock.
     task_state: Arc<Mutex<PersistedState>>,
@@ -93,6 +93,7 @@ struct DrainRequest {
 
 impl WakuBackend {
     pub fn new(settings: DaemonSettingsStore, task_store: StateStore) -> anyhow::Result<Self> {
+        let settings = std::sync::Arc::new(settings);
         let mut task_state = task_store
             .load()
             .context("could not load Kerenzikov task database")?;
@@ -371,6 +372,32 @@ impl Backend for WakuBackend {
                     _ => bail!("provider has no plan usage fetcher"),
                 };
                 Ok(ResponsePayload::PlanUsage { usage })
+            }
+            Command::PriceSessionTokens {
+                provider,
+                model,
+                input,
+                output,
+                cache_read,
+                cache_creation,
+            } => {
+                let rates = crate::usage_history::load_rate_table(&self.usage_rates_dir);
+                let model = model.or_else(|| match provider {
+                    ProviderKind::Claude => Some(crate::git_commit::CLAUDE_COMMIT_MODEL.to_owned()),
+                    ProviderKind::Codex => Some(crate::git_commit::CODEX_COMMIT_MODEL.to_owned()),
+                    _ => None,
+                });
+                let cost_usd = model.and_then(|model| {
+                    crate::usage_history::price_turn_usage(
+                        &rates,
+                        &model,
+                        input,
+                        output,
+                        cache_read,
+                        cache_creation,
+                    )
+                });
+                Ok(ResponsePayload::PricedCost { cost_usd })
             }
             Command::ProbeComputerPermissions { prompt } => {
                 Ok(ResponsePayload::ComputerPermissions {
@@ -830,9 +857,26 @@ impl Backend for WakuBackend {
                     checkpoint: self.capture_turn_checkpoint(cwd, session_id, turn_count)?,
                 },
             }),
-            Command::Workspace { operation } => Ok(ResponsePayload::Workspace {
-                result: crate::workspace::execute(operation)?,
-            }),
+            Command::Workspace { operation } => {
+                // The task router: Waku's own helper steps — commit subjects,
+                // memory extraction — run on the provider's configured helper
+                // model when one is set, whatever the session runs.
+                let mut operation = operation;
+                match &mut operation {
+                    WorkspaceOperation::ExtractMemoryFacts { invocation, .. }
+                    | WorkspaceOperation::GenerateCommitMessage { invocation, .. } => {
+                        if let Some(helper) =
+                            self.settings.get().helper_models.get(&invocation.provider)
+                        {
+                            invocation.model = Some(helper.clone());
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(ResponsePayload::Workspace {
+                    result: crate::workspace::execute(operation)?,
+                })
+            }
             Command::OpenTerminal { cwd, cols, rows } => {
                 let terminal = self.open_terminal(&cwd, cols, rows, events)?;
                 let previous = self
@@ -887,6 +931,7 @@ impl Backend for WakuBackend {
                 let previous = self.sessions.lock().remove(&session_id);
                 drop(previous);
                 let provider = decode_enum(&options.provider)?;
+                let mode = decode_enum(&options.mode)?;
                 let options = DriverStartOptions {
                     binary: options.binary,
                     cwd: options.cwd,
@@ -922,17 +967,56 @@ impl Backend for WakuBackend {
                 // backend's set, but the suppression the drain checks is the
                 // one the worker sees — populated by the request path above.
                 let suppressed = self.drain_suppressed.lock().contains(&session_id);
+                // Model-fallback retry state: the prompt now in flight and
+                // how many fallbacks have been tried this turn. The chain
+                // itself is read from settings at retry time, so editing it
+                // applies to the next failure without a restart.
+                let retry_prompt = std::sync::Arc::new(Mutex::new(None::<String>));
+                let retry_attempts = std::sync::Arc::new(Mutex::new(0_u32));
+                let settings_for_retry = self.settings.clone();
                 std::thread::Builder::new()
                     .name(format!("waku-daemon-events-{session_id}"))
                     .spawn(move || {
                         while let Ok(event) = event_receiver.recv() {
-                            if matches!(event, DriverEvent::TurnFinished { .. }) {
-                                let _ = drain_requests.send(DrainRequest {
-                                    session_id,
-                                    events: drain_events.clone(),
-                                    driver: drain_driver.clone(),
-                                    suppressed,
-                                });
+                            match &event {
+                                DriverEvent::PromptSubmitted { message, .. } => {
+                                    *retry_prompt.lock() = Some(message.clone());
+                                    *retry_attempts.lock() = 0;
+                                }
+                                DriverEvent::TurnFinished { success, summary } => {
+                                    let prompt = retry_prompt.lock().clone();
+                                    let attempts = *retry_attempts.lock();
+                                    if !success
+                                        && prompt
+                                            .as_deref()
+                                            .is_some_and(|prompt| {
+                                                retry_with_fallback_model(
+                                                    &settings_for_retry,
+                                                    session_id,
+                                                    provider,
+                                                    mode,
+                                                    prompt,
+                                                    attempts,
+                                                    summary.as_deref(),
+                                                    &drain_driver,
+                                                )
+                                            })
+                                    {
+                                        *retry_attempts.lock() = attempts + 1;
+                                        // The retry re-prompts on a new model;
+                                        // suppress this settle's queue drain
+                                        // so the follow-up queue waits for
+                                        // the retry's own settle.
+                                        continue;
+                                    }
+                                    let _ = drain_requests.send(DrainRequest {
+                                        session_id,
+                                        events: drain_events.clone(),
+                                        driver: drain_driver.clone(),
+                                        suppressed,
+                                    });
+                                }
+                                _ => {}
                             }
                             notify_push_for_event(&push_registry, &push_state, session_id, &event);
                             let wire = event_to_wire(event).unwrap_or_else(|error| {
@@ -1984,6 +2068,7 @@ fn handle_driver_command(
         | Command::UpdateSettings { .. }
         | Command::ProbeProvider { .. }
         | Command::FetchPlanUsage { .. }
+        | Command::PriceSessionTokens { .. }
         | Command::ProbeComputerPermissions { .. }
         | Command::LoadUsageHistory { .. }
         | Command::LoadSkills { .. }
@@ -2187,8 +2272,76 @@ fn drain_queued_prompt(
     driver.prompt(queued.content);
 }
 
-fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {
-    serde_json::from_value(Value::String(value.to_owned()))
+/// Whether a failed turn's summary reads as a provider-side condition a
+/// different model could survive — overloaded, rate-limited, out of
+/// capacity — rather than the task genuinely failing. Conservative: only
+/// matched phrases retry; everything else settles as a normal failure.
+fn retriable_provider_error(summary: Option<&str>) -> bool {
+    let Some(summary) = summary.map(str::to_ascii_lowercase) else {
+        return false;
+    };
+    [
+        "overloaded",
+        "rate limit",
+        "rate-limit",
+        "ratelimit",
+        "too many requests",
+        "429",
+        "capacity",
+        "temporarily unavailable",
+        "service unavailable",
+        "internal server error",
+        "503",
+        "timeout",
+        "timed out",
+    ]
+    .iter()
+    .any(|marker| summary.contains(marker))
+}
+
+/// Retry a failed turn on the next model in the provider's fallback chain.
+///
+/// Applies the model to the live driver and re-prompts the same text. Returns
+/// whether a retry was started — the caller then skips that settle's queue
+/// drain, so a queued follow-up waits for the retry's own settle instead of
+/// racing it onto the fallback model.
+fn retry_with_fallback_model(
+    settings: &DaemonSettingsStore,
+    session_id: Uuid,
+    provider: ProviderKind,
+    mode: crate::model::RuntimeMode,
+    prompt: &str,
+    attempts: u32,
+    summary: Option<&str>,
+    driver: &DriverHandle,
+) -> bool {
+    if !retriable_provider_error(summary) {
+        return false;
+    }
+    let fallbacks = settings.get().model_fallbacks;
+    let Some(chain) = fallbacks.get(&provider) else {
+        return false;
+    };
+    let Some(next) = chain.get(attempts as usize) else {
+        // The chain is exhausted: the failure settles.
+        return false;
+    };
+    driver.apply_options(crate::driver::SessionOptions {
+        mode,
+        model: Some(next.clone()),
+        reasoning_effort: None,
+        service_tier: None,
+        context_window: None,
+    });
+    driver.prompt(prompt.to_owned());
+    eprintln!(
+        "waku-daemon retrying session {session_id} on fallback model {next} after: {}",
+        summary.unwrap_or("unknown error")
+    );
+    true
+}
+
+fn decode_enum<T: DeserializeOwned>(value: &str) -> anyhow::Result<T> {    serde_json::from_value(Value::String(value.to_owned()))
         .with_context(|| format!("invalid protocol enum value {value:?}"))
 }
 
@@ -2292,6 +2445,20 @@ fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "contextWindow": context_window,
             }),
         ),
+        DriverEvent::TurnUsage {
+            input,
+            output,
+            cache_read,
+            cache_creation,
+        } => (
+            "turnUsage",
+            json!({
+                "input": input,
+                "output": output,
+                "cacheRead": cache_read,
+                "cacheCreation": cache_creation,
+            }),
+        ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
         DriverEvent::TodoUpdated(todos) => ("todoUpdated", serde_json::to_value(todos)?),
@@ -2383,6 +2550,15 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 context_window: usage.context_window,
             }
         }
+        "turnUsage" => {
+            let usage: TurnUsageWire = serde_json::from_value(payload)?;
+            DriverEvent::TurnUsage {
+                input: usage.input,
+                output: usage.output,
+                cache_read: usage.cache_read,
+                cache_creation: usage.cache_creation,
+            }
+        }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
         "todoUpdated" => DriverEvent::TodoUpdated(serde_json::from_value(payload)?),
@@ -2458,6 +2634,17 @@ struct RejectedSteerWire {
 struct UsageWire {
     context_tokens: Option<u64>,
     context_window: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TurnUsageWire {
+    input: u64,
+    output: u64,
+    #[serde(default)]
+    cache_read: u64,
+    #[serde(default)]
+    cache_creation: u64,
 }
 
 #[derive(Deserialize)]

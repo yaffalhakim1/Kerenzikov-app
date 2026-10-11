@@ -1156,19 +1156,28 @@ fn emit_usage(usage: Option<&Value>, events: &impl DriverEventSink) {
     let Some(usage) = usage else {
         return;
     };
-    let total = [
-        "inputTokens",
-        "outputTokens",
-        "cacheReadTokens",
-        "cacheWriteTokens",
-    ]
-    .into_iter()
-    .filter_map(|field| usage.get(field).and_then(Value::as_u64))
-    .fold(0_u64, u64::saturating_add);
+    let field = |name: &str| {
+        usage
+            .get(name)
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .unwrap_or(0)
+    };
+    let input = field("inputTokens");
+    let output = field("outputTokens");
+    let cache_read = field("cacheReadTokens");
+    let cache_creation = field("cacheWriteTokens");
+    let total = input + output + cache_read + cache_creation;
     if total > 0 {
         let _ = events.send(DriverEvent::UsageUpdated {
             context_tokens: Some(total),
             context_window: None,
+        });
+        let _ = events.send(DriverEvent::TurnUsage {
+            input,
+            output,
+            cache_read,
+            cache_creation,
         });
     }
 }

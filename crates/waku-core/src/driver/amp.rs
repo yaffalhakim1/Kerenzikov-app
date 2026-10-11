@@ -429,12 +429,14 @@ fn handle_message(
             // describes this session's context.
             if value.get("parent_tool_use_id").is_none_or(Value::is_null)
                 && let Some(usage) = value.pointer("/message/usage")
-                && let Some(tokens) = super::support::claude_context_tokens(usage)
             {
-                let _ = events.send(DriverEvent::UsageUpdated {
-                    context_tokens: Some(tokens),
-                    context_window: None,
-                });
+                if let Some(tokens) = super::support::claude_context_tokens(usage) {
+                    let _ = events.send(DriverEvent::UsageUpdated {
+                        context_tokens: Some(tokens),
+                        context_window: None,
+                    });
+                }
+                super::support::emit_turn_usage(usage, events);
             }
             if let Some(content) = value.pointer("/message/content").and_then(Value::as_array) {
                 for block in content {

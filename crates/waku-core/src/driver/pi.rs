@@ -1417,6 +1417,27 @@ fn handle_pi_message(
                         context_window: None,
                     });
                 }
+                if let Some(usage) = value.pointer("/message/usage") {
+                    let field = |name: &str| {
+                        usage
+                            .get(name)
+                            .and_then(Value::as_u64)
+                            .filter(|tokens| *tokens > 0)
+                            .unwrap_or(0)
+                    };
+                    let input = field("input");
+                    let output = field("output");
+                    let cache_read = field("cacheRead");
+                    let cache_creation = field("cacheWrite");
+                    if input + output + cache_read + cache_creation > 0 {
+                        let _ = events.send(DriverEvent::TurnUsage {
+                            input,
+                            output,
+                            cache_read,
+                            cache_creation,
+                        });
+                    }
+                }
                 emit_completed_message_fallback(value.get("message"), events, state);
             }
         }
@@ -2410,6 +2431,16 @@ mod tests {
             DriverEvent::UsageUpdated {
                 context_tokens: Some(5952),
                 context_window: None
+            }
+        ));
+        // The same message feeds the live cost accumulator.
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnUsage {
+                input: 33,
+                output: 27,
+                cache_read: 5888,
+                cache_creation: 4
             }
         ));
         assert!(event_rx.try_recv().is_err());

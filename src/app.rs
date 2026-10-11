@@ -927,6 +927,38 @@ struct SessionRuntime {
     /// Background-process snapshots are provider IPC. Keep the polling clock
     /// on the runtime so switching tasks never creates duplicate probes.
     last_background_refresh_at: Instant,
+    /// Live per-turn billing tokens, accumulated from `TurnUsage` events and
+    /// reset when a new turn starts. Ephemeral UI state: providers that do
+    /// not report a split never touch it, and the usage panel shows no cost
+    /// row for them.
+    turn_usage: Option<TurnUsageAccumulator>,
+}
+
+/// One turn's running token totals, in the split the rate table prices.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct TurnUsageAccumulator {
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_creation: u64,
+}
+
+impl TurnUsageAccumulator {
+    fn add(&mut self, event: &DriverEvent) {
+        let DriverEvent::TurnUsage {
+            input,
+            output,
+            cache_read,
+            cache_creation,
+        } = event
+        else {
+            return;
+        };
+        self.input += input;
+        self.output += output;
+        self.cache_read += cache_read;
+        self.cache_creation += cache_creation;
+    }
 }
 
 #[derive(Clone)]
@@ -1168,6 +1200,8 @@ pub struct Waku {
     /// override input below edits this provider's entry.
     expanded_provider_settings: Option<ProviderKind>,
     provider_path_input: Entity<TextInput>,
+    helper_model_input: Entity<TextInput>,
+    model_fallbacks_input: Entity<TextInput>,
     computer_permissions: ComputerPermissions,
     computer_permission_tx: Sender<Result<ComputerPermissions, String>>,
     computer_permission_events: Receiver<Result<ComputerPermissions, String>>,
@@ -1195,6 +1229,13 @@ pub struct Waku {
     /// When each provider's last fetch settled, successful or not — the
     /// refresh backoff measures from here.
     plan_usage_checked_at: HashMap<ProviderKind, Instant>,
+    /// Live session cost, priced on demand by the daemon. Cached against the
+    /// accumulator it was computed from: the panel re-renders per frame but
+    /// only re-asks when the tokens moved. `None` while nothing has been
+    /// priced — a provider without a token split never gets here.
+    turn_cost: Option<(TurnUsageAccumulator, Option<f64>)>,
+    turn_cost_tx: Sender<(TurnUsageAccumulator, Option<f64>)>,
+    turn_cost_events: Receiver<(TurnUsageAccumulator, Option<f64>)>,
     /// Providers whose turn settled since the last fetch, so the meters have
     /// moved.
     plan_usage_stale: HashSet<ProviderKind>,
@@ -2147,6 +2188,16 @@ impl Waku {
                 .select_all_on_focus_click()
                 .placeholder(tr!("input.detected_automatically"))
         });
+        let helper_model_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("input.helper_model_placeholder"))
+        });
+        let model_fallbacks_input = cx.new(|cx| {
+            TextInput::new(window, cx)
+                .select_all_on_focus_click()
+                .placeholder(tr!("input.model_fallbacks_placeholder"))
+        });
         let usage_project_filter =
             cx.new(|cx| TextInput::new(window, cx).placeholder(tr!("input.filter_projects")));
         let right_panel_diff_filter =
@@ -2309,6 +2360,7 @@ impl Waku {
         let (provider_detection_tx, provider_detection_events) = unbounded();
         let (computer_permission_tx, computer_permission_events) = unbounded();
         let (plan_usage_tx, plan_usage_events) = unbounded();
+        let (turn_cost_tx, turn_cost_rx) = unbounded();
         let (event_wake_tx, event_wake_events) = smol::channel::bounded(1);
         let (task_state_sync_tx, task_state_sync_events) = unbounded();
         #[cfg(target_os = "macos")]
@@ -2922,6 +2974,8 @@ impl Waku {
                 provider_detection_checked_at: None,
                 expanded_provider_settings: None,
                 provider_path_input,
+                helper_model_input,
+                model_fallbacks_input,
                 computer_permissions: ComputerPermissions::default(),
                 computer_permission_tx,
                 computer_permission_events,
@@ -2933,6 +2987,9 @@ impl Waku {
                 plan_usage_pending: HashSet::new(),
                 plan_usage_unconfigured: HashSet::new(),
                 plan_usage_checked_at: HashMap::new(),
+                turn_cost: None,
+                turn_cost_tx: turn_cost_tx.clone(),
+                turn_cost_events: turn_cost_rx,
                 plan_usage_stale: HashSet::new(),
                 usage_history: None,
                 usage_history_pending_for: None,

@@ -445,6 +445,29 @@ fn lookup_rate<'a>(table: &'a RateTable, model: &str) -> Option<&'a ModelRate> {
     table.rates.get(&normalized)
 }
 
+/// Prices one turn's billing-token split against the rate table. `None` when
+/// the model is unpriced (unknown, ambiguous, or synthetic) — the caller shows
+/// no cost rather than a wrong one.
+pub fn price_turn_usage(
+    rates: &RateTable,
+    model: &str,
+    input: u64,
+    output: u64,
+    cache_read: u64,
+    cache_creation: u64,
+) -> Option<f64> {
+    let rate = lookup_rate(rates, model)?;
+    // Claude-style splits arrive with the input leg already split fresh vs
+    // cached; Codex deltas arrive as one undifferentiated number, all on the
+    // input leg. Cache rates never exceed input rates, so pricing cached
+    // tokens as fresh input is the conservative (higher) reading.
+    let cost = input as f64 * rate.input
+        + cache_read as f64 * rate.cache_read
+        + cache_creation as f64 * rate.cache_creation
+        + output as f64 * rate.output;
+    cost.is_finite().then_some(cost)
+}
+
 /// Projects the LiteLLM document into a rate table. Entries without both an
 /// input and an output rate are dropped: a half-priced model would silently
 /// under-report cost, which is worse than reporting it as unpriced.

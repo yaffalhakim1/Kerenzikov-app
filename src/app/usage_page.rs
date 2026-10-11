@@ -2795,7 +2795,7 @@ fn group_thousands(number: &str) -> String {
     }
 }
 
-fn format_usd(value: f64) -> String {
+pub(super) fn format_usd(value: f64) -> String {
     format!("${}", group_thousands(&format!("{:.2}", value.max(0.0))))
 }
 

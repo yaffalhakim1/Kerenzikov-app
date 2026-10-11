@@ -30,9 +30,9 @@ const MAX_ERROR_CHARS: usize = 4_000;
 // prompt, so it does not need — or benefit from — the model the task runs on.
 // Where a provider exposes a cheap tier by name, generation is pinned to it and
 // to the lowest effort that tier's API accepts, whatever the session selected.
-const CLAUDE_COMMIT_MODEL: &str = "claude-haiku-4-5";
+pub(crate) const CLAUDE_COMMIT_MODEL: &str = "claude-haiku-4-5";
 const CLAUDE_COMMIT_EFFORT: &str = "low";
-const CODEX_COMMIT_MODEL: &str = "gpt-5.6-luna";
+pub(crate) const CODEX_COMMIT_MODEL: &str = "gpt-5.6-luna";
 // `codex exec` has no effort flag, so the config override is the only route.
 // `none` is the floor: `minimal` is rejected by the API for this model with
 // `unsupported_value`, listing `none` as the lowest it accepts.

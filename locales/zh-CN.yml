@@ -1041,6 +1041,7 @@ usage.refresh_failed: "用量刷新失败：%{error}"
 usage.context_used: 上下文窗口已使用 %{percent}%（%{shortcut}）
 usage.shortcut: 用量（%{shortcut}）
 usage.context_window: 上下文窗口
+usage.session_cost: 会话成本
 usage.plan_limits: 套餐用量限额
 usage.plan_limits_named: 套餐用量限额 · %{plan}
 usage.open_account_settings: 打开账户用量设置

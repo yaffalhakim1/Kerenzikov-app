@@ -858,6 +858,33 @@ fn opencode_context_tokens(info: &Value) -> Option<u64> {
         })
 }
 
+/// The assistant message's billing split, priced live by the app. The same
+/// `tokens` object `opencode_context_tokens` reads, one level shallower.
+fn opencode_turn_usage(info: &Value, events: &impl DriverEventSink) {
+    let Some(tokens) = info.get("tokens") else {
+        return;
+    };
+    let field = |pointer: &str| {
+        tokens
+            .pointer(pointer)
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .unwrap_or(0)
+    };
+    let input = field("/input");
+    let output = field("/output");
+    let cache_read = field("/cache/read");
+    let cache_creation = field("/cache/write");
+    if input + output + cache_read + cache_creation > 0 {
+        let _ = events.send(DriverEvent::TurnUsage {
+            input,
+            output,
+            cache_read,
+            cache_creation,
+        });
+    }
+}
+
 fn opencode_model_key(info: &Value) -> Option<String> {
     info.get("providerID")
         .and_then(Value::as_str)
@@ -969,6 +996,7 @@ fn handle_event(
                         context_window,
                     });
                 }
+                opencode_turn_usage(info, events);
             }
         }
         "session.idle" => {
@@ -1946,6 +1974,16 @@ mod tests {
             DriverEvent::UsageUpdated {
                 context_tokens: Some(15_201),
                 context_window: Some(200_000)
+            }
+        ));
+        // The same update feeds the live cost accumulator.
+        assert!(matches!(
+            event_rx.try_recv().unwrap(),
+            DriverEvent::TurnUsage {
+                input: 13_399,
+                output: 10,
+                cache_read: 1_792,
+                cache_creation: 0
             }
         ));
         assert!(event_rx.try_recv().is_err());

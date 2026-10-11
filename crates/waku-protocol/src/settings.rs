@@ -16,6 +16,18 @@ pub struct DaemonSettings {
     pub disabled_providers: Vec<ProviderKind>,
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub provider_binary_overrides: HashMap<ProviderKind, String>,
+    /// The model Waku's own helper steps — task titling, commit subjects,
+    /// memory extraction — run on, per provider. Empty means the built-in
+    /// cheap-tier pin (or the provider default where there is no pin). The
+    /// task router: cheap work goes to the model you point it at, whatever
+    /// the session itself runs.
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub helper_models: HashMap<ProviderKind, String>,
+    /// Backup models per provider, tried in order when a turn fails with a
+    /// retriable provider error (overloaded, rate limit, capacity). The
+    /// session's own model leads implicitly; this list is what comes after.
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub model_fallbacks: HashMap<ProviderKind, Vec<String>>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -27,6 +39,8 @@ impl Default for DaemonSettings {
             computer_use_allowed_apps: Vec::new(),
             disabled_providers: Vec::new(),
             provider_binary_overrides: HashMap::new(),
+            helper_models: HashMap::new(),
+            model_fallbacks: HashMap::new(),
             extra: BTreeMap::new(),
         }
     }

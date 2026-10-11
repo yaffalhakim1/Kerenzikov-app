@@ -3,4 +3,18 @@ import type { ComputerAppGrant } from "./ComputerAppGrant";
 import type { ProviderKind } from "./ProviderKind";
 import type { JsonValue } from "./serde_json/JsonValue";
 
-export type DaemonSettings = { computer_use_enabled: boolean, computer_use_allowed_apps: Array<ComputerAppGrant>, disabled_providers: Array<ProviderKind>, provider_binary_overrides: { [key in ProviderKind]?: string }, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });
+export type DaemonSettings = { computer_use_enabled: boolean, computer_use_allowed_apps: Array<ComputerAppGrant>, disabled_providers: Array<ProviderKind>, provider_binary_overrides: { [key in ProviderKind]?: string },
+/**
+ * The model Waku's own helper steps — task titling, commit subjects,
+ * memory extraction — run on, per provider. Empty means the built-in
+ * cheap-tier pin (or the provider default where there is no pin). The
+ * task router: cheap work goes to the model you point it at, whatever
+ * the session itself runs.
+ */
+helper_models: { [key in ProviderKind]?: string },
+/**
+ * Backup models per provider, tried in order when a turn fails with a
+ * retriable provider error (overloaded, rate limit, capacity). The
+ * session's own model leads implicitly; this list is what comes after.
+ */
+model_fallbacks: { [key in ProviderKind]?: Array<string> }, } & ({ [key in string]: number | string | boolean | Array<JsonValue> | { [key in string]: JsonValue } | null });

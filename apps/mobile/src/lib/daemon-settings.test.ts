@@ -14,6 +14,8 @@ function settings(overrides: Partial<DaemonSettings> = {}): DaemonSettings {
     computer_use_allowed_apps: [],
     disabled_providers: [],
     provider_binary_overrides: {},
+    helper_models: {},
+    model_fallbacks: {},
     ...overrides,
   };
 }
