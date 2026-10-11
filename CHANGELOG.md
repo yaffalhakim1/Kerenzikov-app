@@ -12,6 +12,23 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.58]
+
+### Android
+
+- **Markdown tables in transcripts read like tables again.** A wide table used
+  to squeeze every column to a few characters, wrapping words mid-syllable.
+  Columns now keep a readable width; a table that genuinely cannot fit pans
+  sideways instead of scrambling.
+- **Text you can actually read.** The dimmest text tier — timestamps, model
+  names, footers — was far too faint on both themes. The whole text ramp now
+  passes contrast checks in light and dark, and the green accent darkens to
+  stay legible in daylight (dark theme keeps its vivid green).
+- Smaller fixes: loading spinners announce themselves to screen readers,
+  failed task and transcript loads offer a Try-again button, selection
+  checkmarks match the rest of the app, and attachment remove buttons no
+  longer overlap each other.
+
 ## [0.1.57]
 
 ### Desktop
