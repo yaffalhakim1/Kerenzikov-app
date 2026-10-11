@@ -6,13 +6,20 @@ import { Platform, PlatformColor, type ColorValue } from 'react-native';
  * background (canvas) → surface (raised cards) → surfaceMuted (fills on cards)
  * → inset (code / terminal wells), with hairline `border` strokes instead of
  * shadows.
+ *
+ * Every text token passes 4.5:1 against the surfaces it renders on (white and
+ * `#ececec` in light, `#232323` and `#2a2a2a` in dark) — measured, not eyedropped.
+ * The light accent keeps the brand hue but darkens to a 4.5:1 pair so accent
+ * text ("See N more", mention spans, links) is legible in daylight; the dark
+ * accent is already 9:1 and stays vivid. `textGhost` is the dim tier at ≥3:1:
+ * reserved for disabled glyphs and decorative marks, never running text.
  */
 export const Colors = {
   light: {
     text: '#242424',
-    textSecondary: '#666666',
-    textTertiary: '#858585',
-    textGhost: '#a4a4a4',
+    textSecondary: '#4f4f4f',
+    textTertiary: '#696969',
+    textGhost: '#808080',
     background: '#ffffff',
     surface: '#ffffff',
     surfaceMuted: '#ececec',
@@ -26,9 +33,9 @@ export const Colors = {
     separator: 'rgba(28, 31, 37, 0.10)',
     border: 'hsla(220, 10%, 12%, 0.08)',
     borderStrong: 'hsla(220, 10%, 12%, 0.15)',
-    accent: '#00da7d',
-    accentSoft: 'rgba(0, 218, 125, 0.12)',
-    codeText: '#00814a',
+    accent: '#007a45',
+    accentSoft: 'rgba(0, 122, 69, 0.12)',
+    codeText: '#007a45',
     codeWash: 'hsla(220, 10%, 12%, 0.07)',
     inverse: '#202227',
     onInverse: '#f8f8f9',
@@ -43,8 +50,8 @@ export const Colors = {
   dark: {
     text: '#e2e2e2',
     textSecondary: '#a3a3a3',
-    textTertiary: '#7d7d7d',
-    textGhost: '#575757',
+    textTertiary: '#909090',
+    textGhost: '#7a7a7a',
     background: '#1a1a1a',
     surface: '#232323',
     surfaceMuted: '#2a2a2a',

@@ -404,7 +404,7 @@ const scrollContentStyle = { minWidth: '100%' } as const;
 
 /** The narrowest a table grid is allowed to be, dp. Below it the columns stop
  *  reading as a table, so the grid keeps this width and pans. */
-const TABLE_MIN_WIDTH = 260;
+const TABLE_MIN_WIDTH = 320;
 
 /** The transcript column's cap, mirroring MAX_CONTENT_WIDTH in
  *  components/transcript-list.tsx. Duplicated rather than imported because

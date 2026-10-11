@@ -54,12 +54,17 @@ export function Blocks({
   color,
   size = 20,
   style,
+  label = 'Working',
 }: {
   /** Tint; defaults to the brand accent. */
   color?: ColorValue;
   /** Overall edge, in pixels. */
   size?: number;
   style?: StyleProp<ViewStyle>;
+  /** What the pulse means to a screen reader. Adjacent-text sites pass their
+   *  own wording; the default keeps a bare "progressbar" from announcing
+   *  itself with no name at all. `null` opts out where a label is nearby. */
+  label?: string | null;
 }) {
   const theme = useTheme();
   const reducedMotion = useReducedMotion();
@@ -88,6 +93,7 @@ export function Blocks({
 
   return (
     <Animated.View
+      accessibilityLabel={label ?? undefined}
       accessibilityRole="progressbar"
       style={[
         { backgroundColor: tint, borderRadius: radius, height: size, width: size },

@@ -21,9 +21,16 @@ const CHAR_WIDTH = 8.2;
  *  horizontal padding. */
 const CELL_CHROME = 20;
 
-/** A column is never narrower than this, dp: a single-character or dash-only
- *  column should still read as a cell rather than a hairline. */
-const MIN_COLUMN_WIDTH = 56;
+/**
+ * A column is never narrower than this, dp. It is a *readability* floor, not a
+ * cosmetic one: 15px body text fits roughly five characters per 60dp, and a
+ * column that narrow wraps every word mid-syllable ("Severi / ty", "Locati /
+ * on") — how a six-column table turns into soup. 92dp holds about nine
+ * characters, enough for short words and numbers to stay whole; a table whose
+ * columns cannot all clear it inside the budget overflows and pans instead,
+ * the same fallback as before.
+ */
+const MIN_COLUMN_WIDTH = 92;
 
 /** The widest line in each column, in characters, across every row. */
 function longestLines(

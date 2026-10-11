@@ -520,6 +520,7 @@ export function SessionView({
               error={query.error}
               loading={query.isPending}
               missing={query.data === null}
+              onRetry={() => void query.refetch()}
             />
           </View>
         )}

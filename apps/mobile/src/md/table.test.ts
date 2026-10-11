@@ -30,13 +30,13 @@ describe('columnWidthsFor', () => {
 
   test('a narrow column keeps a readable floor', () => {
     const widths = columnWidthsFor([['', 'x']], 2);
-    for (const width of widths) expect(width).toBeGreaterThanOrEqual(56);
+    for (const width of widths) expect(width).toBeGreaterThanOrEqual(92);
   });
 
   test('missing and ragged cells do not collapse a track', () => {
     const widths = columnWidthsFor([['a'], ['b', '']], 2);
     expect(widths).toHaveLength(2);
-    expect(widths.every((width) => width >= 56)).toBe(true);
+    expect(widths.every((width) => width >= 92)).toBe(true);
   });
 
   test('no columns is an empty layout', () => {
@@ -51,7 +51,7 @@ describe('columnWidthsFor', () => {
     const total = widths.reduce((sum, width) => sum + width, 0);
     expect(total).toBeLessThanOrEqual(340);
     // Fitting must not squeeze past the readable floor.
-    for (const width of widths) expect(width).toBeGreaterThanOrEqual(56);
+    for (const width of widths) expect(width).toBeGreaterThanOrEqual(92);
   });
 
   test('a table that already fits keeps its natural widths', () => {
@@ -62,17 +62,17 @@ describe('columnWidthsFor', () => {
   test('a narrow column keeps its width while wide columns absorb the budget', () => {
     // Water-filling: the short column never grows, the long one takes the rest.
     const widths = columnWidthsFor([['id', 'a very long description that must wrap']], 2, 300);
-    expect(widths[0]).toBe(56);
-    expect(widths[1]).toBe(300 - 56);
+    expect(widths[0]).toBe(92);
+    expect(widths[1]).toBe(300 - 92);
   });
 
   test('more columns than the width can hold still overflows rather than collapsing', () => {
-    // Seven columns cannot each clear the floor inside a 340dp budget (7 x 56 >
-    // 340), so the grid goes past it and pans - the pre-existing behaviour,
-    // kept as the fallback rather than squeezing cells to unreadable slivers.
-    const row = Array.from({ length: 7 }, (_, index) => `column number ${index} value`);
-    const widths = columnWidthsFor([row], 7, 340);
-    for (const width of widths) expect(width).toBeGreaterThanOrEqual(56);
+    // Four columns cannot each clear the readability floor inside a 340dp
+    // budget (4 x 92 > 340), so the grid goes past it and pans — a squeezed
+    // grid wraps every word mid-syllable, which is worse than a drag.
+    const row = Array.from({ length: 4 }, (_, index) => `column number ${index} value`);
+    const widths = columnWidthsFor([row], 4, 340);
+    for (const width of widths) expect(width).toBeGreaterThanOrEqual(92);
     expect(widths.reduce((sum, width) => sum + width, 0)).toBeGreaterThan(340);
   });
 });

@@ -661,6 +661,7 @@ function TaskDrawerContent({
             error={taskState.error}
             searching={Boolean(search.trim()) && !messageRows.length}
             onNewTask={showNewTask}
+            onRetry={() => void taskState.refetch()}
           />
         )}
         showsVerticalScrollIndicator={false}
@@ -911,10 +912,12 @@ function TaskListEmpty({
   error,
   searching,
   onNewTask,
+  onRetry,
 }: {
   error: unknown;
   searching: boolean;
   onNewTask: () => void;
+  onRetry: () => void;
 }) {
   const theme = useTheme();
   const { phase } = useDaemon();
@@ -946,6 +949,15 @@ function TaskListEmpty({
         <Text style={[styles.emptyBody, { color: theme.textSecondary }]}>
           {error instanceof Error ? error.message : String(error)}
         </Text>
+        <AppPressable
+          accessibilityRole="button"
+          onPress={onRetry}
+          style={({ pressed }) => [
+            styles.emptyRetry,
+            { borderColor: theme.border, opacity: pressed ? 0.7 : 1 },
+          ]}>
+          <Text style={[styles.emptyActionText, { color: theme.text }]}>Try again</Text>
+        </AppPressable>
       </View>
     );
   }
@@ -1319,6 +1331,17 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch',
     borderRadius: Radius.pill,
     marginTop: 18,
+  },
+  // The load-error retry is an outline pill, not the filled primary: this
+  // state explains itself first, and the action must not shout over it.
+  emptyRetry: {
+    alignSelf: 'center',
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    justifyContent: 'center',
+    marginTop: 18,
+    minHeight: 42,
+    paddingHorizontal: 18,
   },
   emptyAction: {
     borderRadius: Radius.pill,
