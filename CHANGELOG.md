@@ -12,6 +12,22 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.57]
+
+### Desktop
+
+- **Queued follow-ups actually run now.** A message queued while an agent was
+  working could silently never start: the queue was handed over at the exact
+  moment the agent finished, before the task's status had caught up, and the
+  handoff gave up instead of waiting. Queued messages from every harness
+  (Codex, OpenCode, Oh My Pi, …) now start on the agent reliably, whether the
+  device that queued them is still around or not.
+- **Codex tasks no longer strand on "already has an active writer".** Starting
+  or resuming a Codex task could fail with that error when the task's previous
+  agent process was still shutting down, leaving the task unable to run until
+  you retried by hand. The app now waits out the shutdown and retries on its
+  own.
+
 ## [0.1.56]
 
 ### Desktop and Android
