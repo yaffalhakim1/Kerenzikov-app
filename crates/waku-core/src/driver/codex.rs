@@ -44,6 +44,9 @@ enum CommandMessage {
     Prompt(String),
     Steer(String),
     Cancel,
+    /// Reissue `thread/resume`/`thread/start` (request id 1) after a rejected
+    /// open — a thread whose previous writer had not flushed yet.
+    ReopenThread,
     Respond {
         request_id: String,
         option_id: String,
@@ -417,6 +420,13 @@ impl CodexDriver {
                 let mut next_request_id = 10_u64;
                 while let Ok(command) = command_rx.recv() {
                     let message = match command {
+                        CommandMessage::ReopenThread => {
+                            // The first open was refused because the previous
+                            // writer had not flushed. Give it a moment, then
+                            // replay the same open request.
+                            std::thread::sleep(Duration::from_millis(250));
+                            open_thread.clone()
+                        }
                         CommandMessage::Prompt(text) => {
                             let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
                                 let _ = writer_events.send(DriverEvent::Error(tr!(
@@ -739,6 +749,8 @@ impl CodexDriver {
         let reader_title_generation = title_generation;
         let reader_commands = commands.clone();
         let reader_events = events.clone();
+        let reader_thread_open_retries = Arc::new(Mutex::new(0_u32));
+        let reader_open_retries = reader_thread_open_retries.clone();
         let reader_thread = thread::Builder::new()
             .name("waku-codex-reader".into())
             .spawn(move || {
@@ -763,6 +775,7 @@ impl CodexDriver {
                                         &reader_goal_rpcs,
                                         &reader_commands,
                                         &reader_events,
+                                        &reader_open_retries,
                                         &mut stream_state,
                                     );
                                     if main_turn_started {
@@ -1195,6 +1208,11 @@ fn write_json_line(writer: &mut impl Write, value: &Value) -> std::io::Result<()
 const CODEX_TITLE_INSTRUCTIONS: &str = "Generate a concise title for the user's coding task. Return only a plain title of at most six words. Do not use tools, quotes, markdown, labels, or ending punctuation.";
 const CODEX_TITLE_MODEL: &str = "gpt-5.6-luna";
 const CODEX_TITLE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How many times a rejected thread open is replayed while the previous
+/// writer flushes. Four attempts at 250ms spacing covers Codex's own EOF
+/// shutdown, which the fork fixture times at 100ms.
+const THREAD_OPEN_RETRIES: u32 = 4;
 
 fn is_codex_turn_started(value: &Value, thread_id: Option<&str>) -> bool {
     let Some(thread_id) = thread_id else {
@@ -1719,6 +1737,7 @@ fn handle_codex_message(
     goal_rpcs: &Mutex<GoalRpcState>,
     commands: &Sender<CommandMessage>,
     events: &impl DriverEventSink,
+    thread_open_retries: &Mutex<u32>,
     stream_state: &mut CodexStreamState,
 ) {
     // JSON-RPC IDs are scoped to each peer, so an app-server request may use
@@ -1831,6 +1850,7 @@ fn handle_codex_message(
 
     if is_response && value.get("id").and_then(Value::as_u64) == Some(1) {
         if let Some(id) = value.pointer("/result/thread/id").and_then(Value::as_str) {
+            *thread_open_retries.lock() = 0;
             *turn_ids.lock() = value
                 .pointer("/result/thread/turns")
                 .and_then(Value::as_array)
@@ -1855,6 +1875,16 @@ fn handle_codex_message(
             // once so the client shows it without waiting for a notification.
             let _ = commands.send(CommandMessage::Goal(GoalOperation::Refresh));
         } else if let Some(error) = value.pointer("/error/message").and_then(Value::as_str) {
+            // Codex marks a thread whose previous app-server process has not
+            // finished flushing its writer as "already has an active writer".
+            // That previous process exits moments later, so ask the writer to
+            // reopen the thread instead of leaving the session stranded.
+            let retries = *thread_open_retries.lock();
+            if error.contains("active writer") && retries < THREAD_OPEN_RETRIES {
+                *thread_open_retries.lock() = retries + 1;
+                let _ = commands.send(CommandMessage::ReopenThread);
+                return;
+            }
             let _ = events.send(DriverEvent::Error(error.to_owned()));
         }
         return;
@@ -2860,6 +2890,7 @@ Stay in exploration mode.
         command_rx: crossbeam_channel::Receiver<CommandMessage>,
         events: crate::driver::DriverEventSender,
         received: crossbeam_channel::Receiver<DriverEvent>,
+        open_retries: Mutex<u32>,
     }
 
     impl GoalHarness {
@@ -2878,6 +2909,7 @@ Stay in exploration mode.
                 command_rx,
                 events,
                 received,
+                open_retries: Mutex::new(0),
             }
         }
 
@@ -2894,6 +2926,7 @@ Stay in exploration mode.
                 &self.goals,
                 &self.commands,
                 &self.events,
+                &self.open_retries,
                 &mut stream_state,
             );
         }
@@ -3405,7 +3438,8 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &mut stream_state,
+                &Mutex::new(0_u32),
+            &mut stream_state,
             );
         };
 
@@ -3474,6 +3508,7 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
+        &Mutex::new(0_u32),
             &mut stream_state,
         );
 
@@ -3509,6 +3544,7 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
+        &Mutex::new(0_u32),
             &mut stream_state,
         );
 
@@ -3561,7 +3597,8 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &mut stream_state,
+                &Mutex::new(0_u32),
+            &mut stream_state,
             );
         }
 
@@ -3607,6 +3644,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
+                &Mutex::new(0_u32),
                 stream_state,
             );
         };
@@ -3678,6 +3716,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
+                &Mutex::new(0_u32),
                 stream_state,
             );
         };
@@ -3746,6 +3785,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
+                &Mutex::new(0_u32),
                 stream_state,
             );
         };
@@ -3835,6 +3875,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
+                &Mutex::new(0_u32),
                 stream_state,
             );
         };
@@ -3902,6 +3943,7 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
+        &Mutex::new(0_u32),
             &mut stream_state,
         );
 
@@ -3940,6 +3982,7 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
+        &Mutex::new(0_u32),
             &mut stream_state,
         );
 
@@ -4014,6 +4057,7 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
+            &Mutex::new(0_u32),
             &mut stream_state,
         );
 

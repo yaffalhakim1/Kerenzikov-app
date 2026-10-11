@@ -75,7 +75,11 @@
 
 The phone app is React Native, so the desktop's rules do not carry over — but
 the principle does: rendering owns the frame, and anything a frame reaches must
-already be in memory.
+already be in memory. The full model — the two cadences, the stream pipeline,
+the transcript/list bounding, boot, and the measurement playbook — is
+[docs/mobile-performance.md](docs/mobile-performance.md); read it before
+touching the stream pump, the transcript, the task list, the veil, or anything
+else a streaming frame reaches.
 
 - Frame work belongs on the compositor. An animation driven by a JS timer
   (`setTimeout` / `setInterval` / `requestAnimationFrame` re-arming itself) is a
