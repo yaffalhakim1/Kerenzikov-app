@@ -3,6 +3,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::{
     Backend, Command, EventSink, Request, ResponsePayload, WireDriverEvent, WorkspaceOperation,
@@ -41,6 +42,12 @@ const RESIDENT_TRANSCRIPT_WINDOW: usize = 24;
 fn trim_resident_transcripts(state: &mut PersistedState, pinned: &HashSet<Uuid>) {
     state.trim_idle_transcripts(pinned, RESIDENT_TRANSCRIPT_WINDOW);
 }
+
+/// How long the drain worker waits for a client projection to flip a settling
+/// session from Busy to Idle before giving up on that settle.
+const DRAIN_BUSY_WAIT: Duration = Duration::from_secs(5);
+/// Poll cadence while waiting out that projection.
+const DRAIN_BUSY_POLL: Duration = Duration::from_millis(100);
 
 pub struct WakuBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
@@ -2108,11 +2115,36 @@ fn drain_queued_prompt(
         driver,
         suppressed,
     } = request;
-    let mut state = task_state.lock();
+    // The session's status is a client projection: the settling client flips
+    // it to Idle on its next save, which can trail the TurnFinished this
+    // request rode in on by a save interval. Poll briefly instead of bailing,
+    // or a follow-up queued behind a fast turn is stranded until the next
+    // settle — which without this drain never comes.
+    let deadline = Instant::now() + DRAIN_BUSY_WAIT;
+    let mut state;
+    let session_status_is_busy = loop {
+        state = task_state.lock();
+        match state
+            .sessions
+            .iter_mut()
+            .find(|s| s.id == session_id)
+            .map(|session| session.status.is_busy())
+        {
+            Some(false) => break false,
+            Some(true) if Instant::now() < deadline => {
+                drop(state);
+                std::thread::sleep(DRAIN_BUSY_POLL);
+            }
+            _ => return,
+        }
+    };
+    if session_status_is_busy {
+        return;
+    }
     let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) else {
         return;
     };
-    if session.is_busy() || session.queued_messages.is_empty() {
+    if session.queued_messages.is_empty() {
         return;
     }
     // A Stop before this settle suppressed the queue: the user asked to
