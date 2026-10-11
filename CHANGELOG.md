@@ -12,6 +12,24 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.59]
+
+### Desktop
+
+- **Live session cost.** The usage panel now shows what the running task
+  costs as it works, priced from the provider's own token split — including
+  cache savings on Claude. Providers that report only context occupancy have
+  no cost row rather than a wrong one.
+- **Helper model per provider.** Point Settings → Providers at a cheaper
+  model for Waku's own background steps — commit subjects and memory
+  extraction — while the task itself keeps running on the strong one.
+- **Fallback models per provider.** List backup models to try in order when
+  a turn fails because the provider is overloaded or rate-limited; the task
+  retries itself instead of stopping. Queue order is preserved across the
+  retry.
+- Protocol bindings and mobile settings fixtures updated for the new
+  settings surface.
+
 ## [0.1.58]
 
 ### Android
