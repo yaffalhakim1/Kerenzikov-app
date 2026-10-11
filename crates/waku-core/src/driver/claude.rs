@@ -1431,6 +1431,10 @@ fn handle_message(
                         context_window: None,
                     });
                 }
+                // Each assistant record carries the complete usage object for
+                // its whole API call: the turn's billing split, priced live
+                // by the app.
+                super::support::emit_turn_usage(usage, events);
             }
             let Some(content) = value.pointer("/message/content").and_then(Value::as_array) else {
                 return;

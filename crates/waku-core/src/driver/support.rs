@@ -11,7 +11,7 @@ use parking_lot::Mutex;
 use serde_json::Value;
 
 use super::computer_use as computer_use_runtime;
-use crate::driver::DriverEventSender;
+use crate::driver::{DriverEvent, DriverEventSender};
 use crate::fs_ext;
 use crate::model::{ActivityKind, ProviderKind};
 
@@ -31,6 +31,32 @@ pub(super) fn claude_context_tokens(usage: &Value) -> Option<u64> {
         + field("cache_creation_input_tokens")
         + field("output_tokens");
     (total > 0).then_some(total)
+}
+
+/// Emits [`DriverEvent::TurnUsage`] from a Claude-wire `usage` object — the
+/// same shape Claude Code and Amp put on `message.usage`. Fields are the
+/// per-API-call billing split; anything absent reads as zero, and an all-zero
+/// object sends nothing.
+pub(super) fn emit_turn_usage(usage: &Value, events: &impl crate::driver::DriverEventSink) {
+    let field = |name: &str| {
+        usage
+            .get(name)
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .unwrap_or(0)
+    };
+    let input = field("input_tokens");
+    let output = field("output_tokens");
+    let cache_read = field("cache_read_input_tokens");
+    let cache_creation = field("cache_creation_input_tokens");
+    if input + output + cache_read + cache_creation > 0 {
+        let _ = events.send(DriverEvent::TurnUsage {
+            input,
+            output,
+            cache_read,
+            cache_creation,
+        });
+    }
 }
 
 #[derive(Clone)]

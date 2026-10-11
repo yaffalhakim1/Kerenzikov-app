@@ -113,6 +113,20 @@ pub fn event_to_wire(event: DriverEvent) -> anyhow::Result<WireDriverEvent> {
                 "contextWindow": context_window,
             }),
         ),
+        DriverEvent::TurnUsage {
+            input,
+            output,
+            cache_read,
+            cache_creation,
+        } => (
+            "turnUsage",
+            json!({
+                "input": input,
+                "output": output,
+                "cacheRead": cache_read,
+                "cacheCreation": cache_creation,
+            }),
+        ),
         DriverEvent::PlanUsageUpdated(usage) => ("planUsageUpdated", serde_json::to_value(usage)?),
         DriverEvent::GoalUpdated(goal) => ("goalUpdated", serde_json::to_value(goal)?),
         DriverEvent::TodoUpdated(todos) => ("todoUpdated", serde_json::to_value(todos)?),
@@ -204,6 +218,15 @@ pub fn event_from_wire(event: WireDriverEvent) -> anyhow::Result<DriverEvent> {
                 context_window: usage.context_window,
             }
         }
+        "turnUsage" => {
+            let usage: TurnUsageWire = serde_json::from_value(payload)?;
+            DriverEvent::TurnUsage {
+                input: usage.input,
+                output: usage.output,
+                cache_read: usage.cache_read,
+                cache_creation: usage.cache_creation,
+            }
+        }
         "planUsageUpdated" => DriverEvent::PlanUsageUpdated(serde_json::from_value(payload)?),
         "goalUpdated" => DriverEvent::GoalUpdated(serde_json::from_value(payload)?),
         "todoUpdated" => DriverEvent::TodoUpdated(serde_json::from_value(payload)?),
@@ -279,6 +302,17 @@ struct RejectedSteerWire {
 struct UsageWire {
     context_tokens: Option<u64>,
     context_window: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TurnUsageWire {
+    input: u64,
+    output: u64,
+    #[serde(default)]
+    cache_read: u64,
+    #[serde(default)]
+    cache_creation: u64,
 }
 
 #[derive(Deserialize)]

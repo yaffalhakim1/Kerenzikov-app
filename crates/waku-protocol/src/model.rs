@@ -2160,6 +2160,18 @@ pub enum DriverEvent {
         context_tokens: Option<u64>,
         context_window: Option<u64>,
     },
+    /// Tokens billed to the *turn* so far, carried by providers whose stream
+    /// splits input from output (Claude's per-message `usage`, Codex's
+    /// thread-sum `tokenUsage`). The app prices these with the model-rate
+    /// table and shows live cost in the usage panel. Providers that report
+    /// only occupancy (`UsageUpdated`) never send this, so the panel simply
+    /// has no cost row there.
+    TurnUsage {
+        input: u64,
+        output: u64,
+        cache_read: u64,
+        cache_creation: u64,
+    },
     /// Account-level rate-limit meters carried by the provider's own stream
     /// (Codex's `account/rateLimits/updated`). Same shape the OAuth fetcher
     /// produces for Claude, so the panel renders both identically.

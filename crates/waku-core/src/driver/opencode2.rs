@@ -1335,6 +1335,7 @@ fn handle_event(
         }
         "session.step.ended" => {
             emit_usage(data.get("tokens"), state, events, service);
+            emit_turn_usage(data.get("tokens"), events);
         }
         "session.step.failed" => {
             let _ = events.send(DriverEvent::Error(error_message(data.get("error"))));
@@ -1714,6 +1715,30 @@ fn emit_usage(
         context_tokens,
         context_window,
     });
+}
+
+/// One step's billing split, priced live by the app. v2 reports reasoning
+/// tokens separately from output, but providers bill them as one — so
+/// reasoning rides the output leg.
+fn emit_turn_usage(tokens: Option<&Value>, events: &impl DriverEventSink) {
+    let Some(tokens) = tokens else {
+        return;
+    };
+    let Ok(usage) = serde_json::from_value::<TokenUsage>(tokens.clone()) else {
+        return;
+    };
+    let input = usage.input as u64;
+    let output = (usage.output + usage.reasoning) as u64;
+    let cache_read = usage.cache.read as u64;
+    let cache_creation = usage.cache.write as u64;
+    if input + output + cache_read + cache_creation > 0 {
+        let _ = events.send(DriverEvent::TurnUsage {
+            input,
+            output,
+            cache_read,
+            cache_creation,
+        });
+    }
 }
 
 fn part_key(data: &Value, state: &StreamState) -> Option<(String, u64)> {
@@ -2653,12 +2678,21 @@ mod tests {
             }
         }));
 
+        // The same step feeds the live cost accumulator alongside the meter.
         assert!(matches!(
             harness.drain().as_slice(),
-            [DriverEvent::UsageUpdated {
-                context_tokens: Some(15_206),
-                context_window: Some(200_000)
-            }]
+            [
+                DriverEvent::UsageUpdated {
+                    context_tokens: Some(15_206),
+                    context_window: Some(200_000)
+                },
+                DriverEvent::TurnUsage {
+                    input: 13_399,
+                    output: 15,
+                    cache_read: 1_792,
+                    cache_creation: 0
+                }
+            ]
         ));
     }
 

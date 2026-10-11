@@ -2158,6 +2158,13 @@ impl Waku {
         cx: &mut Context<Self>,
     ) -> Div {
         let override_value = self.state.provider_binary_overrides.get(&kind).cloned();
+        let helper_model = self.state.helper_models.get(&kind).cloned();
+        let fallbacks = self
+            .state
+            .model_fallbacks
+            .get(&kind)
+            .cloned()
+            .unwrap_or_default();
         let full_path = self
             .provider_probe(kind)
             .filter(|probe| probe.installed)
@@ -2196,6 +2203,149 @@ impl Waku {
                     .update(cx, |input, cx| input.clear(cx));
                 this.apply_provider_path_override(cx);
             }));
+
+        let helper_row = div()
+            .mt(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(5.0))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("providers.helper_model")),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(tr!(
+                        "providers.helper_model_description"
+                    ))),
+            )
+            .child(
+                div()
+                    .mt(px(3.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        TextField::new(
+                            SharedString::from(format!("helper-model-field-{}", kind.id())),
+                            self.helper_model_input.clone(),
+                        )
+                        .flex_1()
+                        .max_w(px(430.0)),
+                    )
+                    .when(helper_model.is_some(), |element| {
+                        element.child(
+                            div()
+                                .id(SharedString::from(format!(
+                                    "helper-model-reset-{}",
+                                    kind.id()
+                                )))
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
+                                .h(px(29.0))
+                                .px(px(10.0))
+                                .rounded(px(7.0))
+                                .border_1()
+                                .border_color(theme.border_strong)
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .cursor_default()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .hover(|element| element.bg(theme.overlay))
+                                .child(tr!("common.reset"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.helper_model_input
+                                        .update(cx, |input, cx| input.clear(cx));
+                                    this.apply_helper_model(cx);
+                                })),
+                        )
+                    }),
+            );
+
+        let fallbacks_row = div()
+            .mt(px(8.0))
+            .flex()
+            .flex_col()
+            .gap(px(5.0))
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme.text)
+                    .child(tr!("providers.model_fallbacks")),
+            )
+            .child(
+                div()
+                    .text_size(sp(12.5))
+                    .line_height(sp(15.0))
+                    .text_color(theme.text_tertiary)
+                    .child(SharedString::from(tr!(
+                        "providers.model_fallbacks_description"
+                    ))),
+            )
+            .child(
+                div()
+                    .mt(px(3.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .child(
+                        TextField::new(
+                            SharedString::from(format!("model-fallbacks-field-{}", kind.id())),
+                            self.model_fallbacks_input.clone(),
+                        )
+                        .flex_1()
+                        .max_w(px(430.0)),
+                    )
+                    .when(!fallbacks.is_empty(), |element| {
+                        element.child(
+                            div()
+                                .id(SharedString::from(format!(
+                                    "model-fallbacks-reset-{}",
+                                    kind.id()
+                                )))
+                                .tab_index(0)
+                                .focus_visible(|style| style.border_color(theme.accent))
+                                .h(px(29.0))
+                                .px(px(10.0))
+                                .rounded(px(7.0))
+                                .border_1()
+                                .border_color(theme.border_strong)
+                                .flex()
+                                .flex_none()
+                                .items_center()
+                                .cursor_default()
+                                .text_size(sp(12.5))
+                                .text_color(theme.text_secondary)
+                                .hover(|element| element.bg(theme.overlay))
+                                .child(tr!("common.reset"))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.model_fallbacks_input
+                                        .update(cx, |input, cx| input.clear(cx));
+                                    this.apply_model_fallbacks(cx);
+                                })),
+                        )
+                    }),
+            )
+            .when(!fallbacks.is_empty(), |element| {
+                element.child(
+                    div()
+                        .text_size(sp(12.5))
+                        .text_color(theme.text_ghost)
+                        .child(SharedString::from(tr!(
+                            "providers.model_fallbacks_active",
+                            models = fallbacks.join(", ")
+                        ))),
+                )
+            });
 
         div()
             .mt(px(10.0))
@@ -2242,6 +2392,8 @@ impl Waku {
                     .text_color(theme.text_ghost)
                     .child(SharedString::from(caption)),
             )
+            .child(helper_row)
+            .child(fallbacks_row)
     }
 
     fn toggle_provider_expanded(
@@ -2253,6 +2405,8 @@ impl Waku {
         // Commit any pending edit for the previously expanded provider before
         // the input is handed to another row.
         self.apply_provider_path_override(cx);
+        self.apply_helper_model(cx);
+        self.apply_model_fallbacks(cx);
         if self.expanded_provider_settings == Some(provider) {
             self.expanded_provider_settings = None;
         } else {
@@ -2265,6 +2419,23 @@ impl Waku {
                 .unwrap_or_default();
             self.provider_path_input
                 .update(cx, |input, cx| input.set_content(override_value, cx));
+            let helper_model = self
+                .state
+                .helper_models
+                .get(&provider)
+                .cloned()
+                .unwrap_or_default();
+            self.helper_model_input
+                .update(cx, |input, cx| input.set_content(helper_model, cx));
+            let fallbacks = self
+                .state
+                .model_fallbacks
+                .get(&provider)
+                .cloned()
+                .unwrap_or_default()
+                .join(", ");
+            self.model_fallbacks_input
+                .update(cx, |input, cx| input.set_content(fallbacks, cx));
             let focus = self.provider_path_input.read(cx).focus();
             window.focus(&focus, cx);
         }
@@ -2301,6 +2472,70 @@ impl Waku {
         self.save();
         self.refresh_provider_detection(Some(provider));
         self.refresh_composer_sources(cx);
+        cx.notify();
+    }
+
+    /// Commit the helper-model edit for the expanded provider: empty means the
+    /// built-in cheap-tier pin. The daemon reads this at each helper step.
+    pub(super) fn apply_helper_model(&mut self, cx: &mut Context<Self>) {
+        let Some(provider) = self.expanded_provider_settings else {
+            return;
+        };
+        let text = self
+            .helper_model_input
+            .read(cx)
+            .content()
+            .trim()
+            .to_owned();
+        let current = self
+            .state
+            .helper_models
+            .get(&provider)
+            .cloned()
+            .unwrap_or_default();
+        if text == current {
+            return;
+        }
+        if text.is_empty() {
+            self.state.helper_models.remove(&provider);
+        } else {
+            self.state.helper_models.insert(provider, text);
+        }
+        self.save();
+        cx.notify();
+    }
+
+    /// Commit the fallback-chain edit for the expanded provider: comma- or
+    /// whitespace-separated model ids, tried in order when a turn fails with
+    /// a retriable provider error. Empty means no fallbacks.
+    pub(super) fn apply_model_fallbacks(&mut self, cx: &mut Context<Self>) {
+        let Some(provider) = self.expanded_provider_settings else {
+            return;
+        };
+        let text = self
+            .model_fallbacks_input
+            .read(cx)
+            .content()
+            .split([',', ' '])
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        let current = self
+            .state
+            .model_fallbacks
+            .get(&provider)
+            .cloned()
+            .unwrap_or_default();
+        if text == current {
+            return;
+        }
+        if text.is_empty() {
+            self.state.model_fallbacks.remove(&provider);
+        } else {
+            self.state.model_fallbacks.insert(provider, text);
+        }
+        self.save();
         cx.notify();
     }
 

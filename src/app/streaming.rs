@@ -374,6 +374,7 @@ impl Waku {
             }
             DriverEvent::TurnStarted => {
                 runtime.last_driver_error = None;
+                runtime.turn_usage = Some(TurnUsageAccumulator::default());
                 if let Some(session) = self.state.session_mut(session_id) {
                     if session.active_turn_id().is_some() {
                         // Covers submissions and the optimistic pursuit turn
@@ -659,6 +660,21 @@ impl Waku {
                 {
                     session.todos = todos;
                     self.state.mark_session_dirty(session_id);
+                }
+            }
+            DriverEvent::TurnUsage { .. } => {
+                // Billed-token accumulations ride the runtime and surface in
+                // the usage meter's cost row; the driver events themselves
+                // are not transcript state. A turn that never reported a
+                // split (ACP providers) leaves the accumulator unset.
+                if let Some(accumulator) = runtime.turn_usage.as_mut() {
+                    accumulator.add(&event);
+                } else {
+                    runtime.turn_usage = {
+                        let mut accumulator = TurnUsageAccumulator::default();
+                        accumulator.add(&event);
+                        Some(accumulator)
+                    };
                 }
             }
             DriverEvent::UsageUpdated {

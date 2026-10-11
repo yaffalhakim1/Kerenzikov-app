@@ -3100,6 +3100,7 @@ impl Waku {
                 last_background_refresh_at: Instant::now()
                     .checked_sub(BACKGROUND_WORK_REFRESH_INTERVAL)
                     .unwrap_or_else(Instant::now),
+                turn_usage: None,
             },
         );
         // Startup can emit before the background task hands this receiver to
@@ -3654,10 +3655,12 @@ impl Waku {
             | self.drain_provider_detection_events()
             | self.drain_computer_permission_events()
             | self.drain_plan_usage_events()
+            | self.drain_turn_cost_events()
             | self.drain_task_state_sync_events(cx)
         {
             cx.notify();
         }
+        self.maybe_price_turn_usage(cx);
         if std::mem::take(&mut self.workspace_queries_stale) {
             self.invalidate_workspace_queries(cx);
         }
