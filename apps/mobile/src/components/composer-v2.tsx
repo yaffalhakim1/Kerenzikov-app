@@ -13,6 +13,8 @@ import { ComposerAccessMenu } from './composer-access-menu';
 import { ComposerAttachmentMenu, type ComposerAttachmentSource } from './composer-attachment-menu';
 import { ComposerTextInput } from './composer-text-input';
 import { SendStopSlot } from './mobile-composer';
+import { ProviderIcon } from './provider-icon';
+import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
 import { useDaemon } from '@/lib/daemon-context';
 import { useTheme } from '@/hooks/use-theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
@@ -23,6 +25,7 @@ import {
   useTaskState,
 } from '@/hooks/use-daemon-data';
 import { detectComposerTrigger, filterComposerCommands } from '@/lib/composer-commands';
+import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { confirmHaptic, tapHaptic } from '@/lib/haptics';
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { sessionBusy } from '@/lib/mobile-runtime';
@@ -67,6 +70,8 @@ export function ComposerV2({
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [modelSheetOpen, setModelSheetOpen] = useState(false);
+  const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
 
   const busy = sessionBusy(session);
   const disconnected = daemon.phase !== 'connected';
@@ -93,7 +98,12 @@ export function ComposerV2({
     flushOnUnmount: true,
   });
 
-  useProviderModels(session.provider);
+  const providerModels = useProviderModels(session.provider);
+  const sessionModels = providerModels.data?.models;
+  const activeModel = session.model
+    ? sessionModels?.find((item) => item.id === session.model)
+    : sessionModels?.find((item) => item.is_default) ?? sessionModels?.[0];
+  const selectedModelName = modelDisplayName(sessionModels, session.model ?? null);
 
   async function submit() {
     const typed = draft.trim();
@@ -115,6 +125,12 @@ export function ComposerV2({
     }
   }
 
+  function applyOptions(changes: Parameters<typeof runtime.updateSessionOptions>[1]) {
+    runtime.updateSessionOptions(session.id, changes).catch((cause) => {
+      setLocalError(cause instanceof Error ? cause.message : String(cause));
+    });
+  }
+
   function chooseAttachment(source: ComposerAttachmentSource) {
     tapHaptic();
     setLocalError(`Attachments are not wired in this composer yet (${source}).`);
@@ -131,6 +147,10 @@ export function ComposerV2({
     >
     <AIInput
       avoidKeyboard={false}
+      // `AIInput`'s root carries `shadow-md` so the card reads as lifted off a
+      // page. This app's surfaces are flat with hairline borders, so the
+      // shadow is the one thing that would look foreign.
+      className="shadow-none"
       onSubmit={submit}
       onValueChange={setDraft}
       status={busy ? 'streaming' : 'ready'}
@@ -234,10 +254,34 @@ export function ComposerV2({
         <ComposerAttachmentMenu onChoose={chooseAttachment} />
         <ComposerAccessMenu
           mode={session.runtime_mode}
-          onApply={(mode) => {
-            runtime.updateSessionOptions(session.id, { runtimeMode: mode }).catch(() => {});
-          }}
+          onApply={(mode) => applyOptions({ runtimeMode: mode })}
         />
+        {/*
+          The model is a `Pill` — a value that opens a list — and the reasoning
+          effort is an `Action`, which is what the library's own composer
+          example does. `indicator` is the chevron; `indicatorSymbol` is the
+          platform's name for it, needed only when the pill is handed over.
+        */}
+        <AIInput.Pill
+          accessibilityLabel={`Model, ${selectedModelName}`}
+          indicator={
+            <AppSymbol
+              name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
+              size={11}
+              tintColor={theme.textTertiary}
+            />
+          }
+          indicatorSymbol="chevron.up.chevron.down"
+          label={selectedModelName}
+          onPress={() => setModelSheetOpen(true)}
+        />
+        {activeModel && modelHasConfigurableTraits(activeModel) ? (
+          <AIInput.Action
+            icon={<ProviderIcon provider={session.provider} size={15} />}
+            label="Reasoning and model options"
+            onPress={() => setTraitsSheetOpen(true)}
+          />
+        ) : null}
         <AIInput.Spacer />
         {/*
           Not `AIInput.Submit`: it offers voice when the field is empty, and
@@ -257,6 +301,29 @@ export function ComposerV2({
         />
       </AIInput.Toolbar>
     </AIInput>
+
+    <ModelSheet
+      model={session.model ?? null}
+      onApply={(selection) => applyOptions(selection)}
+      onDismiss={() => setModelSheetOpen(false)}
+      provider={session.provider}
+      reasoningEffort={session.reasoning_effort ?? null}
+      visible={modelSheetOpen}
+    />
+
+    {activeModel ? (
+      <ModelTraitsSheet
+        model={activeModel}
+        onApply={(changes) => applyOptions(changes)}
+        onDismiss={() => setTraitsSheetOpen(false)}
+        selection={{
+          reasoningEffort: session.reasoning_effort ?? null,
+          serviceTier: session.service_tier ?? null,
+          contextWindow: session.context_window ?? null,
+        }}
+        visible={traitsSheetOpen}
+      />
+    ) : null}
     </View>
   );
 }
