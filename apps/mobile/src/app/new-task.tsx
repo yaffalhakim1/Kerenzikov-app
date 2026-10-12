@@ -20,9 +20,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
 
+import { Chip } from 'panelui-native/components/chip';
+import { Button } from 'panelui-native/components/button';
+import { Item } from 'panelui-native/components/item';
 import { AppSymbol } from '@/components/app-symbol';
 import { AttachmentChip } from '@/components/attachment-chip';
 import { AgentPresetMenu } from '@/components/agent-preset-menu';
@@ -528,29 +530,19 @@ export default function NewTaskScreen() {
         style={styles.scroll}>
         <View style={styles.templates}>
           {PROMPT_TEMPLATES.map((template) => (
-            <AppPressable
+            <Chip
               accessibilityLabel={`Start from: ${template.title}`}
-              accessibilityRole="button"
               key={template.title}
               onPress={() => {
                 tapHaptic();
                 setPrompt(template.prompt);
               }}
-              style={({ pressed }) => [
-                styles.templateChip,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                  opacity: pressed ? 0.6 : 1,
-                },
-              ]}>
-              <AppSymbol name={template.icon} size={13} tintColor={theme.textSecondary} />
-              <Text
-                numberOfLines={1}
-                style={[styles.templateLabel, { color: theme.text }]}>
-                {template.title}
-              </Text>
-            </AppPressable>
+              size="sm"
+              start={<AppSymbol name={template.icon} size={13} tintColor={theme.textSecondary} />}
+              variant="outline"
+            >
+              <Chip.Label>{template.title}</Chip.Label>
+            </Chip>
           ))}
         </View>
 
@@ -622,25 +614,23 @@ export default function NewTaskScreen() {
                   key={`${attachment.blob_reference ?? attachment.path}:${index}`}
                   style={styles.attachmentItem}>
                   <AttachmentChip attachment={attachment} />
-                  <AppPressable
+                  <Button
                     accessibilityLabel={`Remove ${attachment.name}`}
-                    accessibilityRole="button"
+                    className="absolute -right-1 -top-1 h-5 w-5 min-h-0 min-w-0 rounded-full bg-muted px-0 py-0"
                     disabled={submitting}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     onPress={() => {
                       draftSync.markEdited();
                       setAttachments((current) => current.filter((_, item) => item !== index));
                     }}
-                    style={({ pressed }) => [
-                      styles.attachmentRemove,
-                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
-                    ]}>
+                    size="xs"
+                    variant="ghost"
+                  >
                     <AppSymbol
                       name={{ ios: 'xmark', android: 'close', web: 'close' }}
                       size={11}
                       tintColor={theme.textSecondary}
                     />
-                  </AppPressable>
+                  </Button>
                 </View>
               ))}
               {importingAttachments && (
@@ -845,26 +835,31 @@ function SelectorRow({
 }) {
   const theme = useTheme();
   return (
-    <AppPressable
+    <Item
       accessibilityLabel={`${label}: ${value}`}
-      accessibilityRole="button"
       disabled={loading}
       onPress={onPress}
-      style={[styles.row, { backgroundColor: theme.surface }]}>
-      <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
-      {loading ? (
-        <Blocks color={theme.accent} size={16} />
-      ) : (
-        <Text numberOfLines={1} style={[styles.rowValue, { color: theme.text }]}>
-          {value}
-        </Text>
-      )}
-      <AppSymbol
-        name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
-        size={13}
-        tintColor={theme.textTertiary}
-      />
-    </AppPressable>
+      pressScale={1}
+      size="sm"
+    >
+      <Item.Media>
+        <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
+      </Item.Media>
+      <Item.Content>
+        {loading ? (
+          <Blocks color={theme.accent} size={16} />
+        ) : (
+          <Item.Title numberOfLines={1}>{value}</Item.Title>
+        )}
+      </Item.Content>
+      <Item.Actions>
+        <AppSymbol
+          name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
+          size={13}
+          tintColor={theme.textTertiary}
+        />
+      </Item.Actions>
+    </Item>
   );
 }
 
@@ -881,26 +876,7 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingHorizontal: Spacing.three,
   },
-  templateChip: {
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  templateLabel: { fontSize: 13, fontWeight: '500' },
   rows: { gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three },
-  row: {
-    alignItems: 'center',
-    borderRadius: Radius.medium,
-    flexDirection: 'row',
-    gap: 14,
-    minHeight: 52,
-    paddingHorizontal: 6,
-  },
-  rowValue: { flexShrink: 1, fontSize: 16.5, fontWeight: '500' },
   composerShell: { paddingHorizontal: 12 },
   attachmentStack: {
     flexDirection: 'row',
@@ -910,16 +886,6 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   attachmentItem: { position: 'relative' },
-  attachmentRemove: {
-    alignItems: 'center',
-    borderRadius: 10,
-    height: 20,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: -4,
-    top: -4,
-    width: 20,
-  },
   attachmentChipLoading: {
     alignItems: 'center',
     borderRadius: Radius.small,
