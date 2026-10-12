@@ -34,6 +34,7 @@ import {
 } from 'react-native';
 import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import { CodeBlock } from 'panelui-native/components/code-block';
+import { Button } from 'panelui-native/components/button';
 import { AppPressable } from '@/components/app-pressable';
 import { AppSymbol } from '@/components/app-symbol';
 
@@ -154,13 +155,6 @@ const chrome = StyleSheet.create({
     justifyContent: 'space-between',
   },
   codeHeaderLabel: { flexShrink: 1 },
-  copyButton: {
-    alignItems: 'center',
-    borderRadius: 6,
-    height: 20,
-    justifyContent: 'center',
-    width: 24,
-  },
 });
 
 /** Visible text of an inline tree. Must mirror `renderInline`'s traversal
@@ -390,6 +384,9 @@ function MarkdownImage({
   );
   if (!href || href === PENDING_LINK_URL) return image;
   return (
+    // Not a PanelUI control: this wraps an image and carries no chrome of its
+    // own — it exists to make the image a link. PanelUI's pressables all draw a
+    // surface (a row, a button), and one would put a card around a picture.
     <AppPressable accessibilityRole="link" onPress={() => onOpenLink(href)}>
       {image}
     </AppPressable>
@@ -448,10 +445,8 @@ const CodeCopyButton = memo(function CodeCopyButton({
   }, [copied]);
 
   return (
-    <AppPressable
+    <Button
       accessibilityLabel={copied ? 'Copied' : 'Copy code'}
-      accessibilityRole="button"
-      hitSlop={10}
       onPress={() => {
         void Clipboard.setStringAsync(value)
           .then(async () => {
@@ -460,7 +455,9 @@ const CodeCopyButton = memo(function CodeCopyButton({
           })
           .catch(() => {});
       }}
-      style={({ pressed }) => [chrome.copyButton, { opacity: pressed ? 0.5 : 1 }]}>
+      size="icon"
+      variant="ghost"
+    >
       <AppSymbol
         name={copied
           ? { ios: 'checkmark', android: 'check', web: 'check' }
@@ -468,7 +465,7 @@ const CodeCopyButton = memo(function CodeCopyButton({
         size={12}
         tintColor={tint}
       />
-    </AppPressable>
+    </Button>
   );
 });
 
