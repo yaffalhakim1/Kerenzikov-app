@@ -1,5 +1,10 @@
 import { memo, useEffect, useMemo, useRef, type ReactNode } from 'react';
-import { Animated, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { MonoFont } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
@@ -188,17 +193,18 @@ export function MdRevealOnMount({
 }) {
   const reducedMotion = useReducedMotion();
   const fade = enabled && !reducedMotion;
-  const opacity = useRef(new Animated.Value(fade ? 0 : 1)).current;
+  // Reanimated rather than core `Animated`: PanelUI's own rule, and the one
+  // this file is now subject to since it renders `Response`. Core `Animated`
+  // does not compose with Reanimated and its API encourages patterns that put
+  // the frames back on the JS thread.
+  const opacity = useSharedValue(fade ? 0 : 1);
   useEffect(() => {
     if (!fade) return;
-    Animated.timing(opacity, {
-      duration: 240,
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
+    opacity.value = withTiming(1, { duration: 240 });
   }, [fade, opacity]);
   if (!fade) return <>{children}</>;
-  return <Animated.View style={{ opacity }}>{children}</Animated.View>;
+  const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  return <Animated.View style={style}>{children}</Animated.View>;
 }
 
 /** A settled markdown block. Re-renders only when its source changes — the

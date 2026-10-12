@@ -15,16 +15,16 @@
  * measured 4.5:1 pairs — one @variant block per appearance.
  */
 @variant light {
-  --color-background: #ffffff;
+  --color-background: #f6f5f6;
   --color-foreground: #242424;
-  --color-card: #ffffff;
+  --color-card: #f6f5f6;
   --color-muted: #ececec;
-  --color-muted-foreground: #696969;
+  --color-muted-foreground: #858585;
   --color-border: hsla(220, 10%, 12%, 0.08);
   --color-primary: #007a45;
   --color-primary-foreground: #ffffff;
   --color-secondary: #ececec;
-  --color-secondary-foreground: #4f4f4f;
+  --color-secondary-foreground: #666666;
   --color-accent: hsla(220, 10%, 12%, 0.05);
   --color-accent-foreground: #242424;
   /*
@@ -69,18 +69,18 @@
    * (theme.ts `surface`/`inset`/`overlay`), so a popover, menu or code surface
    * matches the rest of the app instead of a second palette.
    */
-  --color-popover: #ffffff;
+  --color-popover: #f6f5f6;
   --color-popover-foreground: #242424;
   --color-card-foreground: #242424;
-  --color-overlay: #ffffff;
+  --color-overlay: #f6f5f6;
   --color-overlay-foreground: #242424;
-  --color-surface: #ffffff;
+  --color-surface: #f6f5f6;
   --color-surface-secondary: #ececec;
   --color-surface-tertiary: #e6e6e6;
   --color-inset: #e6e6e6;
   --color-input: hsla(220, 10%, 12%, 0.08);
   --color-skeleton: hsla(220, 10%, 12%, 0.06);
-  --color-code-keyword: #007a45;
+  --color-code-keyword: #00814a;
 }
 
 @variant dark {
@@ -88,10 +88,10 @@
   --color-foreground: #e2e2e2;
   --color-card: #232323;
   --color-muted: #2a2a2a;
-  --color-muted-foreground: #909090;
+  --color-muted-foreground: #7d7d7d;
   --color-border: hsla(220, 10%, 90%, 0.07);
   --color-primary: #26e085;
-  --color-primary-foreground: #17181c;
+  --color-primary-foreground: #ffffff;
   --color-secondary: #2a2a2a;
   --color-secondary-foreground: #a3a3a3;
   --color-accent: hsla(220, 10%, 90%, 0.05);

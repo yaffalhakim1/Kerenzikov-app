@@ -21,6 +21,9 @@ import {
 import { ConnectionBanner } from '@/components/connection-banner';
 import { ContextGaugeButton } from '@/components/context-gauge';
 import { BackgroundWorkBar, ComputerUseChip, TodoStrip } from '@/components/harness-surfaces';
+import Constants from 'expo-constants';
+
+import { ComposerV2 } from '@/components/composer-v2';
 import { MobileComposer } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
 import {
@@ -97,6 +100,11 @@ const TASK_MENU_COMMANDS = [
 ] as const;
 
 
+
+/** Whether the composer is PanelUI's `AIInput` composition (`composer-v2`)
+ * or the app's own surface. Flipped in `expo.extra` so it can be changed
+ * without a code edit; both composers stay in the tree. */
+const composerV2 = Constants.expoConfig?.extra?.composerV2 === true;
 
 export function SessionView({
   sessionId,
@@ -544,11 +552,19 @@ export function SessionView({
         </View>
       )}
       {session && (
-        <MobileComposer
-          key={`composer:${session.id}`}
-          session={session}
-          onSubmitted={() => listRef.current?.followNextGrowth()}
-        />
+        composerV2 ? (
+          <ComposerV2
+            key={`composer-v2:${session.id}`}
+            onSubmitted={() => listRef.current?.followNextGrowth()}
+            session={session}
+          />
+        ) : (
+          <MobileComposer
+            key={`composer:${session.id}`}
+            onSubmitted={() => listRef.current?.followNextGrowth()}
+            session={session}
+          />
+        )
       )}
 
       {session && (

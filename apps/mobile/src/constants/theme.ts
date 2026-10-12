@@ -17,11 +17,11 @@ import { Platform, PlatformColor, type ColorValue } from 'react-native';
 export const Colors = {
   light: {
     text: '#242424',
-    textSecondary: '#4f4f4f',
-    textTertiary: '#696969',
-    textGhost: '#808080',
-    background: '#ffffff',
-    surface: '#ffffff',
+    textSecondary: '#666666',
+    textTertiary: '#858585',
+    textGhost: '#a4a4a4',
+    background: '#f6f5f6',
+    surface: '#f6f5f6',
     surfaceMuted: '#ececec',
     raised: '#ececec',
     inset: '#e6e6e6',
@@ -34,8 +34,12 @@ export const Colors = {
     border: 'hsla(220, 10%, 12%, 0.08)',
     borderStrong: 'hsla(220, 10%, 12%, 0.15)',
     accent: '#007a45',
-    accentSoft: 'rgba(0, 122, 69, 0.12)',
-    codeText: '#007a45',
+    /** The desktop's brand green, verbatim (`theme.rs`'s `accent`). Used for
+     *  fills, glyphs and brand marks. `accent` above stays the darker step so
+     *  accent *text* stays legible — the desktop value is 1.85:1 on white. */
+    brand: '#00da7d',
+    accentSoft: 'rgba(0, 218, 125, 0.14)',
+    codeText: '#00814a',
     codeWash: 'hsla(220, 10%, 12%, 0.07)',
     inverse: '#202227',
     onInverse: '#f8f8f9',
@@ -50,8 +54,8 @@ export const Colors = {
   dark: {
     text: '#e2e2e2',
     textSecondary: '#a3a3a3',
-    textTertiary: '#909090',
-    textGhost: '#7a7a7a',
+    textTertiary: '#7d7d7d',
+    textGhost: '#575757',
     background: '#1a1a1a',
     surface: '#232323',
     surfaceMuted: '#2a2a2a',
@@ -66,6 +70,7 @@ export const Colors = {
     border: 'hsla(220, 10%, 90%, 0.07)',
     borderStrong: 'hsla(220, 10%, 90%, 0.14)',
     accent: '#26e085',
+    brand: '#26e085',
     accentSoft: 'rgba(38, 224, 133, 0.15)',
     codeText: '#26e085',
     codeWash: 'hsla(220, 10%, 90%, 0.08)',
