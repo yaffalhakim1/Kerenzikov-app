@@ -641,7 +641,7 @@ export function MobileComposer({
       {visibleError && (
         <Alert
           accessibilityLiveRegion="polite"
-          className="mb-1.5 gap-1.5 px-2.5 py-1.5"
+          className="mb-1.5 items-center gap-1.5 px-2.5 py-1.5"
           variant="destructive">
           {/* This app redefines `--color-destructive-foreground` as the
               contrast pair for a *solid* destructive fill, so the variant's
@@ -652,7 +652,10 @@ export function MobileComposer({
           </Alert.Content>
           <Button
             accessibilityLabel="Dismiss error"
-            className="self-center"
+            // Trimmed to the glyph: the banner is a one-line strip, and the
+            // library's own 10pt hit slop on `xs` keeps the target reachable
+            // without the box setting the strip's height.
+            className="min-h-0 min-w-0 self-center px-0.5 py-0"
             onPress={() => {
               setLocalError(null);
               runtime.dismissError(session.id);
@@ -734,13 +737,14 @@ export function MobileComposer({
                     // text-shaped rows use.
                     pressOpacity={0.6}
                     pressScale={1}
-                    size="sm">
+                    size="sm"
+                    variant="muted">
                     {/* Name and hint sit side by side on the left, as they
                         did before — the content column is turned back into a
                         row so the hint does not get pushed to the far edge by
                         the title's flex. */}
                     <Item.Content className="flex-row items-center gap-2">
-                      <Item.Title numberOfLines={1}>/{command.name}</Item.Title>
+                      <Item.Title className="shrink" numberOfLines={1}>/{command.name}</Item.Title>
                       {command.description ? (
                         <Item.Description className="shrink" numberOfLines={1}>
                           {command.description}
@@ -768,7 +772,8 @@ export function MobileComposer({
                     onPress={() => applyFile(file)}
                     pressOpacity={0.6}
                     pressScale={1}
-                    size="sm">
+                    size="sm"
+                    variant="muted">
                     <Item.Media>
                       <AppSymbol
                         name={file.is_dir
@@ -821,7 +826,7 @@ export function MobileComposer({
                   key={file.id}
                   size="sm"
                   start={<UploadRing size={14} />}>
-                  <PanelText className="shrink text-secondary-foreground" numberOfLines={1} size="sm">
+                  <PanelText className="shrink text-xs text-secondary-foreground" numberOfLines={1}>
                     {file.name}
                   </PanelText>
                 </Chip>
@@ -958,6 +963,7 @@ function PermissionPanel({
       <View style={styles.optionActions}>
         {permission.options.map((option) => (
           <Button
+            accessibilityLabel={option.label}
             className="rounded-full"
             disabled={Boolean(responding)}
             key={option.id}
@@ -1063,7 +1069,7 @@ function UserInputPanel({
       <Text style={[styles.questionText, { color: theme.text }]}>{question.question}</Text>
       <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.questionOptions}>
         {question.multiSelect ? (
-          <View className="gap-2">
+          <View className="gap-2.5">
             {question.options.map((option) => (
               <Checkbox
                 checked={selected.includes(option.label)}
@@ -1115,6 +1121,7 @@ function UserInputPanel({
           </Button>
         ) : <View />}
         <Button
+          accessibilityLabel={last ? 'Submit answers' : 'Next question'}
           disabled={!canContinue || submitting}
           onPress={() => void advance()}
           size="sm"
