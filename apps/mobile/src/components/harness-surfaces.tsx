@@ -6,10 +6,11 @@ import type {
 import { Plan } from 'panelui-native/components/plan';
 import type { PlanStepStatus } from 'panelui-native/components/plan';
 import { Button } from 'panelui-native/components/button';
+import { Item } from 'panelui-native/components/item';
 import { Task } from 'panelui-native/components/task';
 import type { TaskStatus } from 'panelui-native/components/task';
 import { memo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { useTheme } from '@/hooks/use-theme';
@@ -194,26 +195,20 @@ export const ComputerUseChip = memo(function ComputerUseChip({
         ? 'Computer use failed'
         : `Controlling ${state.target?.appName ?? 'the host screen'}`;
   return (
-    <View style={[styles.computerChip, { backgroundColor: theme.raised }]}>
-      <View style={[styles.computerDot, { backgroundColor: phaseColor }]} />
-      <Text numberOfLines={1} style={[styles.computerText, { color: theme.textSecondary }]}>
-        {label}
-        {state.target?.windowTitle ? ` · ${state.target.windowTitle}` : ''}
-      </Text>
-    </View>
+    <Item className="mb-2" size="xs">
+      <Item.Media>
+        <View style={[styles.computerDot, { backgroundColor: phaseColor }]} />
+      </Item.Media>
+      <Item.Content>
+        <Item.Title numberOfLines={1} className="text-xs text-secondary-foreground">
+          {label}
+          {state.target?.windowTitle ? ` · ${state.target.windowTitle}` : ''}
+        </Item.Title>
+      </Item.Content>
+    </Item>
   );
 });
 
 const styles = StyleSheet.create({
-  computerChip: {
-    alignItems: 'center',
-    borderRadius: 12,
-    flexDirection: 'row',
-    gap: 7,
-    marginBottom: 8,
-    minHeight: 34,
-    paddingHorizontal: 12,
-  },
   computerDot: { borderRadius: 5, height: 10, width: 10 },
-  computerText: { flex: 1, fontSize: 12.5 },
 });

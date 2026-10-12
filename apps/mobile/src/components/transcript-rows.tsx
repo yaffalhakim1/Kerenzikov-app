@@ -2,10 +2,13 @@ import type { AgentSession, Checkpoint, Message } from '@waku/client';
 import { formatMessageTime } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import { Item } from 'panelui-native/components/item';
+import { Button } from 'panelui-native/components/button';
+import { Message as MessageBubble } from 'panelui-native/components/message';
 import { Shimmer } from 'panelui-native/components/shimmer';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 import { memo, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -14,7 +17,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Collapsible } from 'panelui-native/components/collapsible';
 
-import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
 
 import { ActivityGroup } from '@/components/activity-group';
@@ -162,27 +164,33 @@ function FoldRow({
     transform: [{ rotate: `${rotation.value * 90}deg` }],
   }));
   return (
-    <AppPressable
+    <Item
       accessibilityHint={expanded ? 'Collapses the agent’s work' : 'Shows the agent’s work'}
       accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ expanded }}
+      className="justify-center"
       hitSlop={{ top: 6, bottom: 6 }}
       onPress={() => keepTop(() => onToggle(turnId))}
-      style={({ pressed }) => [styles.foldRow, { opacity: pressed ? 0.6 : 1 }]}>
+      pressOpacity={0.6}
+      pressScale={1}
+      size="xs"
+    >
       <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
-      <Text numberOfLines={1} style={[styles.foldLabel, { color: theme.textTertiary }]}>
-        {label}
-      </Text>
-      <Animated.View style={spin}>
-        <AppSymbol
-          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-          size={10}
-          tintColor={theme.textGhost}
-        />
-      </Animated.View>
+      <Item.Content>
+        <Item.Title numberOfLines={1} className="text-xs text-muted-foreground text-center">
+          {label}
+        </Item.Title>
+      </Item.Content>
+      <Item.Actions>
+        <Animated.View style={spin}>
+          <AppSymbol
+            name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+            size={10}
+            tintColor={theme.textGhost}
+          />
+        </Animated.View>
+      </Item.Actions>
       <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
-    </AppPressable>
+    </Item>
   );
 }
 
@@ -199,10 +207,8 @@ function CopyButton({ label, text }: { label: string; text: string }) {
   }, [copied]);
 
   return (
-    <AppPressable
+    <Button
       accessibilityLabel={copied ? 'Copied' : label}
-      accessibilityRole="button"
-      hitSlop={10}
       onPress={() => {
         void Clipboard.setStringAsync(text)
           .then(async () => {
@@ -211,7 +217,9 @@ function CopyButton({ label, text }: { label: string; text: string }) {
           })
           .catch(() => {});
       }}
-      style={({ pressed }) => [styles.copyButton, { opacity: pressed ? 0.5 : 1 }]}>
+      size="xs"
+      variant="ghost"
+    >
       <AppSymbol
         name={copied
           ? { ios: 'checkmark', android: 'check', web: 'check' }
@@ -219,7 +227,7 @@ function CopyButton({ label, text }: { label: string; text: string }) {
         size={13}
         tintColor={copied ? theme.success : theme.textGhost}
       />
-    </AppPressable>
+    </Button>
   );
 }
 
@@ -238,43 +246,48 @@ function UserBubbleInner({ message }: { message: Message }) {
 
   return (
     <View style={styles.userFrame}>
-      <AppPressable
-        accessibilityHint="Long press to copy"
-        accessibilityLabel={message.display_content ?? message.content}
-        accessibilityRole="button"
-        delayLongPress={350}
-        onLongPress={() => {
-          void Clipboard.setStringAsync(message.content)
-            .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
-            .catch(() => {});
-        }}
-        style={[styles.userBubble, { backgroundColor: theme.raised }]}>
-        {content ? (
-          <Text selectable style={[styles.userText, { color: theme.text }]}>
-            {mentionSegments(content).map((segment, index) => (
-              segment.kind === 'mention' ? (
-                <Text
-                  key={index}
-                  style={{ color: theme.accent, fontWeight: '600' }}>
-                  {segment.value}
-                </Text>
-              ) : (
-                <Text key={index}>{segment.value}</Text>
-              )
-            ))}
-          </Text>
-        ) : null}
-        {message.attachments?.length ? (
-          <View style={styles.attachments}>
-            {message.attachments.map((attachment) => (
-              <AttachmentChip
-                attachment={attachment}
-                key={`${attachment.path}:${attachment.name}`}
-              />
-            ))}
-          </View>
-        ) : null}
-      </AppPressable>
+      <MessageBubble align="end">
+        <MessageBubble.Content>
+          <MessageBubble.Bubble>
+            <Pressable
+              accessibilityHint="Long press to copy"
+              accessibilityLabel={message.display_content ?? message.content}
+              delayLongPress={350}
+              onLongPress={() => {
+                void Clipboard.setStringAsync(message.content)
+                  .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
+                  .catch(() => {});
+              }}
+            >
+              {content ? (
+                <MessageBubble.BubbleContent selectable>
+                  {mentionSegments(content).map((segment, index) => (
+                    segment.kind === 'mention' ? (
+                      <Text
+                        key={index}
+                        style={{ color: theme.accent, fontWeight: '600' }}>
+                        {segment.value}
+                      </Text>
+                    ) : (
+                      <Text key={index}>{segment.value}</Text>
+                    )
+                  ))}
+                </MessageBubble.BubbleContent>
+              ) : null}
+            </Pressable>
+            {message.attachments?.length ? (
+              <View style={styles.attachments}>
+                {message.attachments.map((attachment) => (
+                  <AttachmentChip
+                    attachment={attachment}
+                    key={`${attachment.path}:${attachment.name}`}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </MessageBubble.Bubble>
+        </MessageBubble.Content>
+      </MessageBubble>
       {content.trim() ? (
         <View style={styles.userFooterRow}>
           <CopyButton label="Copy message" text={message.content} />
@@ -421,15 +434,9 @@ export function SessionEmpty({
         </Text>
       )}
       {Boolean(error) && onRetry && (
-        <AppPressable
-          accessibilityRole="button"
-          onPress={onRetry}
-          style={({ pressed }) => [
-            styles.emptyRetry,
-            { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
-          ]}>
-          <Text style={[styles.emptyRetryText, { color: theme.text }]}>Try again</Text>
-        </AppPressable>
+        <Button onPress={onRetry} size="sm" variant="outline">
+          Try again
+        </Button>
       )}
     </View>
   );
@@ -438,14 +445,6 @@ export function SessionEmpty({
 const styles = StyleSheet.create({
   earlier: { alignItems: 'center', paddingVertical: 10 },
   userFrame: { alignItems: 'flex-end' },
-  userBubble: {
-    borderRadius: Radius.large,
-    borderBottomRightRadius: 6,
-    maxWidth: '88%',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  userText: { fontSize: 16, lineHeight: 23 },
   messageFooterRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -464,13 +463,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     minHeight: 20,
   },
-  copyButton: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    height: 20,
-    justifyContent: 'center',
-    width: 24,
-  },
   systemFrame: { alignItems: 'center' },
   systemMessage: {
     borderRadius: Radius.pill,
@@ -482,14 +474,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   attachments: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 9 },
-  foldRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 9,
-    minHeight: 28,
-  },
   foldLine: { flex: 1, height: StyleSheet.hairlineWidth },
-  foldLabel: { flexShrink: 1, fontSize: 12, fontWeight: '500' },
   changedStats: { fontSize: 11.5, fontVariant: ['tabular-nums'], fontWeight: '600' },
   changedFiles: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -511,13 +496,4 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', paddingHorizontal: 32 },
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   emptyBody: { fontSize: 13.5, lineHeight: 19, marginTop: 8, textAlign: 'center' },
-  emptyRetry: {
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    justifyContent: 'center',
-    marginTop: 16,
-    minHeight: 44,
-    paddingHorizontal: 22,
-  },
-  emptyRetryText: { fontSize: 14, fontWeight: '600' },
 });
