@@ -22,10 +22,8 @@ import {
 } from 'react-native';
 import { ScrollViewMarker } from 'react-native-screens/experimental';
 
-import { AppPressable } from '@/components/app-pressable';
 
 import { AppSymbol } from '@/components/app-symbol';
-import { GlassSurface } from '@/components/glass-surface';
 import { useMarkdownStyles, VeilRegistry } from '@/components/md-block-row';
 import { RowAnchorProvider } from '@/components/transcript-anchor';
 import {
@@ -36,6 +34,7 @@ import {
 } from '@/components/transcript-rows';
 import { Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { Fab } from 'panelui-native/components/fab';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildTranscriptPipeline,
@@ -538,21 +537,30 @@ export function TranscriptList({
       <Animated.View
         pointerEvents={jump ? 'auto' : 'none'}
         style={[styles.jumpFrame, { opacity: jumpOpacity }]}>
-        <GlassSurface fallbackColor={theme.surface} interactive style={styles.jumpButton}>
-          <AppPressable
-            accessibilityHint={unseen ? 'New content arrived below' : undefined}
-            accessibilityLabel="Scroll to latest"
-            accessibilityRole="button"
-            onPress={() => scrollToLatest(true)}
-            style={({ pressed }) => [styles.jumpButtonInner, { opacity: pressed ? 0.6 : 1 }]}>
+        <Fab
+          accessibilityHint={unseen ? 'New content arrived below' : undefined}
+          accessibilityLabel="Scroll to latest"
+          glass
+          haptics
+          icon={
             <AppSymbol
               name={{ ios: 'arrow.down', android: 'arrow_downward', web: 'arrow_downward' }}
               size={15}
               tintColor={theme.textSecondary}
             />
-            {unseen && <View style={[styles.unseenDot, { backgroundColor: theme.accent, borderColor: theme.surface }]} />}
-          </AppPressable>
-        </GlassSurface>
+          }
+          onPress={() => scrollToLatest(true)}
+          size="sm"
+          variant="surface"
+        />
+        {unseen ? (
+          <View
+            style={[
+              styles.unseenDot,
+              { backgroundColor: theme.accent, borderColor: theme.surface },
+            ]}
+          />
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -659,12 +667,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 14,
   },
-  jumpButton: {
-    borderRadius: Radius.pill,
-    height: 40,
-    width: 40,
-  },
-  jumpButtonInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
   unseenDot: {
     borderRadius: 5,
     borderWidth: 1.5,

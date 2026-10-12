@@ -5,7 +5,13 @@ import * as Haptics from 'expo-haptics';
 import { Shimmer } from 'panelui-native/components/shimmer';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 import { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Easing, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { Collapsible } from 'panelui-native/components/collapsible';
 
 import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
@@ -136,24 +142,24 @@ function FoldRow({
 }) {
   const theme = useTheme();
   const keepTop = useRowAnchor();
-  // The chevron rotates on the compositor as the fold opens or closes, so the
-  // direction change reads as motion rather than a swap. Native driver only:
-  // transform, never layout.
+  // The chevron rotates on the UI thread as the fold opens or closes, so the
+  // direction change reads as motion rather than a swap. Transform only, never
+  // layout. Reanimated rather than core `Animated`: the two do not compose, and
+  // core `Animated` would put these frames back on the JS thread.
+  //
+  // Not a PanelUI `Collapsible`: that component animates the height of a body
+  // it owns, and this disclosure's body is the turn's rows, rendered by the
+  // transcript list above it. The trigger is all there is here.
   const reducedMotion = useReducedMotion();
-  const rotation = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  const rotation = useSharedValue(expanded ? 1 : 0);
   useEffect(() => {
-    if (reducedMotion) {
-      rotation.setValue(expanded ? 1 : 0);
-      return;
-    }
-    Animated.timing(rotation, {
-      duration: 140,
-      easing: Easing.out(Easing.ease),
-      toValue: expanded ? 1 : 0,
-      useNativeDriver: true,
-    }).start();
+    rotation.value = reducedMotion
+      ? expanded ? 1 : 0
+      : withTiming(expanded ? 1 : 0, { duration: 140, easing: Easing.out(Easing.ease) });
   }, [expanded, reducedMotion, rotation]);
-  const spin = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] });
+  const spin = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value * 90}deg` }],
+  }));
   return (
     <AppPressable
       accessibilityHint={expanded ? 'Collapses the agent’s work' : 'Shows the agent’s work'}
@@ -167,7 +173,7 @@ function FoldRow({
       <Text numberOfLines={1} style={[styles.foldLabel, { color: theme.textTertiary }]}>
         {label}
       </Text>
-      <Animated.View style={{ transform: [{ rotate: spin }] }}>
+      <Animated.View style={spin}>
         <AppSymbol
           name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
           size={10}
@@ -282,34 +288,29 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
   const keepTop = useRowAnchor();
   const [open, setOpen] = useState(false);
   return (
-    <View style={[styles.changedCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-      <AppPressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        onPress={() => keepTop(() => setOpen((value) => !value))}
-        style={({ pressed }) => [styles.changedHeader, { opacity: pressed ? 0.6 : 1 }]}>
+    <Collapsible
+      className="mb-1 rounded-lg border border-border"
+      onOpenChange={() => keepTop(() => setOpen((value) => !value))}
+      open={open}
+      variant="surface"
+    >
+      <Collapsible.Trigger accessibilityRole="button">
         <AppSymbol
           name={{ ios: 'plusminus', android: 'difference', web: 'difference' }}
           size={13}
           tintColor={theme.textSecondary}
         />
-        <Text style={[styles.changedTitle, { color: theme.textSecondary }]}>
+        <Collapsible.Title className="text-sm">
           {checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'} changed
-        </Text>
+        </Collapsible.Title>
         <Text style={styles.changedStats}>
           <Text style={{ color: theme.success }}>+{checkpoint.additions}</Text>
           <Text style={{ color: theme.textGhost }}> </Text>
           <Text style={{ color: theme.danger }}>−{checkpoint.deletions}</Text>
         </Text>
-        <AppSymbol
-          name={open
-            ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
-            : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
-          size={11}
-          tintColor={theme.textGhost}
-        />
-      </AppPressable>
-      {open && (
+        <Collapsible.Indicator />
+      </Collapsible.Trigger>
+      <Collapsible.Content>
         <View style={[styles.changedFiles, { borderTopColor: theme.border }]}>
           {checkpoint.files.map((file) => (
             <View key={file.path} style={styles.changedFileRow}>
@@ -324,8 +325,8 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
             </View>
           ))}
         </View>
-      )}
-    </View>
+      </Collapsible.Content>
+    </Collapsible>
   );
 }
 
@@ -488,19 +489,6 @@ const styles = StyleSheet.create({
   },
   foldLine: { flex: 1, height: StyleSheet.hairlineWidth },
   foldLabel: { flexShrink: 1, fontSize: 12, fontWeight: '500' },
-  changedCard: {
-    borderRadius: Radius.medium,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  changedHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    minHeight: 40,
-    paddingHorizontal: 11,
-  },
-  changedTitle: { flex: 1, fontSize: 12.5, fontWeight: '600' },
   changedStats: { fontSize: 11.5, fontVariant: ['tabular-nums'], fontWeight: '600' },
   changedFiles: {
     borderTopWidth: StyleSheet.hairlineWidth,
