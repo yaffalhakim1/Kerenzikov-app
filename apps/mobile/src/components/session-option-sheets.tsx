@@ -12,7 +12,7 @@ import { Item } from 'panelui-native/components/item';
 import { SearchBar } from 'panelui-native/components/search-bar';
 import { Typography } from 'panelui-native/components/typography';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -21,11 +21,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { AppPressable } from '@/components/app-pressable';
+
 import { AppSymbol } from './app-symbol';
 import { Blocks } from './blocks';
 import { ProviderIcon } from './provider-icon';
 import { Sheet } from './sheet';
 
+import { Radius, Spacing } from '@/constants/theme';
 import { useAllProviderModels, useProviderModels } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -52,11 +55,21 @@ export interface AgentPresetSelection {
 }
 
 /**
- * One option in a sheet, as a PanelUI `Item`: the library owns the press
- * animation, the button role and the disabled announcement, and `leading`
- * holds whatever mark the row is picked by.
+ * One option in a sheet.
  *
- * Selection is carried by the trailing check alone, not by a fill — a tinted
+ * `AppPressable`, not PanelUI `Item`, and that is deliberate. `Item` renders
+ * through `AnimatedPressable` — an `Animated.createAnimatedComponent(Pressable)`
+ * driven by a Reanimated style — and these rows live inside `@expo/ui`'s
+ * native sheet, whose content is hosted by a native `HostView`. Reanimated
+ * cannot update props on a view inside that host; it fails with
+ * `synchronouslyUpdateUIProps failed`, and the row never takes the press. Every
+ * picker in the app (model, reasoning effort, access, service tier, context
+ * window) stopped responding when these rows were moved onto `Item`.
+ *
+ * `Item` is fine everywhere else — it drives the transcript's rows and the
+ * activity list, neither of which is inside a native sheet.
+ *
+ * Selection is carried by the trailing check alone, not by a fill: a tinted
  * background reads as a hover remnant on a static picker, and the checkmark is
  * the stronger signal anyway.
  */
@@ -77,33 +90,38 @@ function OptionRow({
 }) {
   const theme = useTheme();
   return (
-    <Item
-      aria-selected={selected}
+    <AppPressable
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled }}
       disabled={disabled}
       onPress={onPress}
-      // A row is a wide target, and one that shrinks when pressed reads as a
-      // card rather than a line in a list. The dim is the whole feedback.
-      pressScale={1}
-      pressOpacity={0.6}
-      size="sm"
+      style={({ pressed }) => [
+        styles.optionRow,
+        {
+          backgroundColor: pressed ? theme.overlayStrong : 'transparent',
+          opacity: disabled ? 0.4 : 1,
+        },
+      ]}
     >
-      {leading ? <Item.Media>{leading}</Item.Media> : null}
-      <Item.Content>
-        <Item.Title numberOfLines={1}>{label}</Item.Title>
+      {leading ? <View style={styles.optionMedia}>{leading}</View> : null}
+      <View style={styles.optionCopy}>
+        <Text numberOfLines={1} style={[styles.optionLabel, { color: theme.text }]}>
+          {label}
+        </Text>
         {description ? (
-          <Item.Description numberOfLines={2}>{description}</Item.Description>
+          <Text numberOfLines={2} style={[styles.optionDescription, { color: theme.textTertiary }]}>
+            {description}
+          </Text>
         ) : null}
-      </Item.Content>
+      </View>
       {selected ? (
-        <Item.Actions>
-          <AppSymbol
-            name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-            size={15}
-            tintColor={theme.accent}
-          />
-        </Item.Actions>
+        <AppSymbol
+          name={{ ios: 'checkmark', android: 'check', web: 'check' }}
+          size={15}
+          tintColor={theme.accent}
+        />
       ) : null}
-    </Item>
+    </AppPressable>
   );
 }
 
@@ -773,6 +791,22 @@ export function ResumeSessionSheet({
 }
 
 const styles = StyleSheet.create({
+  // The picker row: a wide, quiet line. `Item`'s padding/radius are for
+  // card-shaped rows; these are full-width lines inside a sheet that already
+  // carries the horizontal padding.
+  optionRow: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 44,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 6,
+  },
+  optionMedia: { alignItems: 'center', justifyContent: 'center' },
+  optionCopy: { flex: 1, gap: 2, minWidth: 0 },
+  optionLabel: { fontSize: 15, fontWeight: '500' },
+  optionDescription: { fontSize: 12.5, lineHeight: 17 },
   pagerClip: { overflow: 'hidden' },
   pagerTrack: { flexDirection: 'row', width: '200%' },
   page: { paddingTop: 4, width: '50%' },

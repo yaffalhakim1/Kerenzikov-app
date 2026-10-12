@@ -37,6 +37,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppPressable } from "@/components/app-pressable";
 import { AppSymbol } from "@/components/app-symbol";
 import { DiffView } from "@/components/diff-view";
 import { liquidGlass } from "@/components/glass-surface";
@@ -409,32 +410,30 @@ function FilesSurface({ root }: { root: string | null }) {
           subtitle={selectedPath}
           surface="files"
         />
-        <Item
+        {/*
+          `AppPressable`, not PanelUI `Item`, because this row is inside the
+          native sheet: `Item` presses through `AnimatedPressable`, and
+          Reanimated cannot update props on a view inside `@expo/ui`'s native
+          host — the press never lands. Same reason the picker rows in
+          `session-option-sheets` are `AppPressable`.
+        */}
+        <AppPressable
           accessibilityHint="Returns to the workspace file list"
-          className="gap-1.5 rounded-none"
+          accessibilityRole="button"
           onPress={() => setSelectedPath(null)}
-          // Dim, don't shrink: a full-bleed list row scaling to 0.97 reads as a
-          // layout jump. Same pair PanelUI's own text-shaped rows use.
-          pressOpacity={0.6}
-          pressScale={1}
-          size="sm"
-          style={styles.backRow}
+          style={({ pressed }) => [styles.backRow, { opacity: pressed ? 0.6 : 1 }]}
         >
-          <Item.Media>
-            <AppSymbol
-              name={{
-                ios: "chevron.left",
-                android: "arrow_back",
-                web: "arrow_back",
-              }}
-              size={13}
-              tintColor={NativeTint}
-            />
-          </Item.Media>
-          <Item.Content>
-            <Item.Title style={styles.backLabel}>Files</Item.Title>
-          </Item.Content>
-        </Item>
+          <AppSymbol
+            name={{
+              ios: "chevron.left",
+              android: "arrow_back",
+              web: "arrow_back",
+            }}
+            size={13}
+            tintColor={NativeTint}
+          />
+          <Text style={styles.backLabel}>Files</Text>
+        </AppPressable>
         {file.isPending ? (
           <LoadingMessage />
         ) : file.error ? (
