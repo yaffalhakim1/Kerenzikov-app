@@ -1,18 +1,23 @@
 import type { AgentSession, MessageAttachment } from '@waku/client';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { AIInput } from 'panelui-native/components/ai-input';
 import { Alert } from 'panelui-native/components/alert';
 import { Button } from 'panelui-native/components/button';
 import { Item } from 'panelui-native/components/item';
-import { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Text as PanelText } from 'panelui-native/primitives/text';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from './app-symbol';
-import { AttachmentChip } from './attachment-chip';
+import { AttachmentChip, UploadRing } from './attachment-chip';
 import { ComposerAccessMenu } from './composer-access-menu';
 import { ComposerAttachmentMenu, type ComposerAttachmentSource } from './composer-attachment-menu';
 import { ComposerTextInput } from './composer-text-input';
 import { SendStopSlot } from './mobile-composer';
+import { QueuedMessageRow } from './queued-message-row';
 import { ProviderIcon } from './provider-icon';
 import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
 import { useDaemon } from '@/lib/daemon-context';
@@ -24,11 +29,18 @@ import {
   useProviderModels,
   useTaskState,
 } from '@/hooks/use-daemon-data';
-import { detectComposerTrigger, filterComposerCommands } from '@/lib/composer-commands';
+import {
+  detectComposerTrigger,
+  filterComposerCommands,
+  mergeComposerCommands,
+  resolvedComposerSubmission,
+} from '@/lib/composer-commands';
 import { modelHasConfigurableTraits } from '@/lib/model-traits';
+import { imagePickerFiles, importLocalAttachment, type LocalAttachmentFile } from '@/lib/attachments';
 import { confirmHaptic, tapHaptic } from '@/lib/haptics';
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
-import { sessionBusy } from '@/lib/mobile-runtime';
+import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
+import { isDaemonDisconnectError } from '@/lib/runtime-errors';
 import { useRuntime } from '@/lib/runtime-context';
 
 /**
@@ -72,16 +84,56 @@ export function ComposerV2({
   const [submitting, setSubmitting] = useState(false);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
   const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
+  const [editingQueued, setEditingQueued] = useState(false);
+  const [importingAttachments, setImportingAttachments] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<{ id: number; name: string }[]>([]);
+  const activeSessionId = useRef(session.id);
+  activeSessionId.current = session.id;
+  const mounted = useRef(true);
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
+  const attachmentImportTail = useRef<Promise<void>>(Promise.resolve());
+  const pendingAttachmentImports = useRef(0);
+  const pendingId = useRef(0);
 
   const busy = sessionBusy(session);
   const disconnected = daemon.phase !== 'connected';
+  const queued = session.queued_messages ?? [];
+  const liveRuntime = runtime.runtimes[session.id];
+  // Whether a queued follow-up can be delivered into the live turn right now,
+  // which decides if its Send now action is offered. Mirrors the desktop's
+  // `session_can_steer`: an active provider turn AND a driver that takes a
+  // mid-turn message.
+  const canSteer = sessionHasActiveProviderTurn(session) && Boolean(liveRuntime?.supportsSteer);
+  // The placeholder carries the state the toolbar cannot: a disconnected
+  // composer says why it will not send, and a busy one says a message will
+  // queue rather than interrupt.
+  const placeholder = disconnected
+    ? daemon.phase === 'reconnecting'
+      ? 'Reconnecting…'
+      : daemon.phase === 'connecting' || daemon.phase === 'booting'
+        ? 'Connecting…'
+        : 'Reconnect to message this agent'
+    : busy
+      ? 'Queue a follow-up…'
+      : 'Message agent';
+  const runtimeError = runtime.errors[session.id];
+  // A disconnect error is the connection banner's to report, not the
+  // composer's — showing both says the same thing twice.
+  const visibleError =
+    (disconnected && isDaemonDisconnectError(localError) ? null : localError)
+    || (disconnected && isDaemonDisconnectError(runtimeError) ? null : runtimeError);
 
   const taskState = useTaskState();
   const projectPath = taskState.data?.projects.find(
     (project) => project.id === session.project_id,
   )?.path;
   const commandsQuery = useComposerCommands(session.provider, projectPath);
-  const commands = commandsQuery.data ?? [];
+  const commands = useMemo(
+    () => mergeComposerCommands(commandsQuery.data ?? [], session.available_commands ?? []),
+    [commandsQuery.data, session.available_commands],
+  );
   const trigger = detectComposerTrigger(draft, draft.length);
   const suggestions = trigger?.kind === 'command'
     ? filterComposerCommands(commands, trigger.query)
@@ -107,16 +159,22 @@ export function ComposerV2({
 
   async function submit() {
     const typed = draft.trim();
-    if (!typed || submitting) return;
+    // Template and skill commands have to become provider syntax here — the
+    // daemon sends the prompt through verbatim.
+    const prompt = resolvedComposerSubmission(session.provider, typed, commands) ?? typed;
+    if ((!prompt && attachments.length === 0) || submitting || pendingAttachmentImports.current > 0) {
+      return;
+    }
     setSubmitting(true);
     setLocalError(null);
     onSubmitted?.();
     confirmHaptic();
     try {
-      await runtime.sendPrompt(session, typed, attachments);
+      await runtime.sendPrompt(session, prompt, attachments);
       draftSync.removeSubmittedDraft();
       setDraft('');
       setAttachments([]);
+      setEditingQueued(false);
       tapHaptic();
     } catch (cause) {
       setLocalError(cause instanceof Error ? cause.message : String(cause));
@@ -131,9 +189,88 @@ export function ComposerV2({
     });
   }
 
-  function chooseAttachment(source: ComposerAttachmentSource) {
-    tapHaptic();
-    setLocalError(`Attachments are not wired in this composer yet (${source}).`);
+  async function addLocalFiles(files: LocalAttachmentFile[]) {
+    if (!files.length) return;
+    const targetSessionId = session.id;
+    pendingAttachmentImports.current += 1;
+    setImportingAttachments(true);
+    setLocalError(null);
+    const staged = files.map((file) => ({ id: ++pendingId.current, name: file.name }));
+    setPendingFiles((current) => [...current, ...staged]);
+    // Imports run one at a time behind a tail promise, so a multi-file pick
+    // lands in the order it was chosen rather than whichever upload finishes
+    // first.
+    const operation = attachmentImportTail.current.catch(() => {}).then(async () => {
+      const client = daemon.client;
+      if (!client || daemon.phase !== 'connected') {
+        throw new Error('Kerenzikov daemon is disconnected');
+      }
+      for (let index = 0; index < files.length; index += 1) {
+        const imported = await importLocalAttachment(client, files[index]!);
+        if (mounted.current && activeSessionId.current === targetSessionId) {
+          draftSync.markEdited();
+          setAttachments((current) => [...current, imported]);
+          const id = staged[index]!.id;
+          setPendingFiles((current) => current.filter((item) => item.id !== id));
+        }
+      }
+    });
+    attachmentImportTail.current = operation;
+    try {
+      await operation;
+      tapHaptic();
+    } finally {
+      pendingAttachmentImports.current -= 1;
+      if (mounted.current && pendingAttachmentImports.current === 0) {
+        setImportingAttachments(false);
+      }
+    }
+  }
+
+  async function chooseAttachment(source: ComposerAttachmentSource) {
+    try {
+      if (source === 'files') {
+        const result = await DocumentPicker.getDocumentAsync({
+          copyToCacheDirectory: true,
+          multiple: true,
+          type: '*/*',
+        });
+        if (!result.canceled) {
+          await addLocalFiles(result.assets.map((asset) => ({
+            uri: asset.uri,
+            name: asset.name,
+            mimeType: asset.mimeType,
+            size: asset.size,
+            base64: asset.base64,
+          })));
+        }
+        return;
+      }
+
+      if (source === 'camera') {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          throw new Error('Camera access is required to take a photo');
+        }
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+        });
+        if (!result.canceled) await addLocalFiles(imagePickerFiles(result.assets, 'Photo'));
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsMultipleSelection: true,
+        mediaTypes: ['images'],
+        quality: 1,
+        selectionLimit: 0,
+      });
+      if (!result.canceled) await addLocalFiles(imagePickerFiles(result.assets, 'Photo'));
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : String(cause));
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    }
   }
 
   return (
@@ -145,6 +282,74 @@ export function ComposerV2({
         { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 },
       ]}
     >
+    {visibleError ? (
+      <Alert className="mb-1.5 items-center gap-1.5 px-2.5 py-1.5" variant="destructive">
+        <Alert.Content>
+          <Alert.Title className="text-destructive">{visibleError}</Alert.Title>
+        </Alert.Content>
+        <Button
+          accessibilityLabel="Dismiss error"
+          className="min-h-0 min-w-0 self-center px-0.5 py-0"
+          onPress={() => {
+            setLocalError(null);
+            runtime.dismissError(session.id);
+          }}
+          size="xs"
+          variant="ghost"
+        >
+          <AppSymbol
+            name={{ ios: 'xmark', android: 'close', web: 'close' }}
+            size={12}
+            tintColor={theme.danger}
+          />
+        </Button>
+      </Alert>
+    ) : null}
+
+    {queued.map((message) => (
+      <QueuedMessageRow
+        canSteer={canSteer}
+        key={message.id}
+        message={message}
+        onEdit={() => {
+          // Pop the message back into the composer to be reworked, dropping it
+          // from the queue in the same step — matching the desktop's Edit.
+          runtime.removeQueuedMessage(session.id, message.id).catch(() => {});
+          draftSync.markEdited();
+          setDraft(message.display_content ?? message.content);
+          setAttachments(message.attachments ?? []);
+          setEditingQueued(true);
+        }}
+        onRemove={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
+        onSendNow={() => void runtime.steerQueuedMessage(session.id, message.id).catch(() => {})}
+      />
+    ))}
+
+    {editingQueued ? (
+      <View
+        className="mb-1.5 flex-row items-center justify-between rounded-md border px-2.5 py-1.5"
+        style={{ backgroundColor: theme.overlay, borderColor: theme.border }}
+      >
+        <Text className="text-xs" style={{ color: theme.textSecondary }}>
+          Editing queued message
+        </Text>
+        <Button
+          accessibilityLabel="Cancel editing queued message"
+          className="min-h-0 px-1 py-0"
+          onPress={() => {
+            setEditingQueued(false);
+            draftSync.markEdited();
+            setDraft('');
+            setAttachments([]);
+          }}
+          size="xs"
+          variant="ghost"
+        >
+          <PanelText className="text-[12.5px] font-semibold text-primary">Cancel</PanelText>
+        </Button>
+      </View>
+    ) : null}
+
     <AIInput
       avoidKeyboard={false}
       // `AIInput`'s root carries `shadow-md` so the card reads as lifted off a
@@ -156,31 +361,42 @@ export function ComposerV2({
       status={busy ? 'streaming' : 'ready'}
       value={draft}
     >
-      {localError ? (
-        <Alert className="mb-1.5 items-center gap-1.5 px-2.5 py-1.5" variant="destructive">
-          <Alert.Content>
-            <Alert.Title className="text-destructive">{localError}</Alert.Title>
-          </Alert.Content>
-          <Button
-            accessibilityLabel="Dismiss error"
-            onPress={() => setLocalError(null)}
-            size="xs"
-            variant="ghost"
-          >
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
-              size={13}
-              tintColor={theme.textSecondary}
-            />
-          </Button>
-        </Alert>
-      ) : null}
-
-      {attachments.length > 0 ? (
+      {attachments.length > 0 || pendingFiles.length > 0 ? (
         <View className="flex-row flex-wrap gap-2 px-1 pb-1">
           {attachments.map((attachment, index) => (
-            <View key={`${index}`}>
+            <View className="relative" key={`${attachment.path}:${index}`}>
               <AttachmentChip attachment={attachment} />
+              <Button
+                accessibilityLabel={`Remove ${attachment.name}`}
+                className="absolute -right-1 -top-1 h-5 w-5 min-h-0 min-w-0 rounded-full bg-muted px-0 py-0"
+                disabled={submitting}
+                onPress={() => {
+                  draftSync.markEdited();
+                  setAttachments((current) => current.filter((_, item) => item !== index));
+                }}
+                size="xs"
+                variant="ghost"
+              >
+                <AppSymbol
+                  name={{ ios: 'xmark', android: 'close', web: 'close' }}
+                  size={11}
+                  tintColor={theme.textSecondary}
+                />
+              </Button>
+            </View>
+          ))}
+          {/* One tile per file still in flight, so a multi-file pick shows what
+              is left rather than a single opaque "Attaching…". */}
+          {pendingFiles.map((file) => (
+            <View
+              className="flex-row items-center gap-2 rounded-md px-2.5 py-1.5"
+              key={file.id}
+              style={{ backgroundColor: theme.overlayStrong }}
+            >
+              <UploadRing size={14} />
+              <Text className="text-xs" numberOfLines={1} style={{ color: theme.textSecondary }}>
+                {file.name}
+              </Text>
             </View>
           ))}
         </View>
@@ -243,9 +459,12 @@ export function ComposerV2({
 
       <ComposerTextInput
         editable={!disconnected && !submitting}
+        // The app's own composer opens at a 64pt floor; `AIInput.Field`'s
+        // one-row default is shorter than the surface it replaces.
+        style={styles.field}
         multiline
         onChangeText={setDraft}
-        placeholder="Message the agent"
+        placeholder={placeholder}
         placeholderTextColor={theme.textTertiary}
         value={draft}
       />
@@ -293,7 +512,7 @@ export function ComposerV2({
           busy={busy}
           canSubmit={draft.trim().length > 0 || attachments.length > 0}
           disconnected={disconnected}
-          importingAttachments={false}
+          importingAttachments={importingAttachments}
           onSend={submit}
           onStop={() => void runtime.cancel(session.id)}
           queueing={busy}
@@ -331,4 +550,5 @@ export function ComposerV2({
 const styles = StyleSheet.create({
   // The same shell the app's own composer uses, so the two sit identically.
   shell: { paddingHorizontal: 12, paddingTop: 4 },
+  field: { fontSize: 16, lineHeight: 22, minHeight: 64, paddingHorizontal: 6, paddingVertical: 12 },
 });
