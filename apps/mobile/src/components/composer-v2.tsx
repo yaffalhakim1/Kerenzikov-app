@@ -4,13 +4,15 @@ import { Alert } from 'panelui-native/components/alert';
 import { Button } from 'panelui-native/components/button';
 import { Item } from 'panelui-native/components/item';
 import { useState } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppSymbol } from './app-symbol';
-import { AttachmentChip, UploadRing } from './attachment-chip';
+import { AttachmentChip } from './attachment-chip';
 import { ComposerAccessMenu } from './composer-access-menu';
 import { ComposerAttachmentMenu, type ComposerAttachmentSource } from './composer-attachment-menu';
 import { ComposerTextInput } from './composer-text-input';
+import { SendStopSlot } from './mobile-composer';
 import { useDaemon } from '@/lib/daemon-context';
 import { useTheme } from '@/hooks/use-theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
@@ -22,6 +24,7 @@ import {
 } from '@/hooks/use-daemon-data';
 import { detectComposerTrigger, filterComposerCommands } from '@/lib/composer-commands';
 import { confirmHaptic, tapHaptic } from '@/lib/haptics';
+import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { sessionBusy } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 
@@ -53,6 +56,13 @@ export function ComposerV2({
   const theme = useTheme();
   const runtime = useRuntime();
   const daemon = useDaemon();
+  const insets = useSafeAreaInsets();
+  // The app tracks the software keyboard itself rather than letting `AIInput`
+  // do it: edge-to-edge Android delivers the keyboard as a WindowInset, and
+  // `AIInput`'s own path switches the app out of `adjustResize` to measure it.
+  // This is the same offset `MobileComposer` uses, so both composers sit the
+  // same distance off the keys.
+  const keyboardHeight = useKeyboardHeight();
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -111,8 +121,16 @@ export function ComposerV2({
   }
 
   return (
+    <View
+      style={[
+        styles.shell,
+        // The composer's own floor, plus the keyboard while it is up, plus a
+        // gap — resting directly on the keys reads as part of them.
+        { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 },
+      ]}
+    >
     <AIInput
-      onStop={() => void runtime.cancel(session.id)}
+      avoidKeyboard={false}
       onSubmit={submit}
       onValueChange={setDraft}
       status={busy ? 'streaming' : 'ready'}
@@ -221,9 +239,29 @@ export function ComposerV2({
           }}
         />
         <AIInput.Spacer />
-        {submitting ? <UploadRing size={16} /> : null}
-        <AIInput.Submit />
+        {/*
+          Not `AIInput.Submit`: it offers voice when the field is empty, and
+          this app has no voice — the mic was a button that did nothing. It
+          also has no queue state, and this app queues a message while the
+          agent works. The app's own slot is send/stop/queue with no voice.
+        */}
+        <SendStopSlot
+          busy={busy}
+          canSubmit={draft.trim().length > 0 || attachments.length > 0}
+          disconnected={disconnected}
+          importingAttachments={false}
+          onSend={submit}
+          onStop={() => void runtime.cancel(session.id)}
+          queueing={busy}
+          submitting={submitting}
+        />
       </AIInput.Toolbar>
     </AIInput>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  // The same shell the app's own composer uses, so the two sit identically.
+  shell: { paddingHorizontal: 12, paddingTop: 4 },
+});
