@@ -18,7 +18,6 @@ import {
   View,
 } from 'react-native';
 
-import { ActivitySheetHost } from '@/components/activity-sheet';
 import { ConnectionBanner } from '@/components/connection-banner';
 import { ContextGaugeButton } from '@/components/context-gauge';
 import { BackgroundWorkBar, ComputerUseChip, TodoStrip } from '@/components/harness-surfaces';
@@ -498,16 +497,14 @@ export function SessionView({
       <Stack.Screen options={headerOptions} />
       <View style={styles.body}>
         {session && transcriptMounted ? (
-          <ActivitySheetHost key={`activity-sheet:${session.id}`} session={session}>
-            <TranscriptList
-              headerInset={headerInset}
-              hydrated={!query.isPlaceholderData}
-              ref={listRef}
-              running={running}
-              session={session}
-              onDevSample={devPrompt ? probe.sample : undefined}
-            />
-          </ActivitySheetHost>
+          <TranscriptList
+            headerInset={headerInset}
+            hydrated={!query.isPlaceholderData}
+            ref={listRef}
+            running={running}
+            session={session}
+            onDevSample={devPrompt ? probe.sample : undefined}
+          />
         ) : session ? (
           // The session is in hand and the transcript is a frame or two behind
           // it by design (see the mount effect above). Rendering an empty body

@@ -116,7 +116,7 @@ export const TranscriptRowView = memo(function TranscriptRowView({
         </>
       );
     case 'activities':
-      return <ActivityGroup block={row.block} blockIndex={row.blockIndex} live={row.live} />;
+      return <ActivityGroup block={row.block} live={row.live} />;
     case 'fold':
       return (
         <FoldRow
