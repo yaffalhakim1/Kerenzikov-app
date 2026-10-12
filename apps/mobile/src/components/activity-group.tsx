@@ -1,12 +1,11 @@
 import type { TranscriptBlock } from '@waku/client';
 import { activitiesForBlock } from '@waku/client/event-reducer';
 import { activityHeaderTitle } from '@waku/client/transcript-presentation';
+import { Item } from 'panelui-native/components/item';
 import { memo } from 'react';
-import { StyleSheet, Text } from 'react-native';
 
 import { useActivitySheet } from './activity-sheet';
 import { AppSymbol } from './app-symbol';
-import { AppPressable } from '@/components/app-pressable';
 
 import { useTheme } from '@/hooks/use-theme';
 
@@ -32,34 +31,38 @@ export const ActivityGroup = memo(function ActivityGroup({
   const activities = activitiesForBlock(block);
   if (!activities.length) return null;
   return (
-    <AppPressable
+    // `min-h-7 gap-1.5 p-0` is the row's own metrics, not a restyle: 28dp tall
+    // with a 6dp gap, exactly the desktop trigger's `h-7 gap-1.5`. The item's
+    // padding and radius exist for card-shaped rows, and a transcript line is
+    // full-bleed inside a list that already carries the horizontal padding.
+    // `pressOpacity` + `pressScale={1}` is the same dim-don't-shrink pair
+    // PanelUI's own text-shaped rows use: a full-bleed line scaling to 0.97
+    // reads as a layout jump.
+    <Item
       accessibilityHint="Opens the activity list"
-      accessibilityRole="button"
+      className="min-h-7 gap-1.5 p-0"
       hitSlop={{ top: 6, bottom: 6 }}
+      pressOpacity={0.6}
+      pressScale={1}
       onPress={() => openSheet({
         blockIndex,
         turnId: block.turn_id,
         afterMessage: block.after_message,
-      })}
-      style={({ pressed }) => [styles.header, { opacity: pressed ? 0.6 : 1 }]}>
-      <Text numberOfLines={1} style={[styles.title, { color: theme.textSecondary }]}>
-        {activityHeaderTitle(activities, live)}
-      </Text>
-      <AppSymbol
-        name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-        size={10}
-        tintColor={theme.textGhost}
-      />
-    </AppPressable>
+      })}>
+      <Item.Content>
+        <Item.Title
+          className="text-[13px] text-secondary-foreground"
+          numberOfLines={1}>
+          {activityHeaderTitle(activities, live)}
+        </Item.Title>
+      </Item.Content>
+      <Item.Actions>
+        <AppSymbol
+          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+          size={10}
+          tintColor={theme.textGhost}
+        />
+      </Item.Actions>
+    </Item>
   );
-});
-
-const styles = StyleSheet.create({
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 28,
-  },
-  title: { flexShrink: 1, fontSize: 13, fontWeight: '500' },
 });

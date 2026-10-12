@@ -1,19 +1,34 @@
 import type { AgentSession } from '@waku/client';
+import { Meter } from 'panelui-native/components/meter';
+import type { MeterThreshold } from 'panelui-native/components/meter';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 import { AppPressable } from './app-pressable';
 import { Sheet } from './sheet';
-import { Radius } from '@/constants/theme';
+import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { contextUsagePercent } from '@/lib/session-presentation';
 import { formatTokens } from '@/lib/usage-presentation';
 
+/** Where "nearly full" starts, and where "full" does. One pair for the whole
+ *  file: the header ring and the sheet's meter are the same reading, and two
+ *  breakpoints would let them disagree about what almost-full looks like. */
+const WARNING_AT = 80;
+const DANGER_AT = 95;
+
+/** PanelUI `Meter`'s colour judgement, in the app's own palette — the tokens
+ *  it resolves to are the ones `gaugeColor` returns below. */
+const FULL_THRESHOLDS: MeterThreshold[] = [
+  { from: WARNING_AT, color: 'warning' },
+  { from: DANGER_AT, color: 'destructive' },
+];
+
 /** Ring colour by how close the window is to full. */
-function gaugeColor(percent: number, theme: ReturnType<typeof useTheme>) {
-  if (percent >= 95) return theme.danger;
-  if (percent >= 80) return theme.warning;
+function gaugeColor(percent: number, theme: Theme) {
+  if (percent >= DANGER_AT) return theme.danger;
+  if (percent >= WARNING_AT) return theme.warning;
   return theme.accent;
 }
 
@@ -24,6 +39,11 @@ function gaugeColor(percent: number, theme: ReturnType<typeof useTheme>) {
  * A full ring is a full window. The track is always drawn, so an empty (or
  * unstarted) session still shows the ring's shape rather than nothing, which is
  * what makes the meter recognisable before it has anything to report.
+ *
+ * PanelUI has no ring glyph — its ring, `RingChart`, is a chart with its own
+ * pressable arc, centre readout and legend, and hosting one here would put a
+ * second pressable over the whole header target. The ring therefore stays
+ * drawn by hand; everything else in this file's detail view is PanelUI's.
  */
 function ContextGauge({ percent, size = 18 }: { percent: number; size?: number }) {
   const theme = useTheme();
@@ -93,7 +113,6 @@ export function ContextGaugeButton({
   const value = window !== null && percent !== null
     ? `${formatTokens(Math.min(tokens, window))} / ${formatTokens(window)} (${percent}%)`
     : formatTokens(tokens);
-  const fill = gaugeColor(percent ?? 0, theme);
 
   return (
     <>
@@ -111,12 +130,16 @@ export function ContextGaugeButton({
           <Text style={[styles.detailLabel, { color: theme.text }]}>Context window</Text>
           <Text style={[styles.detailValue, { color: theme.textSecondary }]}>{value}</Text>
         </View>
-        <View style={[styles.detailTrack, { backgroundColor: theme.overlayStrong }]}>
-          <View
-            style={[
-              styles.detailFill,
-              { backgroundColor: fill, width: `${percent ?? 0}%` },
-            ]}
+        {/* The bar is PanelUI's meter, so the track, the fill and the colour
+            judgement all come from the library rather than from here. The
+            visible caption is the row above, hence the accessibility label
+            instead of `label` — which would draw a second one. */}
+        <View style={styles.detailMeter}>
+          <Meter
+            accessibilityLabel="Context window used"
+            size="sm"
+            thresholds={FULL_THRESHOLDS}
+            value={percent ?? 0}
           />
         </View>
         <Text style={[styles.detailHint, { color: theme.textTertiary }]}>
@@ -139,14 +162,9 @@ const styles = StyleSheet.create({
   },
   detailLabel: { fontSize: 15, fontWeight: '500' },
   detailValue: { flexShrink: 1, fontSize: 13, fontVariant: ['tabular-nums'] },
-  detailTrack: {
-    borderRadius: Radius.pill,
-    height: 6,
-    marginHorizontal: 20,
-    marginTop: 10,
-    overflow: 'hidden',
-  },
-  detailFill: { borderRadius: Radius.pill, height: 6 },
+  // The meter spans its container, so the inset is the wrapper's — a width of
+  // its own plus margins would push it past the sheet's edge.
+  detailMeter: { marginHorizontal: 20, marginTop: 10 },
   detailHint: {
     fontSize: 12.5,
     lineHeight: 18,

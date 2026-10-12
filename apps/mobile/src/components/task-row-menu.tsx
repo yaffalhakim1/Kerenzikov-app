@@ -1,7 +1,9 @@
 import { useRef } from 'react';
 import { MenuView, type MenuAction, type MenuComponentRef } from '@expo/ui/community/menu';
 
-import { AppPressable } from '@/components/app-pressable';
+import { AnimatedPressable } from 'panelui-native/primitives/animated-pressable';
+
+import { StateLayer } from '@/constants/theme';
 import { longPressHaptic } from '@/lib/haptics';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -58,18 +60,34 @@ export function TaskRowMenu({
       // and a long press just ran the inner onPress (opening the task).
       shouldOpenOnLongPress
       style={style}>
-      <AppPressable
+      {/*
+        PanelUI's own pressable primitive, so the row's touch handling and the
+        scale/opacity feedback run on the UI thread rather than through a
+        JavaScript-driven press. `pressScale={1}` because this is a full-width
+        row: PanelUI's rule is that a wide target which shrinks reads as a card
+        rather than as a press, and the row already draws its own pressed state
+        through `renderTrigger`. The Material ripple is kept explicitly — it is
+        the one piece of Android press feedback PanelUI has no equivalent for,
+        and the row's list would otherwise be the only one in the app without
+        it.
+      */}
+      <AnimatedPressable
         accessibilityHint="Long press for actions"
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
+        android_ripple={{
+          color: scheme === 'dark' ? StateLayer.dark : StateLayer.light,
+        }}
+        hitSlop={8}
         onLongPress={() => {
           longPressHaptic();
           menu.current?.show();
         }}
-        onPress={onSelect}>
+        onPress={onSelect}
+        pressScale={1}>
         {({ pressed }) => renderTrigger(pressed)}
-      </AppPressable>
+      </AnimatedPressable>
     </MenuView>
   );
 }

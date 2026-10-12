@@ -1,13 +1,14 @@
 import type { MessageAttachment } from '@waku/client';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Image, Modal, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
+import { Chip } from 'panelui-native/components/chip';
+import { Spinner } from 'panelui-native/components/spinner';
+import { Text } from 'panelui-native/primitives/text';
+import { useEffect, useState } from 'react';
+import { Image, Modal, StyleSheet, View } from 'react-native';
 
 import { AppSymbol } from './app-symbol';
 import { AppPressable } from '@/components/app-pressable';
 
 import { Radius } from '@/constants/theme';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { isPreviewableImage, readAttachmentImage } from '@/lib/attachments';
 import { useDaemon } from '@/lib/daemon-context';
@@ -18,63 +19,26 @@ const TILE = 76;
  * The upload indicator on a file still being handed to the daemon.
  *
  * The wire protocol stores an attachment in one request and reports no byte
- * progress, so this is deliberately indeterminate — a rotating arc, not a
- * fabricated percentage. It spins on the compositor (`useNativeDriver`), so a
- * staging screen full of them costs nothing on the JS thread.
+ * progress, so this is deliberately indeterminate — a turning ring, not a
+ * fabricated percentage. PanelUI's `Spinner` is that ring: it animates on the
+ * UI thread, and under the platform's reduce-motion setting it pulses in place
+ * rather than holding still, which is the one thing a stalled-looking spinner
+ * must not do.
+ *
+ * `size` survives from the hand-rolled arc so call sites keep their density;
+ * it lands on the nearest step of the spinner's own scale.
  */
 export function UploadRing({ size = 18 }: { size?: number }) {
-  const theme = useTheme();
-  const reducedMotion = useReducedMotion();
-  const spin = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    if (reducedMotion) return;
-    const loop = Animated.loop(
-      Animated.timing(spin, {
-        duration: 900,
-        easing: Easing.linear,
-        toValue: 1,
-        useNativeDriver: true,
-      }),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [reducedMotion, spin]);
-
-  const strokeWidth = 2;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const center = size / 2;
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   return (
-    <Animated.View
-      accessibilityLabel="Uploading"
-      style={{ height: size, transform: [{ rotate }], width: size }}>
-      <Svg height={size} width={size}>
-        <Circle
-          cx={center}
-          cy={center}
-          fill="none"
-          r={radius}
-          stroke={theme.overlayStrong}
-          strokeWidth={strokeWidth}
-        />
-        <Circle
-          cx={center}
-          cy={center}
-          fill="none"
-          r={radius}
-          stroke={theme.accent}
-          strokeDasharray={`${circumference * 0.28} ${circumference}`}
-          strokeLinecap="round"
-          strokeWidth={strokeWidth}
-        />
-      </Svg>
-    </Animated.View>
+    <Spinner
+      className={size <= 16 ? 'h-3.5 w-3.5' : 'h-4 w-4'}
+      label="Uploading"
+    />
   );
 }
 
 /** One attachment in a message: an inline preview when it is an image the
- * daemon can hand back, otherwise the same name chip as before. */
+ * daemon can hand back, otherwise a PanelUI chip carrying the name. */
 export function AttachmentChip({ attachment }: { attachment: MessageAttachment }) {
   const theme = useTheme();
   const daemon = useDaemon();
@@ -152,34 +116,31 @@ export function AttachmentChip({ attachment }: { attachment: MessageAttachment }
   }
 
   return (
-    <View style={[styles.chip, { backgroundColor: theme.overlayStrong }]}>
-      <AppSymbol
-        name={{
-          ios: is_image ? 'photo' : 'doc',
-          android: is_image ? 'image' : 'description',
-          web: 'description',
-        }}
-        size={12}
-        tintColor={theme.textSecondary}
-      />
-      <Text numberOfLines={1} style={[styles.chipText, { color: theme.textSecondary }]}>
+    <Chip
+      className="max-w-44"
+      size="sm"
+      start={
+        <AppSymbol
+          name={{
+            ios: is_image ? 'photo' : 'doc',
+            android: is_image ? 'image' : 'description',
+            web: 'description',
+          }}
+          size={12}
+          tintColor={theme.textSecondary}
+        />
+      }>
+      {/* An element rather than a bare string: the chip's own label cannot be
+          told to stay on one line, and an attachment name is the one thing
+          here that can outrun the pill. */}
+      <Text className="shrink text-secondary-foreground" numberOfLines={1}>
         {attachment.name}
       </Text>
-    </View>
+    </Chip>
   );
 }
 
 const styles = StyleSheet.create({
-  chip: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    flexDirection: 'row',
-    gap: 5,
-    maxWidth: 180,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-  },
-  chipText: { flexShrink: 1, fontSize: 12 },
   tile: { borderRadius: Radius.small, height: TILE, overflow: 'hidden', width: TILE },
   image: { height: TILE, width: TILE },
   viewer: { alignItems: 'center', flex: 1, justifyContent: 'center' },

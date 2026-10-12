@@ -27,12 +27,60 @@
   --color-secondary-foreground: #4f4f4f;
   --color-accent: hsla(220, 10%, 12%, 0.05);
   --color-accent-foreground: #242424;
+  /*
+   * Each status hue is three tokens, not one, and they are not
+   * interchangeable: `{hue}` is the accent itself, `{hue}-foreground` is the
+   * text drawn on a *soft* tint of it (so a darker step, to stay legible), and
+   * `{hue}-solid-foreground` is the text on a *solid* fill of it (so the
+   * page colour). Putting the solid value in the foreground slot paints white
+   * on a pale red — Alert's destructive title — and reads as a blank row.
+   */
   --color-destructive: #c64a42;
-  --color-destructive-foreground: #ffffff;
+  --color-destructive-foreground: #9e322c;
+  --color-destructive-solid-foreground: #ffffff;
   --color-success: #2f8f52;
+  --color-success-foreground: #1f6b3c;
+  --color-success-solid-foreground: #ffffff;
   --color-warning: #a66b20;
+  --color-warning-foreground: #7a4d16;
+  --color-warning-solid-foreground: #ffffff;
   --color-info: #007a45;
+  --color-info-foreground: #005c34;
+  --color-info-solid-foreground: #ffffff;
   --color-ring: #007a45;
+
+  /*
+   * The soft/subtle pair is what a status is painted *on* — an Alert's or a
+   * Badge's background. Left unmapped they fall back to PanelUI's own hues,
+   * so a red alert would sit on PanelUI's red rather than the house one and
+   * the two would disagree at the edge. They mirror theme.ts's `*Soft`.
+   */
+  --color-destructive-soft: hsla(4, 55%, 52%, 0.10);
+  --color-destructive-subtle: hsla(4, 55%, 52%, 0.16);
+  --color-success-soft: rgba(47, 143, 82, 0.12);
+  --color-success-subtle: rgba(47, 143, 82, 0.18);
+  --color-warning-soft: rgba(166, 107, 32, 0.12);
+  --color-warning-subtle: rgba(166, 107, 32, 0.18);
+  --color-info-soft: rgba(0, 122, 69, 0.12);
+  --color-info-subtle: rgba(0, 122, 69, 0.18);
+
+  /*
+   * Surfaces. PanelUI's own values are neutral greys; these are the house's
+   * (theme.ts `surface`/`inset`/`overlay`), so a popover, menu or code surface
+   * matches the rest of the app instead of a second palette.
+   */
+  --color-popover: #ffffff;
+  --color-popover-foreground: #242424;
+  --color-card-foreground: #242424;
+  --color-overlay: #ffffff;
+  --color-overlay-foreground: #242424;
+  --color-surface: #ffffff;
+  --color-surface-secondary: #ececec;
+  --color-surface-tertiary: #e6e6e6;
+  --color-inset: #e6e6e6;
+  --color-input: hsla(220, 10%, 12%, 0.08);
+  --color-skeleton: hsla(220, 10%, 12%, 0.06);
+  --color-code-keyword: #007a45;
 }
 
 @variant dark {
@@ -48,10 +96,41 @@
   --color-secondary-foreground: #a3a3a3;
   --color-accent: hsla(220, 10%, 90%, 0.05);
   --color-accent-foreground: #e2e2e2;
+  /* Dark inverts the foreground step: on a soft tint the text has to be
+     lighter than the hue, and on a solid fill it is the page colour. */
   --color-destructive: #e2726a;
-  --color-destructive-foreground: #17181c;
+  --color-destructive-foreground: #f0a29c;
+  --color-destructive-solid-foreground: #17181c;
   --color-success: #62c987;
+  --color-success-foreground: #8fdcaa;
+  --color-success-solid-foreground: #17181c;
   --color-warning: #e0b36a;
+  --color-warning-foreground: #eecf9b;
+  --color-warning-solid-foreground: #17181c;
   --color-info: #26e085;
+  --color-info-foreground: #6ce9ab;
+  --color-info-solid-foreground: #17181c;
   --color-ring: #26e085;
+
+  --color-destructive-soft: hsla(4, 55%, 63%, 0.10);
+  --color-destructive-subtle: hsla(4, 55%, 63%, 0.16);
+  --color-success-soft: rgba(98, 201, 135, 0.14);
+  --color-success-subtle: rgba(98, 201, 135, 0.20);
+  --color-warning-soft: rgba(224, 179, 106, 0.14);
+  --color-warning-subtle: rgba(224, 179, 106, 0.20);
+  --color-info-soft: rgba(38, 224, 133, 0.15);
+  --color-info-subtle: rgba(38, 224, 133, 0.21);
+
+  --color-popover: #232323;
+  --color-popover-foreground: #e2e2e2;
+  --color-card-foreground: #e2e2e2;
+  --color-overlay: #232323;
+  --color-overlay-foreground: #e2e2e2;
+  --color-surface: #232323;
+  --color-surface-secondary: #2a2a2a;
+  --color-surface-tertiary: #303030;
+  --color-inset: #151515;
+  --color-input: hsla(220, 10%, 90%, 0.07);
+  --color-skeleton: hsla(220, 10%, 90%, 0.07);
+  --color-code-keyword: #26e085;
 }
