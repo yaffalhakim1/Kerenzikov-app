@@ -5,8 +5,9 @@ import * as Haptics from 'expo-haptics';
 import { Shimmer } from 'panelui-native/components/shimmer';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 import { memo, useEffect, useRef, useState } from 'react';
-import { Easing, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
