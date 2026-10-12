@@ -5,11 +5,13 @@ import type {
 } from '@waku/client';
 import { Plan } from 'panelui-native/components/plan';
 import type { PlanStepStatus } from 'panelui-native/components/plan';
-import { memo, useCallback, useState } from 'react';
+import { Button } from 'panelui-native/components/button';
+import { Task } from 'panelui-native/components/task';
+import type { TaskStatus } from 'panelui-native/components/task';
+import { memo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AppSymbol } from '@/components/app-symbol';
-import { AppPressable } from '@/components/app-pressable';
 import { useTheme } from '@/hooks/use-theme';
 import { type Theme } from '@/constants/theme';
 import { useRuntime } from '@/lib/runtime-context';
@@ -39,7 +41,6 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
   const [done, total] = todoProgress(todos);
   const { start, end, hiddenBefore, hiddenAfter } = visibleTodoWindow(todos);
   const visible = todos.slice(start, end);
-  const activeTodo = todos.findIndex((todo) => todo.status === 'in_progress');
   const todoStatus = (todo: TodoItem): PlanStepStatus =>
     todo.status === 'completed'
       ? 'done'
@@ -69,10 +70,7 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
             </Plan.Step>
           ) : null}
           {visible.map((todo) => (
-            <Plan.Step
-              key={todo.content}
-              description={undefined}
-              status={todoStatus(todo)}>
+            <Plan.Step key={todo.content} status={todoStatus(todo)}>
               {todo.content}
             </Plan.Step>
           ))}
@@ -86,25 +84,40 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
     </Plan>
   );
 });
-/** Status → glyph color: running harness work reads as active, not alarmed. */
-function workStatusColor(theme: Theme, status: BackgroundWorkItem['status']): string {
+/** Harness status → PanelUI `Task`'s four states. `monitoring` is a live
+ *  watch rather than a finished step, so it reads as running. */
+function taskStatus(status: BackgroundWorkItem['status']): TaskStatus {
   switch (status) {
     case 'running':
     case 'monitoring':
-      return theme.accent;
+      return 'running';
+    case 'starting':
     case 'stopping':
-      return theme.warning;
+      return 'pending';
     case 'failed':
-      return theme.danger;
+    case 'lost':
+      return 'error';
     default:
-      return theme.textTertiary;
+      return 'complete';
   }
 }
 
+function isLiveWork(status: BackgroundWorkItem['status']): boolean {
+  return status === 'running' || status === 'monitoring' || status === 'stopping';
+}
+
 /**
- * Harness background work: subagents, detached processes, monitors. A single
- * summary line while anything is live; tapping opens the detail sheet with
- * per-item status and a Stop control where the provider allows one.
+ * Harness background work: subagents, detached processes, monitors.
+ *
+ * A PanelUI `Task` whose trigger is the summary line — status glyph, title and
+ * the count that follows it — and whose content is one `Task.Item` per item
+ * with its live Stop where the provider allows one. The Task is its own
+ * disclosure, so the list opens in place instead of in a sheet over the
+ * transcript: the work is part of what the turn is doing, and a sheet made the
+ * reader lose the transcript to look at it.
+ *
+ * `Task`'s status drives the leading glyph and shimmers the title while work is
+ * live, which is the same signal the row used to draw by hand.
  */
 export const BackgroundWorkBar = memo(function BackgroundWorkBar({
   sessionId,
@@ -113,165 +126,51 @@ export const BackgroundWorkBar = memo(function BackgroundWorkBar({
   sessionId: string;
   items: BackgroundWorkItem[];
 }) {
-  const theme = useTheme();
   const runtime = useRuntime();
-  const [openItem, setOpenItem] = useState<BackgroundWorkItem | null>(null);
-  const live = items.filter(
-    (item) => item.status === 'running' || item.status === 'monitoring' || item.status === 'stopping',
-  );
+  const [stopping, setStopping] = useState<string | null>(null);
+  const live = items.filter((item) => isLiveWork(item.status));
   if (!items.length) return null;
 
   const summary = live.length
     ? `${live.length} running in background`
     : `${items.length} finished`;
-  const openSheet = useCallback((item: BackgroundWorkItem) => setOpenItem(item), []);
+
+  const stop = (item: BackgroundWorkItem) => {
+    setStopping(item.key.providerId);
+    runtime
+      .stopBackgroundWork(sessionId, item.key)
+      .catch(() => {})
+      .finally(() => setStopping(null));
+  };
 
   return (
-    <>
-      <AppPressable
-        accessibilityLabel="Background tasks"
-        accessibilityRole="button"
-        onPress={() => setOpenItem(live[0] ?? items[0] ?? null)}
-        style={({ pressed }) => [
-          styles.workBar,
-          { backgroundColor: theme.raised, opacity: pressed ? 0.7 : 1 },
-        ]}>
-        <AppSymbol
-          name={{ ios: 'square.stack.3d.up', android: 'layers', web: 'layers' }}
-          size={13}
-          tintColor={theme.textTertiary}
-        />
-        <Text numberOfLines={1} style={[styles.workBarText, { color: theme.textSecondary }]}>
-          {summary}
-        </Text>
-        <AppSymbol
-          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-          size={11}
-          tintColor={theme.textTertiary}
-        />
-      </AppPressable>
-      <BackgroundWorkSheet
-        sessionId={sessionId}
-        items={items}
-        openItem={openItem}
-        onClose={() => setOpenItem(null)}
-        onSelect={openSheet}
-      />
-    </>
+    <Task
+      className="mb-2"
+      status={live.length ? 'running' : 'complete'}
+    >
+      <Task.Trigger title={summary} />
+      <Task.Content>
+        {items.map((item) => (
+          <Task.Item key={`${item.key.kind}:${item.key.providerId}`}>
+            {item.title || item.key.providerId}
+            {`  ${item.status}`}
+            {item.canStop && item.status !== 'stopping' ? (
+              <Button
+                accessibilityLabel={`Stop ${item.title || item.key.providerId}`}
+                disabled={stopping === item.key.providerId}
+                onPress={() => stop(item)}
+                size="xs"
+                variant="ghost"
+              >
+                Stop
+              </Button>
+            ) : null}
+          </Task.Item>
+        ))}
+      </Task.Content>
+    </Task>
   );
 });
-
-function BackgroundWorkSheet({
-  sessionId,
-  items,
-  openItem,
-  onClose,
-  onSelect,
-}: {
-  sessionId: string;
-  items: BackgroundWorkItem[];
-  openItem: BackgroundWorkItem | null;
-  onClose: () => void;
-  onSelect: (item: BackgroundWorkItem) => void;
-}) {
-  const theme = useTheme();
-  const runtime = useRuntime();
-  const [stopping, setStopping] = useState<string | null>(null);
-
-  const stop = useCallback(
-    (item: BackgroundWorkItem) => {
-      setStopping(item.key.providerId);
-      runtime
-        .stopBackgroundWork(sessionId, item.key)
-        .catch(() => {})
-        .finally(() => setStopping(null));
-    },
-    [runtime, sessionId],
-  );
-
-  if (!openItem) return null;
-  const live = items.filter(
-    (item) => item.status === 'running' || item.status === 'monitoring' || item.status === 'stopping',
-  );
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {/* Dim behind the sheet; tap to close. */}
-      <AppPressable
-        accessibilityLabel="Close background tasks"
-        onPress={onClose}
-        style={styles.sheetBackdrop}
-      />
-      <View style={[styles.sheet, { backgroundColor: theme.background }]}>
-        <View style={styles.sheetHeader}>
-          <Text style={[styles.sheetTitle, { color: theme.text }]}>Background tasks</Text>
-          <AppPressable
-            accessibilityLabel="Close"
-            accessibilityRole="button"
-            hitSlop={8}
-            onPress={onClose}
-            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <AppSymbol
-              name={{ ios: 'xmark', android: 'close', web: 'close' }}
-              size={15}
-              tintColor={theme.textSecondary}
-            />
-          </AppPressable>
-        </View>
-        <ScrollView style={styles.sheetList}>
-          <View style={styles.workTabs}>
-            {live.length > 0 && items.filter((item) => !live.includes(item)).length > 0 && (
-              <Text style={[styles.sheetSection, { color: theme.textTertiary }]}>Running</Text>
-            )}
-          </View>
-          {items.map((item) => (
-            <View
-              key={`${item.key.kind}:${item.key.providerId}`}
-              style={[styles.workCard, { backgroundColor: theme.raised }]}>
-              <AppPressable
-                accessibilityLabel={`${item.title || item.key.providerId}, ${item.status}`}
-                accessibilityRole="button"
-                onPress={() => onSelect(item)}>
-                <View style={styles.workCardHeader}>
-                  <AppSymbol
-                    name={{ ios: 'circle.fill', android: 'circle', web: 'circle' }}
-                    size={9}
-                    tintColor={workStatusColor(theme, item.status)}
-                  />
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.workCardTitle, { color: theme.text }]}
-                  >
-                    {item.title || item.key.providerId}
-                  </Text>
-                  <Text style={[styles.workCardStatus, { color: workStatusColor(theme, item.status) }]}>
-                    {item.status}
-                  </Text>
-                </View>
-                {item.detail ? (
-                  <Text numberOfLines={2} style={[styles.workCardDetail, { color: theme.textSecondary }]}>
-                    {item.detail}
-                  </Text>
-                ) : null}
-              </AppPressable>
-              {item.canStop && item.status !== 'stopping' && (
-                <View style={styles.workCardFooter}>
-                  <AppPressable
-                    accessibilityLabel={`Stop ${item.title || item.key.providerId}`}
-                    accessibilityRole="button"
-                    disabled={stopping === item.key.providerId}
-                    onPress={() => stop(item)}
-                    style={({ pressed }) => ({ opacity: pressed || stopping === item.key.providerId ? 0.5 : 1 })}>
-                    <Text style={[styles.workStopText, { color: theme.danger }]}>Stop</Text>
-                  </AppPressable>
-                </View>
-              )}
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-    </View>
-  );
-}
 
 /** The agent is driving the host's screen: a compact live indicator with
  *  the target app and window, and the phase as color (running = accent,
@@ -317,39 +216,4 @@ const styles = StyleSheet.create({
   },
   computerDot: { borderRadius: 5, height: 10, width: 10 },
   computerText: { flex: 1, fontSize: 12.5 },
-  workBar: {
-    alignItems: 'center',
-    borderRadius: 12,
-    flexDirection: 'row',
-    gap: 7,
-    marginBottom: 8,
-    minHeight: 38,
-    paddingHorizontal: 12,
-  },
-  workBarText: { flex: 1, fontSize: 13 },
-  sheetBackdrop: { backgroundColor: 'rgba(0,0,0,0.45)', flex: 1 },
-  sheet: {
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    maxHeight: '80%',
-    paddingHorizontal: 16,
-    paddingTop: 14,
-  },
-  sheetHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  sheetTitle: { fontSize: 16, fontWeight: '700' },
-  sheetList: { marginBottom: 20 },
-  sheetSection: { fontSize: 12, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' },
-  workTabs: { minHeight: 0 },
-  workCard: { borderRadius: 12, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 10 },
-  workCardHeader: { alignItems: 'center', flexDirection: 'row', gap: 7 },
-  workCardTitle: { flex: 1, fontSize: 14, fontWeight: '600' },
-  workCardStatus: { fontSize: 11.5, fontWeight: '600' },
-  workCardDetail: { fontSize: 12.5, lineHeight: 17, marginTop: 4 },
-  workCardFooter: { alignItems: 'flex-end', marginTop: 6 },
-  workStopText: { fontSize: 13, fontWeight: '700' },
 });

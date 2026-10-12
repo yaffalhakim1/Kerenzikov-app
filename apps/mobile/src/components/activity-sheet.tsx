@@ -16,6 +16,8 @@ import {
 } from '@waku/client/transcript-presentation';
 import { Reasoning } from 'panelui-native/components/reasoning';
 import { Task } from 'panelui-native/components/task';
+import { Item } from 'panelui-native/components/item';
+import { Button } from 'panelui-native/components/button';
 import {
   createContext,
   useCallback,
@@ -38,7 +40,6 @@ import { ACTIVITY_ICONS } from './activity-icons';
 import { AppSymbol } from './app-symbol';
 import { DiffView } from './diff-view';
 import { liquidGlass } from './glass-surface';
-import { AppPressable } from '@/components/app-pressable';
 
 import { MonoFont, NativeTint, Radius, Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
@@ -164,18 +165,21 @@ export function ActivitySheetHost({
                 <View style={styles.page}>
                   {selected ? (
                     <>
-                      <AppPressable
+                      <Button
                         accessibilityHint="Shows the whole group"
-                        accessibilityRole="button"
+                        accessibilityLabel="Back"
+                        className="mb-1 self-start"
                         onPress={() => slideTo(0)}
-                        style={({ pressed }) => [styles.backRow, { opacity: pressed ? 0.55 : 1 }]}>
+                        size="xs"
+                        variant="ghost"
+                      >
                         <AppSymbol
                           name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
                           size={14}
                           tintColor={NativeTint}
                         />
-                        <Text style={[styles.backLabel, { color: NativeTint }]}>Back</Text>
-                      </AppPressable>
+                        Back
+                      </Button>
                       <ActivityDetail activity={selected} />
                     </>
                   ) : null}
@@ -212,7 +216,12 @@ function GroupList({
 }
 
 /** One activity in the list: the desktop card's header — kind glyph, bold
- * action label, subject, edit totals, trailing state. */
+ * action label, subject, edit totals, trailing state.
+ *
+ * A PanelUI `Item`: the kind glyph is the media slot, the action label and its
+ * subject are the title, the edit totals are the description, and the trailing
+ * state is an action. A row that opens detail is the item itself; one that
+ * does not is `disabled` so it stops claiming to be pressable. */
 function GroupRow({ activity, onPress }: { activity: ActivityItem; onPress: () => void }) {
   const theme = useTheme();
   const hasDetail = activityHasDetail(activity);
@@ -220,37 +229,34 @@ function GroupRow({ activity, onPress }: { activity: ActivityItem; onPress: () =
   const detail = activityRowDetail(activity) || preview;
   const stats = activityFileChangeStats(activity);
   return (
-    <AppPressable
-      accessibilityHint={hasDetail ? 'Opens the details' : undefined}
-      accessibilityRole={hasDetail ? 'button' : 'text'}
-      disabled={!hasDetail}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.row,
-        { backgroundColor: pressed ? theme.overlayStrong : 'transparent' },
-      ]}>
-      <View style={[styles.rowIcon, { backgroundColor: theme.overlay }]}>
+    <Item disabled={!hasDetail} onPress={hasDetail ? onPress : undefined}>
+      <Item.Media>
         <AppSymbol
           name={ACTIVITY_ICONS[activity.kind]}
           size={14}
           tintColor={theme.textSecondary}
         />
-      </View>
-      <Text numberOfLines={1} style={[styles.rowLabel, { color: theme.text }]}>
-        <Text style={[styles.rowAction, { color: activity.failed ? theme.danger : theme.text }]}>
+      </Item.Media>
+      <Item.Content>
+        <Item.Title
+          className={activity.failed ? 'text-destructive' : undefined}
+          numberOfLines={1}
+        >
           {activityActionLabel(activity)}
-        </Text>
-        {detail ? <Text style={{ color: theme.textSecondary }}>{`  ${detail}`}</Text> : null}
-      </Text>
-      {stats && (
-        <Text style={styles.rowStats}>
-          <Text style={{ color: theme.success }}>+{stats.additions}</Text>
-          <Text style={{ color: theme.textGhost }}> </Text>
-          <Text style={{ color: theme.danger }}>−{stats.deletions}</Text>
-        </Text>
-      )}
-      <RowState activity={activity} hasDetail={hasDetail} />
-    </AppPressable>
+        </Item.Title>
+        {detail ? (
+          <Item.Description numberOfLines={1}>{detail}</Item.Description>
+        ) : null}
+      </Item.Content>
+      {stats ? (
+        <Item.Description>
+          {`+${stats.additions} −${stats.deletions}`}
+        </Item.Description>
+      ) : null}
+      <Item.Actions>
+        <RowState activity={activity} hasDetail={hasDetail} />
+      </Item.Actions>
+    </Item>
   );
 }
 
@@ -291,6 +297,25 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
   const changes = activity.file_changes ?? [];
   const images = activity.image_urls ?? [];
   const title = activity.reasoning ? reasoningTitle(activity) : activityDisplayTitle(activity);
+  // The header survives both branches — a reasoning row is still a row with a
+  // kind glyph and a state, and dropping it left the sheet's title blank. The
+  // reasoning trace only swaps what the header's title slot holds: the fold
+  // trigger replaces the plain title text, and the trace moves under the row.
+  const header = (titleSlot: ReactNode) => (
+    <View style={styles.header}>
+      <View style={[styles.iconWell, { backgroundColor: theme.overlayStrong }]}>
+        <AppSymbol
+          name={ACTIVITY_ICONS[activity.kind]}
+          size={17}
+          tintColor={theme.textSecondary}
+        />
+      </View>
+      <View style={styles.headerCopy}>
+        {titleSlot}
+        <ActivityStatus activity={activity} />
+      </View>
+    </View>
+  );
   // Activity rows are a record of what happened, so PanelUI Task's "open and
   // stays open" default is exactly right here — the fold just keeps the
   // command/output wells from shouting over the title on a small sheet.
@@ -300,39 +325,31 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
       contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}
       style={styles.fill}>
       {activity.reasoning ? (
-        <>
-          <Reasoning duration={undefined} isStreaming={!activity.complete}>
-            <Reasoning.Trigger label={(streaming) =>
-              streaming
-                ? reasoningTitle(activity)
-                : `${reasoningTitle(activity)}`
-            } />
-            <Reasoning.Content>
-              <ReasoningText content={plainReasoning(reasoning)} live={!activity.complete} />
-            </Reasoning.Content>
-          </Reasoning>
-        </>
+        <Reasoning isStreaming={!activity.complete}>
+          {header(
+            <Reasoning.Trigger
+              label={() => (
+                <Text numberOfLines={3} style={[styles.title, { color: theme.text }]}>
+                  {reasoningTitle(activity)}
+                </Text>
+              )}
+            />,
+          )}
+          <Reasoning.Content>
+            <ReasoningText content={plainReasoning(reasoning)} live={!activity.complete} />
+          </Reasoning.Content>
+        </Reasoning>
       ) : (
         <>
-          <View style={styles.header}>
-            <View style={[styles.iconWell, { backgroundColor: theme.overlayStrong }]}>
-              <AppSymbol
-                name={ACTIVITY_ICONS[activity.kind]}
-                size={17}
-                tintColor={theme.textSecondary}
-              />
-            </View>
-            <View style={styles.headerCopy}>
-              <Text
-                accessibilityRole="header"
-                numberOfLines={3}
-                selectable
-                style={[styles.title, { color: theme.text }]}>
-                {title}
-              </Text>
-              <ActivityStatus activity={activity} />
-            </View>
-          </View>
+          {header(
+            <Text
+              accessibilityRole="header"
+              numberOfLines={3}
+              selectable
+              style={[styles.title, { color: theme.text }]}>
+              {title}
+            </Text>,
+          )}
           {sections.map((section) => (
             <DetailSection
               content={section.content}
@@ -505,36 +522,8 @@ const styles = StyleSheet.create({
   page: { width: '50%' },
   // ── Page one: the list ──────────────────────────────────────────────────
   listContent: { paddingHorizontal: Spacing.two, paddingTop: 6 },
-  row: {
-    alignItems: 'center',
-    borderRadius: Radius.medium,
-    flexDirection: 'row',
-    gap: 11,
-    minHeight: 46,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  rowIcon: {
-    alignItems: 'center',
-    borderRadius: Radius.tiny,
-    height: 26,
-    justifyContent: 'center',
-    width: 26,
-  },
-  rowLabel: { flex: 1, fontSize: 15, minWidth: 0 },
-  rowAction: { fontWeight: '600' },
-  rowStats: { fontSize: 12, fontVariant: ['tabular-nums'], fontWeight: '600' },
   runningDot: { borderRadius: 3, height: 6, width: 6 },
   // ── Page two: the detail ────────────────────────────────────────────────
-  backRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 5,
-    marginHorizontal: Spacing.two,
-    minHeight: 40,
-    paddingHorizontal: 10,
-  },
-  backLabel: { fontSize: 15, fontWeight: '600' },
   content: { gap: 14, paddingHorizontal: Spacing.three, paddingTop: 6 },
   header: { alignItems: 'flex-start', flexDirection: 'row', gap: 12 },
   iconWell: {

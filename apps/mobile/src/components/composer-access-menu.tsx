@@ -1,12 +1,10 @@
 import { useState } from 'react';
-import { StyleSheet } from 'react-native';
 
 import { AppSymbol } from './app-symbol';
 import type { ComposerAccessMenuProps } from './composer-access-menu.types';
 import { AccessSheet } from './session-option-sheets';
-import { AppPressable } from '@/components/app-pressable';
+import { AIInput } from 'panelui-native/components/ai-input';
 
-import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { runtimeModeLabel } from '@/lib/session-presentation';
 
@@ -25,13 +23,11 @@ export function ComposerAccessMenu({ mode, onApply }: ComposerAccessMenuProps) {
 
   return (
     <>
-      <AppPressable
-        accessibilityLabel={`Agent access, ${runtimeModeLabel(mode)}`}
-        accessibilityRole="button"
+      <AIInput.Action
+        icon={<AppSymbol name={MODE_ICONS[mode]} size={19} tintColor={theme.textSecondary} />}
+        label={`Agent access, ${runtimeModeLabel(mode)}`}
         onPress={() => setOpen(true)}
-        style={({ pressed }) => [styles.trigger, { opacity: pressed ? 0.55 : 1 }]}>
-        <AppSymbol name={MODE_ICONS[mode]} size={19} tintColor={theme.textSecondary} />
-      </AppPressable>
+      />
       <AccessSheet
         mode={mode}
         onApply={onApply}
@@ -41,13 +37,3 @@ export function ComposerAccessMenu({ mode, onApply }: ComposerAccessMenuProps) {
     </>
   );
 }
-
-const styles = StyleSheet.create({
-  trigger: {
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-});

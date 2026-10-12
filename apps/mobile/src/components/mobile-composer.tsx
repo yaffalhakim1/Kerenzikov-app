@@ -12,16 +12,21 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Animated,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
 import { AIInput } from 'panelui-native/components/ai-input';
+import { Button } from 'panelui-native/components/button';
 
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -167,23 +172,18 @@ export function ComposerIconButton({
 }) {
   const theme = useTheme();
   return (
-    <AppPressable
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ disabled, selected: active }}
-      borderless
+    <AIInput.Action
       disabled={disabled}
-      hitSlop={8}
+      icon={
+        <AppSymbol
+          name={icon}
+          size={19}
+          tintColor={active ? NativeTint : theme.textSecondary}
+        />
+      }
+      label={label}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.iconButton,
-        {
-          backgroundColor: active ? theme.overlayStrong : 'transparent',
-          opacity: disabled ? 0.35 : pressed ? 0.55 : 1,
-        },
-      ]}>
-      <AppSymbol name={icon} size={19} tintColor={active ? NativeTint : theme.textSecondary} />
-    </AppPressable>
+    />
   );
 }
 
@@ -202,16 +202,13 @@ export function SendButton({
 }) {
   const theme = useTheme();
   return (
-    <AppPressable
+    <Button
       accessibilityLabel={label}
-      accessibilityRole="button"
       disabled={disabled}
-      hitSlop={8}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.sendButton,
-        { opacity: pressed || busy ? 0.6 : 1 },
-      ]}>
+      size="icon"
+      variant="ghost"
+    >
       {busy ? (
         <Blocks color={theme.textSecondary} size={16} />
       ) : (
@@ -223,7 +220,7 @@ export function SendButton({
           tintColor={disabled ? theme.textTertiary : theme.text}
         />
       )}
-    </AppPressable>
+    </Button>
   );
 }
 
@@ -231,10 +228,14 @@ export function SendButton({
  * The composer's primary slot: Stop while the agent works, Send when it can
  * act, cross-fading in place instead of one button replacing the other.
  *
- * Two stacked absolute children driven by one Animated pair per state flip —
- * `useNativeDriver: true` keeps every frame on the compositor, so the morph
- * costs nothing on the JS thread during a stream. The slot is 36dp wide in
- * both states, so the swap never shifts the toolbar.
+ * The two states are stacked in one slot and cross-faded, so the toolbar never
+ * shifts. Reanimated drives it, per the library's rule that core `Animated`
+ * does not compose with it and would put the frames back on the JS thread.
+ *
+ * PanelUI's own `AIInput.Submit` is the same idea — one button that is send,
+ * stop or voice — but it has no queue state: while the agent is working with
+ * text typed it *stops*, where this app queues. So the states are wired here
+ * and only the button chrome comes from PanelUI.
  */
 export function SendStopSlot({
   busy,
@@ -258,61 +259,56 @@ export function SendStopSlot({
   const theme = useTheme();
   const sendDisabled = !canSubmit || submitting || importingAttachments || disconnected;
   const sendVisible = !busy || canSubmit;
-  const sendOpacity = useRef(new Animated.Value(sendVisible ? 1 : 0)).current;
-  const stopOpacity = useRef(new Animated.Value(busy && sendVisible ? 1 : busy ? 1 : 0)).current;
+  const stopShown = busy && !sendVisible;
+
+  const sendProgress = useSharedValue(sendVisible ? 1 : 0);
+  const stopProgress = useSharedValue(stopShown ? 1 : 0);
   const [sendMounted, setSendMounted] = useState(sendVisible);
   const [stopMounted, setStopMounted] = useState(busy);
+
   useEffect(() => {
-    Animated.timing(sendOpacity, {
-      duration: 140,
-      toValue: sendVisible ? 1 : 0,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setSendMounted(sendVisible);
-    });
     if (sendVisible) setSendMounted(true);
-  }, [sendOpacity, sendVisible]);
+    sendProgress.value = withTiming(sendVisible ? 1 : 0, { duration: 140 });
+  }, [sendProgress, sendVisible]);
   useEffect(() => {
-    const stopShown = busy && !sendVisible;
-    Animated.timing(stopOpacity, {
-      duration: 140,
-      toValue: stopShown ? 1 : 0,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setStopMounted(stopShown || busy);
-    });
     if (stopShown) setStopMounted(true);
-  }, [busy, sendVisible, stopOpacity]);
-  const sendScale = sendOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
-  const stopScale = stopOpacity.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1] });
+    stopProgress.value = withTiming(stopShown ? 1 : 0, { duration: 140 });
+  }, [stopProgress, stopShown]);
+
+  const sendStyle = useAnimatedStyle(() => ({
+    opacity: sendProgress.value,
+    transform: [{ scale: 0.7 + 0.3 * sendProgress.value }],
+  }));
+  const stopStyle = useAnimatedStyle(() => ({
+    opacity: stopProgress.value,
+    transform: [{ scale: 0.7 + 0.3 * stopProgress.value }],
+  }));
+
   if (!sendMounted && !stopMounted) return null;
   return (
     <View style={styles.sendSlot}>
       {stopMounted && (
         <Animated.View
-          pointerEvents={busy && !sendVisible ? 'auto' : 'none'}
-          style={[styles.sendSlotChild, { opacity: stopOpacity, transform: [{ scale: stopScale }] }]}>
-          <AppPressable
+          pointerEvents={stopShown ? 'auto' : 'none'}
+          style={[styles.sendSlotChild, stopStyle]}>
+          <Button
             accessibilityLabel="Stop agent"
-            accessibilityRole="button"
-            hitSlop={8}
             onPress={onStop}
-            style={({ pressed }) => [
-              styles.sendButton,
-              { backgroundColor: theme.dangerSoft, opacity: pressed ? 0.55 : 1 },
-            ]}>
+            size="icon"
+            variant="destructive"
+          >
             <AppSymbol
               name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
               size={14}
               tintColor={theme.danger}
             />
-          </AppPressable>
+          </Button>
         </Animated.View>
       )}
       {sendMounted && (
         <Animated.View
           pointerEvents={sendVisible ? 'auto' : 'none'}
-          style={[styles.sendSlotChild, { opacity: sendOpacity, transform: [{ scale: sendScale }] }]}>
+          style={[styles.sendSlotChild, sendStyle]}>
           <SendButton
             busy={submitting}
             disabled={sendDisabled}
