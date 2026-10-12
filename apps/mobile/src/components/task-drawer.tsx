@@ -25,7 +25,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Drawer } from 'react-native-drawer-layout';
+import { Panelside } from 'panelui-native/components/panelside';
 import Animated, {
   FadeIn,
   FadeOut,
@@ -123,21 +123,20 @@ interface TaskDrawerContextValue {
 const TaskDrawerContext = createContext<TaskDrawerContextValue | null>(null);
 
 export function TaskDrawerHost({ children }: { children: ReactNode }) {
-  const theme = useTheme();
   const daemon = useDaemon();
   const pathname = usePathname();
   const params = useGlobalSearchParams<{ id?: string | string[] }>();
   const { width } = useWindowDimensions();
   const [open, setOpen] = useState(false);
-  // The drawer library renders its content even while closed, so mounting the
+  // The panel renders its content even while closed, so mounting the
   // task list at launch builds every row (and its provider icon) before the
   // user asks for it — measured as multi-second frames on first paint. Build it
   // on first open, then keep it mounted so search/scroll state survives close.
   const [contentMounted, setContentMounted] = useState(false);
-  // Full-bleed: the drawer replaces the screen rather than leaving a strip of
+  // Full-bleed: the panel replaces the screen rather than leaving a strip of
   // the chat showing, so the task list is not squeezed into a phone-width
   // column with a permanently visible sliver behind it.
-  const drawerWidth = width;
+  const panelWidth = width;
   const drawerEnabled = daemon.phase === 'booting' || daemon.profiles.length > 0;
   // The first open lands right after connect, when the JS thread is still
   // busy with the connect-time queries; measured on a physical device as a
@@ -168,40 +167,40 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
 
   useEffect(() => setOpen(false), [drawerEnabled, pathname]);
 
-  const drawerScene = <View style={styles.drawerScene}>{children}</View>;
+  const drawerScene = (
+    <Panelside.Scene>
+      <View style={styles.drawerScene}>{children}</View>
+    </Panelside.Scene>
+  );
 
   return (
     <TaskDrawerContext.Provider value={controls}>
       <View style={styles.drawerHost}>
-        {drawerEnabled ? (
-          <Drawer
-            drawerStyle={{ backgroundColor: theme.background, width: drawerWidth }}
-            // `front`, not `back`: the sidebar slides in over the chat page
-            // with a dim overlay, leaving the transcript in place underneath.
-            drawerType="front"
-            open={open}
-            overlayAccessibilityLabel="Close task history"
-            overlayStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.18)' }}
-            renderDrawerContent={() => (
-              contentMounted && (taskStateReady || daemon.phase !== 'connected') ? (
-                <TaskDrawerContent
-                  drawerRowWidth={drawerWidth - 24}
-                  selectedSessionId={selectedSessionId}
-                  onClose={closeTaskDrawer}
-                />
-              ) : null
-            )}
-            // Narrow edge so wide code/tables can pan horizontally without
-            // opening the drawer; the button still opens it anywhere.
-            swipeEdgeWidth={32}
-            swipeEnabled={swipeEnabled}
-            onClose={closeTaskDrawer}
-            onOpen={openTaskDrawer}>
-            {drawerScene}
-          </Drawer>
-        ) : (
-          drawerScene
-        )}
+        <Panelside
+          open={open}
+          onOpenChange={(next) => {
+            if (next) setContentMounted(true);
+            setOpen(next);
+          }}
+          mode="push"
+          width={panelWidth}
+          swipeEnabled={swipeEnabled}
+          haptics
+        >
+          <Panelside.Panel>
+            {drawerEnabled && contentMounted
+              && (taskStateReady || daemon.phase !== 'connected')
+              ? (
+                  <TaskDrawerContent
+                    drawerRowWidth={panelWidth - 24}
+                    selectedSessionId={selectedSessionId}
+                    onClose={closeTaskDrawer}
+                  />
+                )
+              : null}
+          </Panelside.Panel>
+          {drawerScene}
+        </Panelside>
       </View>
     </TaskDrawerContext.Provider>
   );

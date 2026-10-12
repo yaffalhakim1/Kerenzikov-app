@@ -1,0 +1,57 @@
+@import 'tailwindcss';
+@import 'uniwind';
+@import 'panelui-native/theme.css';
+
+/* Bun hoists panelui-native to the workspace root's node_modules, three levels
+ * above this file (apps/mobile/src -> apps/mobile -> apps -> repo root). A
+ * wrong path fails silently: PanelUI's classes never compile and its provider
+ * collapses the tree to zero height — a blank screen. */
+@source '../../../node_modules/panelui-native/src';
+
+/*
+ * Waku graphite palette mapped onto PanelUI's token names, so PanelUI
+ * components render in the house colors without touching the app's own
+ * useTheme() tokens (src/constants/theme.ts). Values mirror those tokens —
+ * measured 4.5:1 pairs — one @variant block per appearance.
+ */
+@variant light {
+  --color-background: #ffffff;
+  --color-foreground: #242424;
+  --color-card: #ffffff;
+  --color-muted: #ececec;
+  --color-muted-foreground: #696969;
+  --color-border: hsla(220, 10%, 12%, 0.08);
+  --color-primary: #007a45;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #ececec;
+  --color-secondary-foreground: #4f4f4f;
+  --color-accent: hsla(220, 10%, 12%, 0.05);
+  --color-accent-foreground: #242424;
+  --color-destructive: #c64a42;
+  --color-destructive-foreground: #ffffff;
+  --color-success: #2f8f52;
+  --color-warning: #a66b20;
+  --color-info: #007a45;
+  --color-ring: #007a45;
+}
+
+@variant dark {
+  --color-background: #1a1a1a;
+  --color-foreground: #e2e2e2;
+  --color-card: #232323;
+  --color-muted: #2a2a2a;
+  --color-muted-foreground: #909090;
+  --color-border: hsla(220, 10%, 90%, 0.07);
+  --color-primary: #26e085;
+  --color-primary-foreground: #17181c;
+  --color-secondary: #2a2a2a;
+  --color-secondary-foreground: #a3a3a3;
+  --color-accent: hsla(220, 10%, 90%, 0.05);
+  --color-accent-foreground: #e2e2e2;
+  --color-destructive: #e2726a;
+  --color-destructive-foreground: #17181c;
+  --color-success: #62c987;
+  --color-warning: #e0b36a;
+  --color-info: #26e085;
+  --color-ring: #26e085;
+}

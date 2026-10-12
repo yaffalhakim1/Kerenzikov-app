@@ -14,6 +14,8 @@ import {
   activityRowDetail,
   reasoningTitle,
 } from '@waku/client/transcript-presentation';
+import { Reasoning } from 'panelui-native/components/reasoning';
+import { Task } from 'panelui-native/components/task';
 import {
   createContext,
   useCallback,
@@ -289,34 +291,48 @@ function ActivityDetail({ activity }: { activity: ActivityItem }) {
   const changes = activity.file_changes ?? [];
   const images = activity.image_urls ?? [];
   const title = activity.reasoning ? reasoningTitle(activity) : activityDisplayTitle(activity);
+  // Activity rows are a record of what happened, so PanelUI Task's "open and
+  // stays open" default is exactly right here — the fold just keeps the
+  // command/output wells from shouting over the title on a small sheet.
   return (
     <ScrollView
       alwaysBounceVertical={false}
       contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}
       style={styles.fill}>
-      <View style={styles.header}>
-        <View style={[styles.iconWell, { backgroundColor: theme.overlayStrong }]}>
-          <AppSymbol
-            name={ACTIVITY_ICONS[activity.kind]}
-            size={17}
-            tintColor={theme.textSecondary}
-          />
-        </View>
-        <View style={styles.headerCopy}>
-          <Text
-            accessibilityRole="header"
-            numberOfLines={3}
-            selectable
-            style={[styles.title, { color: theme.text }]}>
-            {title}
-          </Text>
-          <ActivityStatus activity={activity} />
-        </View>
-      </View>
       {activity.reasoning ? (
-        <ReasoningText content={plainReasoning(reasoning)} live={!activity.complete} />
+        <>
+          <Reasoning duration={undefined} isStreaming={!activity.complete}>
+            <Reasoning.Trigger label={(streaming) =>
+              streaming
+                ? reasoningTitle(activity)
+                : `${reasoningTitle(activity)}`
+            } />
+            <Reasoning.Content>
+              <ReasoningText content={plainReasoning(reasoning)} live={!activity.complete} />
+            </Reasoning.Content>
+          </Reasoning>
+        </>
       ) : (
         <>
+          <View style={styles.header}>
+            <View style={[styles.iconWell, { backgroundColor: theme.overlayStrong }]}>
+              <AppSymbol
+                name={ACTIVITY_ICONS[activity.kind]}
+                size={17}
+                tintColor={theme.textSecondary}
+              />
+            </View>
+            <View style={styles.headerCopy}>
+              <Text
+                accessibilityRole="header"
+                numberOfLines={3}
+                selectable
+                style={[styles.title, { color: theme.text }]}>
+                {title}
+              </Text>
+              <ActivityStatus activity={activity} />
+            </View>
+          </View>
           {sections.map((section) => (
             <DetailSection
               content={section.content}
@@ -392,24 +408,24 @@ function DetailSection({
 }) {
   const theme = useTheme();
   return (
-    <View style={styles.section}>
-      {label ? (
-        <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>{label}</Text>
-      ) : null}
-      {content ? (
-        mono ? (
-          <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
-            <Text selectable style={[styles.monoText, { color: theme.textSecondary }]}>
+    <Task defaultOpen>
+      <Task.Trigger title={label ?? 'Detail'} />
+      <Task.Content>
+        {content ? (
+          mono ? (
+            <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
+              <Text selectable style={[styles.monoText, { color: theme.textSecondary }]}>
+                {boundedText(content)}
+              </Text>
+            </View>
+          ) : (
+            <Text selectable style={[styles.bodyText, { color: theme.textSecondary }]}>
               {boundedText(content)}
             </Text>
-          </View>
-        ) : (
-          <Text selectable style={[styles.bodyText, { color: theme.textSecondary }]}>
-            {boundedText(content)}
-          </Text>
-        )
-      ) : null}
-    </View>
+          )
+        ) : null}
+      </Task.Content>
+    </Task>
   );
 }
 
@@ -533,13 +549,6 @@ const styles = StyleSheet.create({
   status: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   statusText: { fontSize: 13 },
   stats: { fontVariant: ['tabular-nums'], fontWeight: '600' },
-  section: { gap: 6 },
-  sectionLabel: {
-    fontSize: 11.5,
-    fontWeight: '600',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-  },
   well: {
     borderRadius: Radius.small,
     borderWidth: StyleSheet.hairlineWidth,

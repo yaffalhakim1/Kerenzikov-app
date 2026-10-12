@@ -33,6 +33,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
+import { CodeBlock } from 'panelui-native/components/code-block';
 import { AppPressable } from '@/components/app-pressable';
 import { AppSymbol } from '@/components/app-symbol';
 
@@ -472,6 +473,30 @@ const CodeCopyButton = memo(function CodeCopyButton({
 });
 
 function renderCode(
+  value: string,
+  language: string | null,
+  ctx: RenderContext,
+  key: string | number,
+): ReactNode {
+  // The live tail veils code lines through the shared positional ordinal, and a
+  // PanelUI CodeBlock renders its own tokens and cannot participate in that
+  // contract — consuming the ordinal without veiling would shift every later
+  // element's spans. Settled blocks carry no veil and a discardable ordinal, so
+  // they take the PanelUI component.
+  if (ctx.veil) return renderVeiledCode(value, language, ctx, key);
+  return (
+    <CodeBlock key={key} code={value} language={language ?? undefined}>
+      <CodeBlock.Header>
+        <CodeBlock.Language>{language ?? ''}</CodeBlock.Language>
+        <CodeBlock.Actions>
+          <CodeBlock.CopyButton />
+        </CodeBlock.Actions>
+      </CodeBlock.Header>
+    </CodeBlock>
+  );
+}
+
+function renderVeiledCode(
   value: string,
   language: string | null,
   ctx: RenderContext,

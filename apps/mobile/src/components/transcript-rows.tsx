@@ -2,6 +2,8 @@ import type { AgentSession, Checkpoint, Message } from '@waku/client';
 import { formatMessageTime } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import { Shimmer } from 'panelui-native/components/shimmer';
+import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 import { memo, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
@@ -360,14 +362,19 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
     return () => clearInterval(timer);
   }, []);
   const elapsed = startedAt ? Math.max(0, now - startedAt) : 0;
-  const word = session.status === 'waiting'
+  const waiting = session.status === 'waiting';
+  const word = waiting
     ? 'Waiting for you'
     : `${FLAVOUR_WORDS[(flavourSeed(session.id) + Math.floor(elapsed / 7)) % FLAVOUR_WORDS.length]}…`;
   return (
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
-      <Blocks color={theme.accent} size={14} />
-      <Text style={[styles.workingText, { color: theme.textTertiary }]}>{word}</Text>
-      {startedAt != null && session.status !== 'waiting' && (
+      {/* The orb's silhouette names the kind of busy; the word shimmers while
+          it changes every 7s so a swap never reads as a static relabel. */}
+      <ThinkingOrb size={18} state={waiting ? 'listening' : 'working'} />
+      <Shimmer enabled={!waiting} textClassName="text-[12.5px] font-medium">
+        {word}
+      </Shimmer>
+      {startedAt != null && !waiting && (
         <Text style={[styles.workingElapsed, { color: theme.textTertiary }]}>
           {formatElapsed(elapsed)}
         </Text>

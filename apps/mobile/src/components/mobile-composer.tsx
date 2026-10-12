@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
+import { AIInput } from 'panelui-native/components/ai-input';
 
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -38,7 +39,6 @@ import type { ComposerTextInputProps } from './composer-text-input.types';
 import { ProviderIcon } from './provider-icon';
 import { QueuedMessageRow } from './queued-message-row';
 import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
-import { GlassSurface } from './glass-surface';
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useComposerCommands, useProjectFiles, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
@@ -85,16 +85,12 @@ export function ComposerCard({
 }) {
   const theme = useTheme();
   return (
-    <GlassSurface
-      fallbackColor={theme.composer}
-      interactive
-      style={[
-        styles.card,
-        // The brand rim is the composer's signature, so it is drawn on both the
-        // glass host and the flat fallback rather than only where the system
-        // material is missing.
-        { borderColor: theme.accent, borderWidth: 1 },
-      ]}>
+    <AIInput
+      className="px-2.5 pb-3.5 pt-3"
+      // The brand rim is the composer's signature, so it is drawn over the
+      // panel's own card surface rather than replacing it.
+      style={{ borderColor: theme.accent, borderWidth: 1 }}
+    >
       {beforeInput}
       {header}
       <ComposerTextInput
@@ -104,12 +100,12 @@ export function ComposerCard({
         style={[styles.input, { color: theme.text }]}
         {...inputProps}
       />
-      <View style={styles.toolbar}>
+      <AIInput.Toolbar>
         <View style={styles.cluster}>{left}</View>
-        <View style={styles.toolbarSpacer} />
+        <AIInput.Spacer />
         <View style={styles.cluster}>{right}</View>
-      </View>
-    </GlassSurface>
+      </AIInput.Toolbar>
+    </AIInput>
   );
 }
 
@@ -1144,12 +1140,6 @@ function RequestPanel({ borderColor, children }: { borderColor: string; children
 
 const styles = StyleSheet.create({
   shell: { paddingHorizontal: 12, paddingTop: 4 },
-  card: {
-    borderRadius: 26,
-    paddingBottom: 14,
-    paddingHorizontal: 10,
-    paddingTop: 12,
-  },
   headerRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1223,8 +1213,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
   },
   attachmentName: { flexShrink: 1, fontSize: 12, fontWeight: '600' },
-  toolbar: { alignItems: 'center', flexDirection: 'row', marginTop: 2 },
-  toolbarSpacer: { flex: 1 },
   // No gap: each control already carries its own 36pt box, and the invisible
   // space between them reads as the spacing.
   cluster: { alignItems: 'center', flexDirection: 'row' },

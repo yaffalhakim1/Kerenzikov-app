@@ -3,6 +3,8 @@ import type {
   ComputerUseState,
   TodoItem,
 } from '@waku/client';
+import { Plan } from 'panelui-native/components/plan';
+import type { PlanStepStatus } from 'panelui-native/components/plan';
 import { memo, useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
@@ -37,106 +39,53 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
   const [done, total] = todoProgress(todos);
   const { start, end, hiddenBefore, hiddenAfter } = visibleTodoWindow(todos);
   const visible = todos.slice(start, end);
+  const activeTodo = todos.findIndex((todo) => todo.status === 'in_progress');
+  const todoStatus = (todo: TodoItem): PlanStepStatus =>
+    todo.status === 'completed'
+      ? 'done'
+      : todo.status === 'in_progress'
+        ? 'active'
+        : todo.status === 'cancelled' ? 'skipped' : 'pending';
   return (
-    <View style={[styles.todoCard, { backgroundColor: theme.raised }]}>
-      <AppPressable
-        accessibilityLabel={`Tasks, ${done} of ${total} done`}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: !collapsed }}
-        hitSlop={6}
-        onPress={() => setCollapsed((value) => !value)}
-        style={({ pressed }) => [
-          styles.todoHeader,
-          !collapsed && styles.todoHeaderExpanded,
-          { opacity: pressed ? 0.6 : 1 },
-        ]}>
-        <AppSymbol
-          name={
-            collapsed
-              ? { ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }
-              : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }
-          }
-          size={13}
-          tintColor={theme.textTertiary}
-        />
-        <Text style={[styles.todoTitle, { color: theme.textTertiary }]}>Tasks</Text>
-        <Text style={[styles.todoCount, { color: theme.textTertiary }]}>
-          {done}/{total}
-        </Text>
-      </AppPressable>
-      {!collapsed && (
-        <>
+    <Plan defaultOpen={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
+      <Plan.Header>
+        <Plan.Icon>
+          <AppSymbol
+            name={{ ios: 'list.bullet', android: 'format_list_bulleted', web: 'format_list_bulleted' }}
+            size={15}
+            tintColor={theme.textTertiary}
+          />
+        </Plan.Icon>
+        <Plan.Title>Tasks</Plan.Title>
+        <Plan.Action>
+          <Plan.Progress value={done} total={total} />
+        </Plan.Action>
+      </Plan.Header>
+      <Plan.Content>
+        <Plan.Steps>
           {hiddenBefore > 0 ? (
-            <TodoOverflowRow label={`${hiddenBefore} earlier`} theme={theme} />
+            <Plan.Step key="before" status="skipped">
+              {`${hiddenBefore} earlier`}
+            </Plan.Step>
           ) : null}
           {visible.map((todo) => (
-            <View key={todo.content} style={styles.todoRow}>
-              <AppSymbol
-                name={
-                  todo.status === 'completed'
-                    ? { ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }
-                    : todo.status === 'in_progress'
-                      ? { ios: 'circle.dashed', android: 'adjust', web: 'adjust' }
-                      : todo.status === 'cancelled'
-                        ? { ios: 'xmark.circle', android: 'cancel', web: 'cancel' }
-                        : { ios: 'circle', android: 'radio_button_unchecked', web: 'radio_button_unchecked' }
-                }
-                size={13}
-                tintColor={
-                  todo.status === 'completed'
-                    ? theme.success
-                    : todo.status === 'in_progress'
-                      ? theme.accent
-                      : theme.textTertiary
-                }
-              />
-              <Text
-                numberOfLines={2}
-                style={[
-                  styles.todoText,
-                  {
-                    color: todo.status === 'cancelled' ? theme.textTertiary : theme.text,
-                    textDecorationLine: todo.status === 'completed' ? 'line-through' : 'none',
-                  },
-                ]}>
-                {todo.content}
-              </Text>
-            </View>
+            <Plan.Step
+              key={todo.content}
+              description={undefined}
+              status={todoStatus(todo)}>
+              {todo.content}
+            </Plan.Step>
           ))}
           {hiddenAfter > 0 ? (
-            <TodoOverflowRow label={`${hiddenAfter} later`} theme={theme} />
+            <Plan.Step key="after" status="skipped">
+              {`${hiddenAfter} later`}
+            </Plan.Step>
           ) : null}
-        </>
-      )}
-    </View>
+        </Plan.Steps>
+      </Plan.Content>
+    </Plan>
   );
 });
-
-/**
- * The `N earlier` / `N later` edge row that marks hidden entries, so a windowed
- * plan never reads as the whole plan.
- */
-const TodoOverflowRow = memo(function TodoOverflowRow({
-  label,
-  theme,
-}: {
-  label: string;
-  theme: Theme;
-}) {
-  return (
-    <View style={styles.todoRow}>
-      <AppSymbol
-        name={{ ios: 'ellipsis', android: 'more_horiz', web: 'more_horiz' }}
-        size={13}
-        tintColor={theme.textTertiary}
-      />
-      <Text numberOfLines={1} style={[styles.todoText, { color: theme.textTertiary }]}>
-        {label}
-      </Text>
-    </View>
-  );
-});
-
 /** Status → glyph color: running harness work reads as active, not alarmed. */
 function workStatusColor(theme: Theme, status: BackgroundWorkItem['status']): string {
   switch (status) {
@@ -368,20 +317,6 @@ const styles = StyleSheet.create({
   },
   computerDot: { borderRadius: 5, height: 10, width: 10 },
   computerText: { flex: 1, fontSize: 12.5 },
-  todoCard: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 8,
-  },
-  todoHeader: { alignItems: 'center', flexDirection: 'row', gap: 6 },
-  // Only the expanded header owns the gap to its rows; collapsed, the header
-  // is the whole card and the margin would read as stray padding.
-  todoHeaderExpanded: { marginBottom: 6 },
-  todoTitle: { fontSize: 11, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' },
-  todoCount: { fontSize: 11, fontVariant: ['tabular-nums'], marginLeft: 'auto' },
-  todoRow: { alignItems: 'flex-start', flexDirection: 'row', gap: 8, paddingVertical: 3 },
-  todoText: { flex: 1, fontSize: 13.5, lineHeight: 18 },
   workBar: {
     alignItems: 'center',
     borderRadius: 12,

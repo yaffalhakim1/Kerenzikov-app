@@ -13,6 +13,7 @@ import {
 } from '@/md/render';
 import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
 import { RowVeil } from '@/md/veil';
+import { Response } from 'panelui-native/components/response';
 
 /**
  * Markdown metrics — the desktop's render.rs values scaled up for a phone:
@@ -207,11 +208,25 @@ export const MdBlockSettled = memo(
   function MdBlockSettled({
     node,
     styles,
+    source,
   }: {
     node: MarkdownBlock['node'];
     source: string;
     styles: MarkdownStyles;
   }) {
+    /*
+     * Prose and code go to PanelUI's own renderer, which colours fenced blocks
+     * and draws the rest from one tokeniser. Structural blocks (tables, lists,
+     * quotes) stay on the house renderer: it lays tables out to a measured
+     * column budget and the veil contract is written against it, and neither is
+     * something the panel renderer reproduces.
+     *
+     * `source` is this block's own slice, which is exactly what the panel
+     * renderer wants — it takes markdown text, not a parsed tree.
+     */
+    if (node.type === 'paragraph' || node.type === 'code' || node.type === 'heading') {
+      return <Response>{source}</Response>;
+    }
     return <>{renderBlock(node, staticContext(styles), 'b')}</>;
   },
   (previous, next) => previous.source === next.source && previous.styles === next.styles,
