@@ -15,7 +15,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import Animated, {
@@ -23,10 +22,17 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
 import { AIInput } from 'panelui-native/components/ai-input';
+import { Alert } from 'panelui-native/components/alert';
 import { Button } from 'panelui-native/components/button';
+import { Checkbox } from 'panelui-native/components/checkbox';
+import { Chip } from 'panelui-native/components/chip';
+import { Item } from 'panelui-native/components/item';
+import { RadioGroup } from 'panelui-native/components/radio-group';
+import { Surface } from 'panelui-native/components/surface';
+import { Textarea } from 'panelui-native/components/textarea';
+import { Text as PanelText } from 'panelui-native/primitives/text';
 
 import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -144,16 +150,22 @@ export function ComposerTargetChip({
   onPress: () => void;
 }) {
   return (
-    <AppPressable
+    <Button
       accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
+      // Trimmed back to its label: the header chip is a name, not a pill, so
+      // only the press feedback and the button role are wanted from the
+      // library — the same treatment the inline agent preset beside it takes.
+      className="min-h-0 min-w-0 shrink gap-1.5 border-0 px-0 py-0"
       onPress={onPress}
-      style={({ pressed }) => [styles.targetChip, { opacity: pressed ? 0.55 : 1 }]}>
+      pressOpacity={0.55}
+      pressScale={1}
+      size="xs"
+      variant="ghost">
       {leading}
-      <Text numberOfLines={1} style={[styles.targetChipLabel, { color }]}>
+      <PanelText numberOfLines={1} style={[styles.targetChipLabel, { color }]}>
         {label}
-      </Text>
-    </AppPressable>
+      </PanelText>
+    </Button>
   );
 }
 
@@ -627,28 +639,33 @@ export function MobileComposer({
         />
       )}
       {visibleError && (
-        <View
+        <Alert
           accessibilityLiveRegion="polite"
-          style={[styles.errorBanner, { backgroundColor: theme.dangerSoft }]}>
-          <Text style={[styles.errorText, { color: theme.danger }]}>
-            {visibleError}
-          </Text>
-          <AppPressable
+          className="mb-1.5 gap-1.5 px-2.5 py-1.5"
+          variant="destructive">
+          {/* This app redefines `--color-destructive-foreground` as the
+              contrast pair for a *solid* destructive fill, so the variant's
+              own title colour lands white-on-pink here. The text takes the
+              house danger colour instead. */}
+          <Alert.Content>
+            <Alert.Title className="text-destructive">{visibleError}</Alert.Title>
+          </Alert.Content>
+          <Button
             accessibilityLabel="Dismiss error"
-            accessibilityRole="button"
-            hitSlop={8}
+            className="self-center"
             onPress={() => {
               setLocalError(null);
               runtime.dismissError(session.id);
             }}
-            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
+            size="xs"
+            variant="ghost">
             <AppSymbol
               name={{ ios: 'xmark', android: 'close', web: 'close' }}
               size={12}
               tintColor={theme.danger}
             />
-          </AppPressable>
-        </View>
+          </Button>
+        </Alert>
       )}
       {queued.map((message) => (
         <QueuedMessageRow
@@ -675,19 +692,21 @@ export function MobileComposer({
           <Text style={[styles.editingText, { color: theme.textSecondary }]}>
             Editing queued message
           </Text>
-          <AppPressable
+          <Button
             accessibilityLabel="Cancel editing queued message"
-            accessibilityRole="button"
-            hitSlop={8}
+            className="min-h-0 px-1 py-0"
             onPress={() => {
               setEditingQueued(false);
               draftSync.markEdited();
               setDraft('');
               setAttachments([]);
             }}
-            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-            <Text style={[styles.editingCancel, { color: theme.accent }]}>Cancel</Text>
-          </AppPressable>
+            size="xs"
+            variant="ghost">
+            <PanelText className="text-[12.5px] font-semibold text-primary">
+              Cancel
+            </PanelText>
+          </Button>
         </View>
       )}
 
@@ -705,26 +724,30 @@ export function MobileComposer({
                 style={styles.commandListScroll}
                 contentContainerStyle={styles.commandListContent}>
                 {suggestions.map((command) => (
-                  <AppPressable
+                  <Item
                     accessibilityLabel={`Use command ${command.name}`}
-                    accessibilityRole="button"
+                    className="gap-2 rounded-md px-2.5 py-1.5"
                     key={`${command.scope}:${command.name}`}
                     onPress={() => applyCommand(command)}
-                    style={({ pressed }) => [
-                      styles.commandRow,
-                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
-                    ]}>
-                    <Text numberOfLines={1} style={[styles.commandName, { color: theme.text }]}>
-                      /{command.name}
-                    </Text>
-                    {command.description ? (
-                      <Text
-                        numberOfLines={1}
-                        style={[styles.commandHint, { color: theme.textTertiary }]}>
-                        {command.description}
-                      </Text>
-                    ) : null}
-                  </AppPressable>
+                    // Dim, don't shrink: a full-bleed suggestion row scaling to
+                    // 0.97 reads as a layout jump. Same pair PanelUI's own
+                    // text-shaped rows use.
+                    pressOpacity={0.6}
+                    pressScale={1}
+                    size="sm">
+                    {/* Name and hint sit side by side on the left, as they
+                        did before — the content column is turned back into a
+                        row so the hint does not get pushed to the far edge by
+                        the title's flex. */}
+                    <Item.Content className="flex-row items-center gap-2">
+                      <Item.Title numberOfLines={1}>/{command.name}</Item.Title>
+                      {command.description ? (
+                        <Item.Description className="shrink" numberOfLines={1}>
+                          {command.description}
+                        </Item.Description>
+                      ) : null}
+                    </Item.Content>
+                  </Item>
                 ))}
               </ScrollView>
             </View>
@@ -738,26 +761,27 @@ export function MobileComposer({
                 style={styles.commandListScroll}
                 contentContainerStyle={styles.commandListContent}>
                 {fileSuggestions.map((file) => (
-                  <AppPressable
+                  <Item
                     accessibilityLabel={`Mention ${file.path}`}
-                    accessibilityRole="button"
+                    className="gap-2 rounded-md px-2.5 py-1.5"
                     key={file.path}
                     onPress={() => applyFile(file)}
-                    style={({ pressed }) => [
-                      styles.commandRow,
-                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
-                    ]}>
-                    <AppSymbol
-                      name={file.is_dir
-                        ? { ios: 'folder', android: 'folder', web: 'folder' }
-                        : { ios: 'doc.text', android: 'description', web: 'description' }}
-                      size={14}
-                      tintColor={theme.textSecondary}
-                    />
-                    <Text numberOfLines={1} style={[styles.fileName, { color: theme.text }]}>
-                      {file.path}
-                    </Text>
-                  </AppPressable>
+                    pressOpacity={0.6}
+                    pressScale={1}
+                    size="sm">
+                    <Item.Media>
+                      <AppSymbol
+                        name={file.is_dir
+                          ? { ios: 'folder', android: 'folder', web: 'folder' }
+                          : { ios: 'doc.text', android: 'description', web: 'description' }}
+                        size={14}
+                        tintColor={theme.textSecondary}
+                      />
+                    </Item.Media>
+                    <Item.Content>
+                      <Item.Title numberOfLines={1}>{file.path}</Item.Title>
+                    </Item.Content>
+                  </Item>
                 ))}
               </ScrollView>
             </View>
@@ -769,34 +793,38 @@ export function MobileComposer({
                   key={`${attachment.blob_reference ?? attachment.path}:${index}`}
                   style={styles.attachmentItem}>
                   <AttachmentChip attachment={attachment} />
-                  <AppPressable
+                  <Button
                     accessibilityLabel={`Remove ${attachment.name}`}
-                    accessibilityRole="button"
+                    // A 20pt badge pinned to the chip's corner, so the library
+                    // button is trimmed back to the box this had: the press
+                    // feedback and the button role come from it, the size and
+                    // the position from here.
+                    className="absolute -right-1 -top-1 h-5 w-5 min-h-0 min-w-0 rounded-full border-0 bg-muted px-0 py-0"
                     disabled={submitting}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     onPress={() => {
                       draftSync.markEdited();
                       setAttachments((current) => current.filter((_, item) => item !== index));
                     }}
-                    style={({ pressed }) => [
-                      styles.attachmentRemove,
-                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
-                    ]}>
+                    size="xs"
+                    variant="ghost">
                     <AppSymbol
                       name={{ ios: 'xmark', android: 'close', web: 'close' }}
                       size={11}
                       tintColor={theme.textSecondary}
                     />
-                  </AppPressable>
+                  </Button>
                 </View>
               ))}
               {pendingFiles.map((file) => (
-                <View key={file.id} style={[styles.attachmentChip, { backgroundColor: theme.overlayStrong }]}>
-                  <UploadRing size={14} />
-                  <Text numberOfLines={1} style={[styles.attachmentName, { color: theme.textSecondary }]}>
+                <Chip
+                  className="max-w-48"
+                  key={file.id}
+                  size="sm"
+                  start={<UploadRing size={14} />}>
+                  <PanelText className="shrink text-secondary-foreground" numberOfLines={1} size="sm">
                     {file.name}
-                  </Text>
-                </View>
+                  </PanelText>
+                </Chip>
               ))}
             </View>
           ) : null}
@@ -929,8 +957,8 @@ function PermissionPanel({
       {error && <Text style={[styles.panelError, { color: theme.danger }]}>{error}</Text>}
       <View style={styles.optionActions}>
         {permission.options.map((option) => (
-          <AppPressable
-            accessibilityRole="button"
+          <Button
+            className="rounded-full"
             disabled={Boolean(responding)}
             key={option.id}
             onPress={() => {
@@ -942,21 +970,13 @@ function PermissionPanel({
                 setResponding(null);
               });
             }}
-            style={({ pressed }) => [
-              styles.optionButton,
-              {
-                backgroundColor: option.allow ? theme.inverse : theme.surfaceMuted,
-                opacity: pressed || (responding && responding !== option.id) ? 0.55 : 1,
-              },
-            ]}>
+            size="sm"
+            variant={option.allow ? 'primary' : 'secondary'}>
             {responding === option.id && (
               <Blocks color={option.allow ? theme.onInverse : theme.text} size={14} />
             )}
-            <Text style={[
-              styles.optionButtonText,
-              { color: option.allow ? theme.onInverse : theme.text },
-            ]}>{option.label}</Text>
-          </AppPressable>
+            {option.label}
+          </Button>
         ))}
       </View>
     </RequestPanel>
@@ -1042,95 +1062,90 @@ function UserInputPanel({
       </View>
       <Text style={[styles.questionText, { color: theme.text }]}>{question.question}</Text>
       <ScrollView keyboardShouldPersistTaps="handled" nestedScrollEnabled style={styles.questionOptions}>
-        {question.options.map((option) => {
-          const checked = selected.includes(option.label);
-          return (
-            <AppPressable
-              accessibilityRole={question.multiSelect ? 'checkbox' : 'radio'}
-              accessibilityState={{ checked }}
-              key={option.label}
-              onPress={() => toggle(option.label)}
-              style={({ pressed }) => [
-                styles.questionOption,
-                {
-                  backgroundColor: checked ? NativeTint : theme.surfaceMuted,
-                  borderColor: checked ? NativeTint : 'transparent',
-                  opacity: pressed ? 0.65 : 1,
-                },
-              ]}>
-              <View style={styles.questionOptionCopy}>
-                <Text style={[styles.questionOptionLabel, { color: theme.text }]}>{option.label}</Text>
-                {option.description && option.description !== option.label && (
-                  <Text style={[styles.questionOptionDescription, { color: theme.textSecondary }]}>
-                    {option.description}
-                  </Text>
-                )}
-              </View>
-              {checked && (
-                <AppSymbol
-                  name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-                  size={14}
-                  tintColor={NativeTint}
-                />
-              )}
-            </AppPressable>
-          );
-        })}
-        <TextInput
+        {question.multiSelect ? (
+          <View className="gap-2">
+            {question.options.map((option) => (
+              <Checkbox
+                checked={selected.includes(option.label)}
+                description={optionDetail(option)}
+                key={option.label}
+                label={option.label}
+                onCheckedChange={() => toggle(option.label)}
+                variant="card"
+              />
+            ))}
+          </View>
+        ) : (
+          <RadioGroup
+            onValueChange={toggle}
+            value={selected[0] ?? ''}
+            variant="card">
+            {question.options.map((option) => (
+              <RadioGroup.Item
+                description={optionDetail(option)}
+                key={option.label}
+                label={option.label}
+                value={option.label}
+              />
+            ))}
+          </RadioGroup>
+        )}
+        <Textarea
           accessibilityLabel="Custom answer"
-          multiline
-          placeholder="Write another answer…"
-          placeholderTextColor={theme.textTertiary}
-          selectionColor={NativeTint}
-          style={[
-            styles.customAnswer,
-            {
-              backgroundColor: theme.surfaceMuted,
-              borderColor: custom.trim() ? NativeTint : 'transparent',
-              color: theme.text,
-            },
-          ]}
-          value={custom}
+          className="bg-muted"
+          containerClassName="mt-2.5"
           onChangeText={(value) => {
             setCustomAnswers((values) => ({ ...values, [question.id]: value }));
             if (value.trim()) setSelections((values) => ({ ...values, [question.id]: [] }));
           }}
+          placeholder="Write another answer…"
+          rows={2}
+          size="sm"
+          value={custom}
         />
       </ScrollView>
       {error && <Text style={[styles.panelError, { color: theme.danger }]}>{error}</Text>}
       <View style={styles.questionActions}>
         {index > 0 ? (
-          <AppPressable
-            accessibilityRole="button"
+          <Button
             onPress={() => setIndex((value) => value - 1)}
-            style={styles.backButton}>
-            <Text style={[styles.backButtonText, { color: theme.textSecondary }]}>Back</Text>
-          </AppPressable>
+            size="sm"
+            variant="ghost">
+            Back
+          </Button>
         ) : <View />}
-        <AppPressable
-          accessibilityRole="button"
+        <Button
           disabled={!canContinue || submitting}
           onPress={() => void advance()}
-          style={({ pressed }) => [
-            styles.nextButton,
-            { backgroundColor: theme.inverse, opacity: !canContinue || submitting || pressed ? 0.55 : 1 },
-          ]}>
+          size="sm"
+          variant="primary">
           {submitting && <Blocks color={theme.onInverse} size={16} />}
-          <Text style={[styles.nextButtonText, { color: theme.onInverse }]}>
-            {last ? 'Submit' : 'Next'}
-          </Text>
-        </AppPressable>
+          {last ? 'Submit' : 'Next'}
+        </Button>
       </View>
     </RequestPanel>
   );
 }
 
+/** The line under a choice, or nothing when it would only restate the label. */
+function optionDetail(option: {
+  label: string;
+  description?: string | null;
+}): string | undefined {
+  return option.description && option.description !== option.label
+    ? option.description
+    : undefined;
+}
+
+/** The card a permission request or a question is asked on, above the composer. */
 function RequestPanel({ borderColor, children }: { borderColor: string; children: ReactNode }) {
-  const theme = useTheme();
   return (
-    <View style={[styles.requestPanel, { backgroundColor: theme.surface, borderColor }]}>
+    <Surface
+      className="mb-2 rounded-2xl p-3"
+      padding="none"
+      style={{ borderColor, borderWidth: 1 }}>
       {children}
-    </View>
+    </Surface>
   );
 }
 
@@ -1142,12 +1157,6 @@ const styles = StyleSheet.create({
     gap: 12,
     paddingHorizontal: 6,
     paddingTop: 4,
-  },
-  targetChip: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexShrink: 1,
-    gap: 5,
   },
   targetChipLabel: {
     fontSize: 13,
@@ -1163,30 +1172,9 @@ const styles = StyleSheet.create({
   },
   attachmentStack: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 4, paddingTop: 4 },
   attachmentItem: { position: 'relative' },
-  attachmentRemove: {
-    alignItems: 'center',
-    borderRadius: 10,
-    height: 20,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: -4,
-    top: -4,
-    width: 20,
-  },
   commandList: { marginHorizontal: 4, marginTop: 4 },
   commandListScroll: { maxHeight: 220 },
   commandListContent: { gap: 4, paddingVertical: 4 },
-  commandRow: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
-  },
-  commandName: { fontSize: 14, fontWeight: '600' },
-  commandHint: { fontSize: 11.5, marginTop: 1 },
-  fileName: { flex: 1, fontSize: 13.5 },
   editingRow: {
     alignItems: 'center',
     borderRadius: Radius.small,
@@ -1198,39 +1186,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   editingText: { fontSize: 12.5, fontWeight: '600' },
-  editingCancel: { fontSize: 12.5, fontWeight: '600' },
-  attachmentChip: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    flexDirection: 'row',
-    gap: 6,
-    height: 30,
-    maxWidth: 190,
-    paddingHorizontal: 9,
-  },
-  attachmentName: { flexShrink: 1, fontSize: 12, fontWeight: '600' },
   // No gap: each control already carries its own 36pt box, and the invisible
   // space between them reads as the spacing.
   cluster: { alignItems: 'center', flexDirection: 'row' },
-  // Material's minimum touch target is 48dp; these render at 36dp visually
-  // (AppPressable adds the padding back via hitSlop) so the toolbar stays
-  // dense without dropping below the reachable minimum.
-  iconButton: {
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-  sendButton: {
-    // Same footprint as the other toolbar controls: the send glyph is another
-    // icon in the row, not a raised button, so it carries no fill of its own.
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
   // The morph slot: both states are absolutely positioned in the same 36dp
   // box, so the cross-fade never shifts the toolbar.
   sendSlot: { height: 36, width: 36 },
@@ -1243,22 +1201,6 @@ const styles = StyleSheet.create({
     top: 0,
     width: 36,
   },
-  errorBanner: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    flexDirection: 'row',
-    gap: 9,
-    marginBottom: 7,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  errorText: { flex: 1, fontSize: 12, fontWeight: '600', lineHeight: 17 },
-  requestPanel: {
-    borderRadius: Radius.large,
-    borderWidth: 1,
-    marginBottom: 8,
-    padding: 12,
-  },
   requestHeading: { alignItems: 'center', flexDirection: 'row', gap: 8 },
   requestTitle: { flex: 1, fontSize: 14, fontWeight: '700' },
   detailScroll: {
@@ -1270,56 +1212,11 @@ const styles = StyleSheet.create({
   },
   requestDetail: { fontFamily: MonoFont, fontSize: 11.5, lineHeight: 17 },
   optionActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end', marginTop: 11 },
-  optionButton: {
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 38,
-    paddingHorizontal: 14,
-  },
-  optionButtonText: { fontSize: 13, fontWeight: '700' },
   panelError: { fontSize: 12, lineHeight: 17, marginTop: 8 },
   questionHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   questionEyebrow: { fontSize: 11, fontWeight: '700', letterSpacing: 0.55, textTransform: 'uppercase' },
   progress: { fontSize: 11, fontWeight: '600' },
   questionText: { fontSize: 14, fontWeight: '600', lineHeight: 20, marginTop: 7 },
   questionOptions: { marginTop: 10, maxHeight: 260 },
-  questionOption: {
-    alignItems: 'center',
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 10,
-    minHeight: 44,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
-  },
-  questionOptionCopy: { flex: 1 },
-  questionOptionLabel: { fontSize: 13, fontWeight: '600' },
-  questionOptionDescription: { fontSize: 11.5, lineHeight: 16, marginTop: 2 },
-  customAnswer: {
-    borderRadius: Radius.medium,
-    borderWidth: 1,
-    fontSize: 13,
-    lineHeight: 18,
-    minHeight: 42,
-    paddingHorizontal: 11,
-    paddingVertical: 9,
-  },
   questionActions: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  backButton: { justifyContent: 'center', minHeight: 36, paddingHorizontal: 6 },
-  backButtonText: { fontSize: 13, fontWeight: '600' },
-  nextButton: {
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    flexDirection: 'row',
-    gap: 6,
-    justifyContent: 'center',
-    minHeight: 36,
-    minWidth: 78,
-    paddingHorizontal: 14,
-  },
-  nextButtonText: { fontSize: 13, fontWeight: '700' },
 });
