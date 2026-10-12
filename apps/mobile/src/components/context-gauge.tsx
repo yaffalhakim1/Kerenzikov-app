@@ -1,11 +1,11 @@
 import type { AgentSession } from '@waku/client';
+import { Button } from 'panelui-native/components/button';
 import { Meter } from 'panelui-native/components/meter';
 import type { MeterThreshold } from 'panelui-native/components/meter';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
-import { AppPressable } from './app-pressable';
 import { Sheet } from './sheet';
 import type { Theme } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -116,14 +116,14 @@ export function ContextGaugeButton({
 
   return (
     <>
-      <AppPressable
+      <Button
         accessibilityLabel={`Context window, ${value}. Open details.`}
-        accessibilityRole="button"
-        hitSlop={8}
         onPress={() => setOpen(true)}
-        style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1 })}>
+        size="icon"
+        variant="ghost"
+      >
         <ContextGauge percent={percent ?? 0} size={size} />
-      </AppPressable>
+      </Button>
 
       <Sheet onDismiss={() => setOpen(false)} title="Context window" visible={open}>
         <View style={styles.detailRow}>

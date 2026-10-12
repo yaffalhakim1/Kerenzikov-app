@@ -1,4 +1,6 @@
 import type { MessageAttachment } from '@waku/client';
+import { Button } from 'panelui-native/components/button';
+import { AppPressable } from '@/components/app-pressable';
 import { Chip } from 'panelui-native/components/chip';
 import { Spinner } from 'panelui-native/components/spinner';
 import { Text } from 'panelui-native/primitives/text';
@@ -6,7 +8,6 @@ import { useEffect, useState } from 'react';
 import { Image, Modal, StyleSheet, View } from 'react-native';
 
 import { AppSymbol } from './app-symbol';
-import { AppPressable } from '@/components/app-pressable';
 
 import { Radius } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -75,6 +76,9 @@ export function AttachmentChip({ attachment }: { attachment: MessageAttachment }
   if (source) {
     return (
       <>
+        // Not a PanelUI control: this is a bare tappable image with no chrome
+        // of its own. Every PanelUI pressable draws a surface, which would put
+        // a card behind the picture.
         <AppPressable
           accessibilityLabel={`Preview ${attachment.name}`}
           accessibilityRole="button"
@@ -97,18 +101,19 @@ export function AttachmentChip({ attachment }: { attachment: MessageAttachment }
               source={{ uri: source }}
               style={styles.viewerImage}
             />
-            <AppPressable
+            <Button
               accessibilityLabel="Close preview"
-              accessibilityRole="button"
-              hitSlop={8}
+              className="absolute end-4 top-4"
               onPress={() => setPreviewing(false)}
-              style={[styles.close, { backgroundColor: theme.overlayStrong }]}>
+              size="icon"
+              variant="ghost"
+            >
               <AppSymbol
                 name={{ ios: 'xmark', android: 'close', web: 'close' }}
                 size={15}
                 tintColor={theme.text}
               />
-            </AppPressable>
+            </Button>
           </View>
         </Modal>
       </>
