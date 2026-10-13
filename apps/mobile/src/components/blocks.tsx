@@ -35,6 +35,7 @@ export function Blocks({
   size = 20,
   style,
   label = 'Working',
+  speed,
 }: {
   /** Tint; defaults to the brand accent. */
   color?: ColorValue;
@@ -45,6 +46,14 @@ export function Blocks({
    *  wording; the default keeps a bare "progressbar" from announcing itself
    *  with no name at all. */
   label?: string | null;
+  /**
+   * `Loader`'s own rate multiplier. Left undefined the ring loops forever,
+   * which is right for something being waited on; `0` stops it and draws the
+   * still frame, which is right for a mark that is only ever a position —
+   * `EarlierIndicator` is the one such call site, and it mounts for every
+   * transcript longer than the initial window.
+   */
+  speed?: number;
 }) {
   const theme = useTheme();
   return (
@@ -66,6 +75,7 @@ export function Blocks({
       // sits on scrolling lists, where a loader per row is the norm, so the
       // extra view is worth not having.
       style={style}
+      speed={speed}
       variant="morph-ring"
     />
   );
