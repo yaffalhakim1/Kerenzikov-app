@@ -43,6 +43,7 @@ import {
   persistSession,
   probeProvider,
   removeDaemonSession,
+  removeQueuedMessage as requestRemoveQueuedMessage,
   rewindSessionToMessage,
   sameProviderSession,
   refreshTrackedSession,
@@ -1132,8 +1133,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       queued_messages: (current.queued_messages ?? []).filter((item) => item.id !== messageId),
     };
     cacheSession(next);
+    // The queue is merged on save, so dropping the entry locally is not
+    // enough — the daemon would put it back from its own copy.
+    if (daemon.client) await requestRemoveQueuedMessage(daemon.client, sessionId, messageId);
     await persistOrdered(next);
-  }, [cacheSession, daemon.activeProfile?.id, persistOrdered, queryClient]);
+  }, [cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, queryClient]);
 
   /** Deliver a queued follow-up into the running turn right away instead of
    *  waiting for the turn to settle. The row is removed first so the provider
@@ -1152,6 +1156,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       queued_messages: (current.queued_messages ?? []).filter((item) => item.id !== messageId),
     };
     cacheSession(next);
+    // Steered means it left the queue; tell the daemon so the merge does not
+    // put it back. A rejected steer re-queues it as a new entry.
+    if (daemon.client) await requestRemoveQueuedMessage(daemon.client, sessionId, messageId);
     await persistOrdered(next);
     await ensureRuntime(next);
     await steerPrompt(next, message.display_content ?? message.content, message.attachments ?? [], message.content);

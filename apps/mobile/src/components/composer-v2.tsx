@@ -118,6 +118,13 @@ export function ComposerV2({
     : busy
       ? 'Queue a follow-up…'
       : 'Message agent';
+  // Recovery affordances for a session whose provider failed to start. Only a
+  // settled failure offers them: reloading under a live turn would strand the
+  // work the runtime is still driving.
+  const recovery = session.status === 'failed' && !busy;
+  const retryPrompt = recovery
+    ? [...session.messages].reverse().find((message) => message.role === 'user')
+    : undefined;
   const runtimeError = runtime.errors[session.id];
   // A disconnect error is the connection banner's to report, not the
   // composer's — showing both says the same thing twice.
@@ -285,6 +292,46 @@ export function ComposerV2({
     <ComposerSurface
       aboveCard={
         <>
+          {recovery ? (
+            <View
+              className="mb-1.5 flex-row items-center gap-2.5 rounded-md border px-3 py-2.5"
+              style={{
+                backgroundColor: theme.dangerSoft,
+                borderColor: theme.danger,
+              }}>
+              <AppSymbol name="exclamationmark.triangle" size={14} tintColor={theme.danger} />
+              <Text className="flex-1 text-xs" style={{ color: theme.textSecondary }}>
+                The provider stopped before it could run this turn.
+              </Text>
+              <Button
+                accessibilityLabel="Reload the agent runtime"
+                className="min-h-0 px-1.5 py-0"
+                onPress={() => {
+                  void runtime.reloadSession(session.id).catch(() => {});
+                }}
+                size="xs"
+                variant="ghost">
+                <PanelText className="text-[12.5px] font-semibold text-primary">Reload</PanelText>
+              </Button>
+              {retryPrompt ? (
+                <Button
+                  accessibilityLabel="Run the last message again"
+                  className="min-h-0 px-1.5 py-0"
+                  onPress={() => {
+                    void runtime
+                      .sendPrompt(session, retryPrompt.content, retryPrompt.attachments ?? [])
+                      .catch(() => {});
+                  }}
+                  size="xs"
+                  variant="ghost">
+                  <PanelText className="text-[12.5px] font-semibold text-primary">
+                    Try again
+                  </PanelText>
+                </Button>
+              ) : null}
+            </View>
+          ) : null}
+
           {queued.map((message) => (
             <QueuedMessageRow
               canSteer={canSteer}

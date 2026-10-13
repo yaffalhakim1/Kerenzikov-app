@@ -258,6 +258,7 @@ function transcriptSession(): AgentSession {
     provider: 'codex',
     runtime_mode: 'fullAccess',
     status: 'idle',
+    live_state: 'idle',
     created_at: 10,
     updated_at: 200,
     provider_cursor: null,

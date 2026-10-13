@@ -100,6 +100,8 @@ export function createSession(
     context_window: options.contextWindow ?? null,
     agent_preset: options.agentPreset ?? null,
     status: 'idle',
+    // Daemon-owned; a session the client just created has no runtime yet.
+    live_state: 'idle',
     created_at: now,
     updated_at: now,
     last_reply_at: null,

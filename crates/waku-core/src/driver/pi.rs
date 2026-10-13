@@ -11,6 +11,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -111,6 +112,15 @@ impl PiFlavor {
         matches!(self, Self::Pi)
     }
 
+    /// Whether a prompt arriving mid-turn must go out as `follow_up`.
+    ///
+    /// Oh My Pi refuses `prompt` while it is streaming with its own
+    /// `AgentBusyError`, and documents `follow_up` for that case. Pi accepts a
+    /// prompt mid-run, so it keeps the plain verb.
+    fn queues_a_live_prompt(self) -> bool {
+        matches!(self, Self::OhMyPi)
+    }
+
     fn cursor(self, session_id: String, session_file: Option<PathBuf>) -> ProviderResumeCursor {
         match self {
             Self::Pi => ProviderResumeCursor::Pi {
@@ -145,6 +155,12 @@ impl PiFlavor {
 
 enum CommandMessage {
     Prompt(String),
+    /// Replay a prompt with an explicit verb after the agent turned out to be
+    /// mid-run. Sent by the reader, which sees the refusal but owns no stdin.
+    ReplayPrompt {
+        verb: &'static str,
+        message: String,
+    },
     Steer(String),
     Cancel,
     CancelExtensionRequest(String),
@@ -162,7 +178,12 @@ enum CommandMessage {
 
 enum PendingResponse {
     Request(Sender<Result<Value, String>>),
-    Prompt,
+    /// An in-flight prompt: the verb it went out as, and the text, so a
+    /// refusal caused by a mid-run start can be replayed with the other verb.
+    Prompt {
+        verb: &'static str,
+        message: String,
+    },
 }
 
 type PendingResponses = Arc<Mutex<HashMap<String, PendingResponse>>>;
@@ -280,6 +301,12 @@ impl PiDriver {
 
         let (commands, command_rx) = unbounded();
         let pending = Arc::new(Mutex::new(HashMap::new()));
+        // Whether a run is live right now. The reader owns the authoritative
+        // stream state; the writer needs this before it picks a verb, because
+        // Oh My Pi refuses `prompt` while streaming.
+        let turn_live = Arc::new(AtomicBool::new(false));
+        let reader_turn_live = turn_live.clone();
+        let writer_turn_live = turn_live.clone();
         let reader_pending = pending.clone();
         let reader_commands = commands.clone();
         let reader_events = events.clone();
@@ -299,14 +326,24 @@ impl PiDriver {
                                         // envelopes that reassemble into one
                                         // logical message.
                                         match chunks.accept(value) {
-                                            Ok(Some(value)) => handle_pi_message(
-                                                flavor,
-                                                value,
-                                                &reader_pending,
-                                                &reader_commands,
-                                                &reader_events,
-                                                &mut stream_state,
-                                            ),
+                                            Ok(Some(value)) => {
+                                                handle_pi_message(
+                                                    flavor,
+                                                    value,
+                                                    &reader_pending,
+                                                    &reader_commands,
+                                                    &reader_events,
+                                                    &mut stream_state,
+                                                );
+                                                // Published on every frame that
+                                                // can start or settle a run, so
+                                                // the writer's verb choice is
+                                                // never a frame behind.
+                                                reader_turn_live.store(
+                                                    stream_state.run_started,
+                                                    Ordering::Release,
+                                                );
+                                            }
                                             Ok(None) => {}
                                             Err(error) => {
                                                 let _ =
@@ -502,11 +539,49 @@ impl PiDriver {
                 while let Ok(message) = command_rx.recv() {
                     match message {
                         CommandMessage::Prompt(prompt) => {
+                            // Oh My Pi refuses `prompt` while it is streaming;
+                            // `follow_up` is the verb it offers for that case.
+                            // Choosing by the live flag keeps a follow-up that
+                            // the daemon drained mid-turn from becoming an
+                            // error banner.
+                            let verb = if flavor.queues_a_live_prompt()
+                                && writer_turn_live.load(Ordering::Acquire)
+                            {
+                                "follow_up"
+                            } else {
+                                "prompt"
+                            };
                             let result = send_prompt(
                                 &mut stdin,
                                 &writer_pending,
                                 &mut next_request_id,
+                                verb,
                                 &prompt,
+                            );
+                            if let Err(error) = result {
+                                let _ = writer_events.send(DriverEvent::Error(tr!(
+                                    "errors.provider_rejected_prompt_detail",
+                                    provider = flavor.display_name(),
+                                    error = error
+                                )));
+                                let _ = writer_events.send(DriverEvent::TurnFinished {
+                                    success: false,
+                                    summary: Some(tr!(
+                                        "errors.provider_rejected_prompt",
+                                        provider = flavor.display_name()
+                                    )),
+                                });
+                            }
+                        }
+                        CommandMessage::ReplayPrompt { verb, message } => {
+                            // A refused prompt replayed with the verb the
+                            // refusal asked for. Failure here is a real error.
+                            let result = send_prompt(
+                                &mut stdin,
+                                &writer_pending,
+                                &mut next_request_id,
+                                verb,
+                                &message,
                             );
                             if let Err(error) = result {
                                 let _ = writer_events.send(DriverEvent::Error(tr!(
@@ -856,6 +931,7 @@ fn send_prompt(
     stdin: &mut impl Write,
     pending: &PendingResponses,
     next_request_id: &mut u64,
+    verb: &'static str,
     prompt: &str,
 ) -> Result<(), String> {
     *next_request_id += 1;
@@ -864,14 +940,20 @@ fn send_prompt(
         let mut pending = pending.lock();
         // A response from an older prompt cannot settle the next turn.
         pending.retain(|_, response| matches!(response, PendingResponse::Request(_)));
-        pending.insert(id.clone(), PendingResponse::Prompt);
+        pending.insert(
+            id.clone(),
+            PendingResponse::Prompt {
+                verb,
+                message: prompt.to_owned(),
+            },
+        );
     }
     // OMP built-ins can hold the prompt response until compaction or another
     // command finishes. Do not apply the short control-RPC timeout or block
     // the writer from sending abort while waiting for that response.
     if let Err(error) = write_json_line(
         stdin,
-        &json!({"id": id, "type": "prompt", "message": prompt}),
+        &json!({"id": id, "type": verb, "message": prompt}),
     ) {
         pending.lock().remove(&id);
         return Err(format!("transport write failed: {error}"));
@@ -1230,6 +1312,13 @@ fn clone_ohmypi_session(
     result
 }
 
+/// Whether an error string is Oh My Pi's "agent is already processing"
+/// refusal, which is a signal to re-deliver as `follow_up` rather than a
+/// failure to report.
+fn is_agent_busy_refusal(error: &str) -> bool {
+    error.contains("Agent is already processing")
+}
+
 #[derive(Default)]
 struct PiStreamState {
     run_started: bool,
@@ -1255,8 +1344,11 @@ fn handle_pi_message(
         let Some(id) = value.get("id").and_then(Value::as_str) else {
             return;
         };
-        let prompt_response = matches!(pending.lock().get(id), Some(PendingResponse::Prompt));
-        if prompt_response {
+        let prompt_verb = match pending.lock().get(id) {
+            Some(PendingResponse::Prompt { verb, .. }) => Some(*verb),
+            _ => None,
+        };
+        if let Some(verb) = prompt_verb {
             let success = value.get("success").and_then(Value::as_bool) == Some(true);
             let local_only =
                 value.pointer("/data/agentInvoked").and_then(Value::as_bool) == Some(false);
@@ -1264,6 +1356,26 @@ fn handle_pi_message(
                 // OMP may acknowledge a prompt before reporting that an
                 // extension handled it locally. Retain the id for that second
                 // response; normal agent completion retires it below.
+                return;
+            }
+            // A `prompt` refused because the agent is mid-run is not a failure:
+            // Oh My Pi offers `follow_up` for exactly that case. The writer
+            // chose `prompt` because the run had not started when it looked, so
+            // hand the replay back to it — only the writer owns stdin.
+            let refusal = value.get("error").and_then(Value::as_str);
+            if !success
+                && verb == "prompt"
+                && flavor.queues_a_live_prompt()
+                && refusal.is_some_and(is_agent_busy_refusal)
+            {
+                let message = match pending.lock().remove(id) {
+                    Some(PendingResponse::Prompt { message, .. }) => message,
+                    _ => return,
+                };
+                let _ = commands.send(CommandMessage::ReplayPrompt {
+                    verb: "follow_up",
+                    message,
+                });
                 return;
             }
             pending.lock().remove(id);
@@ -1664,7 +1776,7 @@ mod tests {
     fn local_slash_command_output_and_completion_do_not_need_an_agent_turn() {
         let (pending, commands, _command_rx, mut state) = harness();
         let (events, event_rx) = unbounded();
-        send_prompt(&mut Vec::new(), &pending, &mut 0, "/context").unwrap();
+        send_prompt(&mut Vec::new(), &pending, &mut 0, "prompt", "/context").unwrap();
         for frame in [
             json!({"type": "response", "id": "waku-1", "command": "prompt", "success": true}),
             json!({"type": "command_output", "text": "Available commands\n"}),
@@ -1696,14 +1808,85 @@ mod tests {
         assert!(pending.lock().is_empty());
     }
 
+    /// Oh My Pi refuses a plain `prompt` while a run is live. The refusal is a
+    /// routing signal, not a failure: it must come back as a `follow_up` replay
+    /// rather than an error banner and a settled turn.
+    #[test]
+    fn ohmypi_busy_refusal_is_replayed_as_a_follow_up() {
+        let (pending, commands, command_rx, mut state) = harness();
+        let (events, event_rx) = unbounded();
+        let mut next = 0;
+        let mut wire = Vec::new();
+        send_prompt(&mut wire, &pending, &mut next, "prompt", "keep going").unwrap();
+
+        handle_pi_message(
+            PiFlavor::OhMyPi,
+            json!({
+                "type": "response",
+                "id": "waku-1",
+                "success": false,
+                "error": "Agent is already processing. Use steer() or followUp() to queue messages, or wait for completion."
+            }),
+            &pending,
+            &commands,
+            &events,
+            &mut state,
+        );
+
+        // No turn was settled and nothing reached the transcript as an error.
+        assert!(event_rx.try_recv().is_err());
+        assert!(pending.lock().is_empty());
+        match command_rx.try_recv().expect("a replay should be queued") {
+            CommandMessage::ReplayPrompt { verb, message } => {
+                assert_eq!(verb, "follow_up");
+                assert_eq!(message, "keep going");
+            }
+            _ => panic!("expected a prompt replay"),
+        }
+    }
+
+    /// Pi has no busy refusal, so a failed prompt stays a failure there.
+    #[test]
+    fn pi_prompt_failures_are_not_replayed() {
+        let (pending, commands, command_rx, mut state) = harness();
+        let (events, event_rx) = unbounded();
+        let mut next = 0;
+        let mut wire = Vec::new();
+        send_prompt(&mut wire, &pending, &mut next, "prompt", "keep going").unwrap();
+
+        handle_pi_message(
+            PiFlavor::Pi,
+            json!({
+                "type": "response",
+                "id": "waku-1",
+                "success": false,
+                "error": "Agent is already processing."
+            }),
+            &pending,
+            &commands,
+            &events,
+            &mut state,
+        );
+
+        assert!(command_rx.try_recv().is_err(), "Pi should not replay");
+        assert!(matches!(event_rx.recv().unwrap(), DriverEvent::TurnStarted));
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::Error(_)
+        ));
+        assert!(matches!(
+            event_rx.recv().unwrap(),
+            DriverEvent::TurnFinished { success: false, .. }
+        ));
+    }
     #[test]
     fn asynchronous_prompt_errors_settle_only_the_current_prompt() {
         let (pending, commands, _command_rx, mut state) = harness();
         let (events, event_rx) = unbounded();
         let mut next = 0;
         let mut wire = Vec::new();
-        send_prompt(&mut wire, &pending, &mut next, "/old").unwrap();
-        send_prompt(&mut wire, &pending, &mut next, "/new").unwrap();
+        send_prompt(&mut wire, &pending, &mut next, "prompt", "/old").unwrap();
+        send_prompt(&mut wire, &pending, &mut next, "prompt", "/new").unwrap();
         handle_pi_message(
             PiFlavor::Pi,
             json!({"type": "response", "id": "waku-1", "success": false, "error": "stale"}),

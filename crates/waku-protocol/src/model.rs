@@ -787,6 +787,42 @@ impl SessionStatus {
     }
 }
 
+/// Whether a session's provider is live right now.
+///
+/// Written **only by the daemon**, from the session's own driver events, and
+/// merged across client saves like `archived_at` and the ending checkpoints.
+/// See `docs/adr/0004-daemon-owned-session-state.md`.
+///
+/// [`SessionStatus`] answers the same question from a client's projection: the
+/// settling client flips it to `Idle` on its next save, which trails the
+/// provider's own settle, and a client that never saves leaves it stale
+/// forever. Anything that must be correct without a client present — the
+/// daemon's queue drain, the steer gate — reads this instead.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum LiveState {
+    /// No runtime, or a runtime that is not running a turn.
+    #[default]
+    Idle,
+    /// A runtime is being created or attached.
+    Starting,
+    /// A provider turn is running.
+    Running,
+    /// The reply ended but detached work holds the turn open, or the user
+    /// pressed Stop and the interrupt is still in flight.
+    Parked,
+    /// The runtime exited, or failed to start.
+    Failed,
+}
+
+impl LiveState {
+    /// Whether a provider turn is running or parked on detached work, so a
+    /// new message must not be sent as a fresh prompt.
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Running | Self::Parked)
+    }
+}
+
 /// A follow-up message queued while the agent is busy. It becomes its own
 /// turn once the current turn settles successfully.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, TS)]
@@ -1076,6 +1112,13 @@ pub struct AgentSession {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_preset: Option<String>,
     pub status: SessionStatus,
+    /// Daemon-owned provider liveness. Clients render it and never write it;
+    /// see [`LiveState`] and `docs/adr/0004-daemon-owned-session-state.md`.
+    ///
+    /// Optional on the wire: a client that predates this field simply omits it,
+    /// and the daemon's value is the one that survives the merge either way.
+    #[serde(default)]
+    pub live_state: LiveState,
     pub created_at: u64,
     /// Any mutation, including title edits and truncation. Use
     /// [`Self::last_reply_at`] for conversation recency.
@@ -1164,6 +1207,7 @@ impl AgentSession {
             context_window: None,
             agent_preset: None,
             status: SessionStatus::Idle,
+            live_state: LiveState::Idle,
             created_at: now,
             updated_at: now,
             last_reply_at: None,
@@ -1209,6 +1253,7 @@ impl AgentSession {
             context_window: None,
             agent_preset: None,
             status: self.status,
+            live_state: self.live_state,
             created_at: self.created_at,
             updated_at: self.updated_at,
             last_reply_at: self.last_reply_at,

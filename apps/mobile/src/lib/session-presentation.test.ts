@@ -576,6 +576,7 @@ function session(overrides: Partial<AgentSession>): AgentSession {
     provider: 'codex',
     runtime_mode: 'autoAcceptEdits',
     status: 'idle',
+    live_state: 'idle',
     created_at: 1,
     updated_at: 1,
     last_reply_at: 1,

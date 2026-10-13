@@ -720,6 +720,10 @@ errors.daemon_disconnected: Kerenzikov デーモンに接続されていませ�
 errors.path_outside_workspace: このパスはデーモンホスト上の現在のワークスペース外にあります
 errors.rename_task: "タスクの名前を変更できませんでした：%{error}"
 errors.remove_task: "タスクを削除できませんでした：%{error}"
+errors.remove_queued_message: "キュー内のメッセージを更新できませんでした：%{error}"
+session.provider_failed_hint: プロバイダーがこのターンを実行する前に停止しました。
+session.reload_runtime: 再読み込み
+session.retry_last_turn: 再試行
 errors.save_draft: "下書きを保存できませんでした：%{error}"
 errors.rewind_task: "タスクを巻き戻せませんでした：%{error}"
 errors.project_not_found: プロジェクトが見つかりません

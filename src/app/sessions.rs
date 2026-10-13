@@ -1,5 +1,21 @@
 use super::*;
 
+/// The submission `retry_last_turn` resubmits: the most recent user turn,
+/// with the presentation fields the transcript showed. `None` when the session
+/// has no user turn to re-run.
+pub(super) fn retryable_submission(session: &AgentSession) -> Option<ComposerSubmission> {
+    session
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == MessageRole::User)
+        .map(|message| ComposerSubmission {
+            prompt: message.content.clone(),
+            display_content: message.display_content.clone(),
+            attachments: message.attachments.clone(),
+        })
+}
+
 fn retain_runtime_after_cancel(provider: ProviderKind) -> bool {
     // Codex's app-server owns the Computer Use process tree, and Amp offers no
     // interrupt on its stream — stopping it means ending the process. Both
@@ -1332,6 +1348,56 @@ impl Waku {
         self.remeasure_transcript_tail();
         self.save();
         cx.notify();
+    }
+
+    /// Recovery for a session whose provider failed to start.
+    ///
+    /// Drops the runtime and re-attaches from the daemon, which re-resolves
+    /// the provider binary and reopens the native session. The transcript is
+    /// untouched: only the transport is rebuilt. Offered only on a settled
+    /// session, so it can never orphan a turn that is still running.
+    pub(super) fn reload_session_runtime(&mut self, cx: &mut Context<Self>) {
+        let Some(session_id) = self.state.selected_session else {
+            return;
+        };
+        // Reloading under a live turn would strand the provider work it is
+        // still driving; the control is only rendered when settled, and this
+        // guard keeps the keyboard path honest too.
+        if self
+            .selected_session()
+            .is_some_and(|session| session.status.is_busy())
+            || self.submission_preparations.contains(&session_id)
+        {
+            return;
+        }
+        if let Some(runtime) = self.runtimes.remove(&session_id) {
+            runtime.driver.close();
+        }
+        // A fresh attach is the same path a reconnecting client takes, so the
+        // runtime id, capabilities and replay cursor all come from the daemon
+        // rather than being assumed here.
+        self.runtime_attach_pending.remove(&session_id);
+        self.runtime_attach_misses.remove(&session_id);
+        self.start_runtime_attachment(session_id, cx);
+        cx.notify();
+    }
+
+    /// Resubmits the last user prompt on the selected session.
+    ///
+    /// The recovery for a turn that never reached the provider: the prompt is
+    /// still in the transcript, so re-running it is what the user means by
+    /// "try again". Refuses while a turn is live so it cannot double-send.
+    pub(super) fn retry_last_turn(&mut self, cx: &mut Context<Self>) {
+        let Some(session) = self.selected_session() else {
+            return;
+        };
+        if session.status.is_busy() {
+            return;
+        }
+        let Some(submission) = retryable_submission(session) else {
+            return;
+        };
+        self.submit_composer_submission(submission, cx);
     }
 
     pub(super) fn respond_permission(

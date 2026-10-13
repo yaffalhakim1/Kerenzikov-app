@@ -26,6 +26,7 @@ use super::{
     transcript_rows_fingerprint, widened_panel_width_for_file_editor,
     widened_panel_width_for_review,
 };
+use super::sessions::retryable_submission;
 use crate::git_branch::BranchEntry;
 use crate::model::{
     ActivityItem, ActivityKind, AgentSession, Checkpoint, CheckpointFile, CheckpointStatus,
@@ -910,6 +911,21 @@ fn idle_reaping_releases_finished_sessions_but_never_a_running_turn() {
 
     // A runtime whose session is already gone is pure leak.
     assert!(session_is_reapable(None, stale, false));
+}
+
+/// Retry resubmits the last user turn, presentation included, and reports
+/// nothing to run when the session has no user message.
+#[test]
+fn retry_resubmits_the_last_user_turn() {
+    let mut session = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+    assert!(retryable_submission(&session).is_none());
+
+    session.begin_turn("first");
+    session.push_message(MessageRole::Assistant, "a reply");
+    session.begin_turn("second");
+
+    let submission = retryable_submission(&session).expect("the last user turn");
+    assert_eq!(submission.prompt, "second");
 }
 
 #[test]

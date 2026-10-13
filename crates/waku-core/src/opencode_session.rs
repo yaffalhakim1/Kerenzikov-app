@@ -319,6 +319,8 @@ fn fork_message_id(message_ids: &[String], retained_turns: usize) -> anyhow::Res
 pub(crate) struct OpenCodeServer {
     child: Mutex<Child>,
     pub(crate) port: u16,
+    /// The resolved executable, kept so a version mismatch can name it.
+    binary: PathBuf,
 }
 
 impl OpenCodeServer {
@@ -361,23 +363,55 @@ impl OpenCodeServer {
         let server = Self {
             child: Mutex::new(child),
             port,
+            binary: binary.to_path_buf(),
         };
         let started_at = Instant::now();
+        // Kept across attempts: a v2 binary answers the v1 routes with the web
+        // UI's HTML, which is a version mismatch rather than a server that is
+        // still starting. Failing with that reason beats a bare timeout.
+        let mut mismatch = None;
         loop {
-            if server
-                .request_with_timeout("GET", "/global/health", None, HEALTH_PROBE_TIMEOUT)
-                .is_ok()
-            {
-                return Ok(server);
+            match server.probe_health() {
+                Ok(()) => return Ok(server),
+                Err(error) => {
+                    let _ = mismatch.replace(error);
+                }
             }
             if let Some(status) = server.child.lock().try_wait()? {
                 bail!("OpenCode session server exited during startup ({status})");
             }
             if started_at.elapsed() >= SERVER_START_TIMEOUT {
-                bail!("timed out starting the OpenCode session server");
+                return match mismatch.take() {
+                    Some(error) => Err(error),
+                    None => bail!("timed out starting the OpenCode session server"),
+                };
             }
             thread::sleep(Duration::from_millis(40));
         }
+    }
+
+    /// Confirms the server speaks the API this driver implements.
+    ///
+    /// The v1 routes are unversioned, so OpenCode 2 answers them with its web
+    /// UI rather than an error: `/global/health` returns `200 text/html`. A
+    /// plain success check therefore reads a wrong-version server as healthy
+    /// and fails later on an unrelated route, which is why the body has to be
+    /// JSON before the probe counts.
+    fn probe_health(&self) -> anyhow::Result<()> {
+        let response = crate::http_wire::http_request(
+            &crate::http_wire::Endpoint::local(self.port),
+            "GET",
+            "/global/health",
+            None,
+            HEALTH_PROBE_TIMEOUT,
+        )?;
+        accept_health_body(&response, &self.binary_hint())
+    }
+
+    /// The resolved binary path, when the caller kept it, so a version
+    /// mismatch names the executable that caused it.
+    fn binary_hint(&self) -> String {
+        self.binary.display().to_string()
     }
 
     pub(crate) fn request(
@@ -408,6 +442,25 @@ impl OpenCodeServer {
             .try_wait()
             .is_ok_and(|status| status.is_none())
     }
+}
+
+/// Accepts only a JSON health body.
+///
+/// The v1 routes are unversioned, so OpenCode 2 answers them with its web UI
+/// rather than an error: `/global/health` returns `200 text/html`. A plain
+/// success check therefore reads a wrong-version server as healthy and fails
+/// later on an unrelated route, so the body has to decode before the probe
+/// counts.
+fn accept_health_body(response: &[u8], binary: &str) -> anyhow::Result<()> {
+    if serde_json::from_slice::<Value>(response).is_ok() {
+        return Ok(());
+    }
+    bail!(
+        "the `opencode` binary at {binary} is not the v1 server this task expects: it \
+         answered /global/health with a non-JSON body, which is what OpenCode 2 does. \
+         Point the OpenCode provider at an OpenCode 1.x binary, or start this task with \
+         the OpenCode 2 provider."
+    )
 }
 
 fn is_native_user_turn(message: &Value) -> bool {
@@ -503,6 +556,29 @@ pub(crate) fn encode_path_segment(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// OpenCode 2 serves its web UI on the v1 routes, so a bare `200` is not
+    /// health. The probe has to reject the HTML body or the driver starts
+    /// against a server it cannot talk to.
+    #[test]
+    fn a_non_json_health_body_is_rejected_as_a_version_mismatch() {
+        let html = b"<!doctype html>\n<html lang=\"en\"><head></head></html>";
+        let error = accept_health_body(html, "/opt/opencode")
+            .expect_err("an HTML body must not pass the health probe");
+        let message = error.to_string();
+        assert!(
+            message.contains("/opt/opencode"),
+            "the error must name the resolved binary: {message}"
+        );
+        assert!(
+            message.contains("OpenCode 2"),
+            "the error must name the likely cause: {message}"
+        );
+
+        // A real v1 health payload still passes.
+        accept_health_body(br#"{"healthy":true}"#, "/opt/opencode")
+            .expect("a JSON body is health");
+    }
 
     #[test]
     fn selected_fork_message_excludes_the_next_user_turn() {
@@ -603,6 +679,7 @@ mod tests {
         let server = OpenCodeServer {
             child: Mutex::new(child),
             port: 0,
+            binary: PathBuf::from("/usr/bin/true"),
         };
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline && server.is_alive() {
@@ -621,6 +698,7 @@ mod tests {
         let server = OpenCodeServer {
             child: Mutex::new(child),
             port: 0,
+            binary: PathBuf::from("/bin/sleep"),
         };
         let started = Instant::now();
         server.shutdown(Duration::from_secs(3));

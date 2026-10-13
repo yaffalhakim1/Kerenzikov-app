@@ -3,7 +3,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
 
 use crate::{
     Backend, Command, EventSink, Request, ResponsePayload, WireDriverEvent, WorkspaceOperation,
@@ -20,8 +19,8 @@ use crate::attachments::AttachmentStore;
 use crate::computer_use::{ComputerTarget, ComputerUsePhase, ComputerUseState};
 use crate::driver::{self, DriverHandle, DriverStartOptions, SessionOptions};
 use crate::model::{
-    ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, PermissionOption,
-    Project, ProviderKind, ProviderResumeCursor, QueuedMessage, SessionStatus,
+    ActivityKind, AgentSession, Checkpoint, CheckpointStatus, DriverEvent, LiveState,
+    PermissionOption, Project, ProviderKind, ProviderResumeCursor, QueuedMessage, SessionStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
 use crate::settings::DaemonSettingsStore;
@@ -42,12 +41,6 @@ const RESIDENT_TRANSCRIPT_WINDOW: usize = 24;
 fn trim_resident_transcripts(state: &mut PersistedState, pinned: &HashSet<Uuid>) {
     state.trim_idle_transcripts(pinned, RESIDENT_TRANSCRIPT_WINDOW);
 }
-
-/// How long the drain worker waits for a client projection to flip a settling
-/// session from Busy to Idle before giving up on that settle.
-const DRAIN_BUSY_WAIT: Duration = Duration::from_secs(5);
-/// Poll cadence while waiting out that projection.
-const DRAIN_BUSY_POLL: Duration = Duration::from_millis(100);
 
 pub struct WakuBackend {
     sessions: Mutex<HashMap<Uuid, (Uuid, DriverHandle)>>,
@@ -71,8 +64,10 @@ pub struct WakuBackend {
     /// the worker keeps pace with any realistic settle rate.
     drain_requests: crossbeam_channel::Sender<DrainRequest>,
     /// Sessions whose next settle must NOT start a queued prompt: the user
-    /// pressed Stop. Cleared by any new prompt on the session.
-    drain_suppressed: Mutex<HashSet<Uuid>>,
+    /// pressed Stop. Cleared by any new prompt on the session. Shared with each
+    /// session's event thread so a Stop pressed mid-turn is seen at the settle
+    /// it is meant to suppress.
+    drain_suppressed: Arc<Mutex<HashSet<Uuid>>>,
     /// Mobile devices that asked to be notified while backgrounded. Shared
     /// with each session's event thread, which sends the pushes.
     push_registry: crate::push::PushRegistry,
@@ -140,7 +135,7 @@ impl WakuBackend {
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             drain_requests,
-            drain_suppressed: Mutex::new(HashSet::new()),
+            drain_suppressed: Arc::new(Mutex::new(HashSet::new())),
             push_registry: crate::push::PushRegistry::new(),
         })
     }
@@ -579,6 +574,30 @@ impl Backend for WakuBackend {
                 }
                 Ok(ResponsePayload::Ack)
             }
+            Command::RemoveQueuedMessage {
+                session_id,
+                message_id,
+            } => {
+                // Its own command because a save merges the queue rather than
+                // replacing it: omitting an entry there cannot express removal
+                // without erasing it for every other client too.
+                let mut state = self.task_state.lock();
+                if let Some(session) = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                {
+                    let before = session.queued_messages.len();
+                    session
+                        .queued_messages
+                        .retain(|queued| queued.id != message_id);
+                    if session.queued_messages.len() != before {
+                        state.mark_session_dirty(session_id);
+                        self.task_store.save(&mut state)?;
+                    }
+                }
+                Ok(ResponsePayload::Ack)
+            }
             Command::HydrateSession { session_id } => {
                 // Live runtimes stay resident; everything else is trimmed to
                 // the recency window once the response is built.
@@ -930,6 +949,17 @@ impl Backend for WakuBackend {
             Command::Start { options } => {
                 let previous = self.sessions.lock().remove(&session_id);
                 drop(previous);
+                // From here the daemon owns this session's liveness: a runtime
+                // is being built, so nothing may treat the session as idle until
+                // a driver event says otherwise. See ADR 0004.
+                {
+                    let mut state = self.task_state.lock();
+                    if set_live_state(&mut state, session_id, LiveState::Starting)
+                        && let Err(error) = self.task_store.save(&mut state)
+                    {
+                        eprintln!("waku-daemon could not persist live state: {error}");
+                    }
+                }
                 let provider = decode_enum(&options.provider)?;
                 let mode = decode_enum(&options.mode)?;
                 let options = DriverStartOptions {
@@ -950,7 +980,16 @@ impl Backend for WakuBackend {
                 };
                 let (wake, _wake_events) = smol::channel::bounded(1);
                 let (event_sender, event_receiver) = driver::event_channel(wake);
-                let handle = driver::start_local(provider, options, event_sender)?;
+                let handle = match driver::start_local(provider, options, event_sender) {
+                    Ok(handle) => handle,
+                    Err(error) => {
+                        let mut state = self.task_state.lock();
+                        if set_live_state(&mut state, session_id, LiveState::Failed) {
+                            let _ = self.task_store.save(&mut state);
+                        }
+                        return Err(error);
+                    }
+                };
                 let supports_steer = handle.supports_steer();
                 // The daemon drains the session's queued prompts itself when
                 // a turn finishes: the queuing client may be gone by then,
@@ -963,10 +1002,15 @@ impl Backend for WakuBackend {
                 let drain_events = events.clone();
                 let push_registry = self.push_registry.clone();
                 let push_state = self.task_state.clone();
-                // Read once at start; a Cancel during the turn flips the
-                // backend's set, but the suppression the drain checks is the
-                // one the worker sees — populated by the request path above.
-                let suppressed = self.drain_suppressed.lock().contains(&session_id);
+                // Shared rather than snapshotted: a Stop pressed *during* the
+                // turn must suppress the settle's drain, and a start-time read
+                // cannot see a Cancel that has not happened yet.
+                let drain_suppressed = self.drain_suppressed.clone();
+                // The event thread records the daemon-owned liveness each event
+                // implies, so the drain can trust it without waiting on any
+                // client. See ADR 0004.
+                let live_state_state = self.task_state.clone();
+                let live_state_store = self.task_store.clone();
                 // Model-fallback retry state: the prompt now in flight and
                 // how many fallbacks have been tried this turn. The chain
                 // itself is read from settings at retry time, so editing it
@@ -978,6 +1022,25 @@ impl Backend for WakuBackend {
                     .name(format!("waku-daemon-events-{session_id}"))
                     .spawn(move || {
                         while let Ok(event) = event_receiver.recv() {
+                            // Recorded first: the drain request raised below
+                            // reads this, and must see the state this event
+                            // reports rather than the previous one.
+                            if let Some(next) = live_state_for_event(&event) {
+                                let changed = {
+                                    let mut state = live_state_state.lock();
+                                    set_live_state(&mut state, session_id, next)
+                                };
+                                if changed {
+                                    // Persist so a client reading the stored
+                                    // projection sees the same liveness.
+                                    let mut state = live_state_state.lock();
+                                    if let Err(error) = live_state_store.save(&mut state) {
+                                        eprintln!(
+                                            "waku-daemon could not persist live state: {error}"
+                                        );
+                                    }
+                                }
+                            }
                             match &event {
                                 DriverEvent::PromptSubmitted { message, .. } => {
                                     *retry_prompt.lock() = Some(message.clone());
@@ -1009,6 +1072,8 @@ impl Backend for WakuBackend {
                                         // the retry's own settle.
                                         continue;
                                     }
+                                    let suppressed =
+                                        drain_suppressed.lock().contains(&session_id);
                                     let _ = drain_requests.send(DrainRequest {
                                         session_id,
                                         events: drain_events.clone(),
@@ -1148,6 +1213,40 @@ fn merge_stale_session_metadata(existing: &mut AgentSession, incoming: AgentSess
     }
 }
 
+/// The `LiveState` a driver event moves a session into, if it moves it at all.
+///
+/// The daemon owns this value because it is the only component that observes
+/// the driver directly; a client's `SessionStatus` is its own projection of the
+/// same events and can trail the settle or never arrive. See ADR 0004.
+fn live_state_for_event(event: &DriverEvent) -> Option<LiveState> {
+    match event {
+        DriverEvent::Connected { .. } => Some(LiveState::Idle),
+        DriverEvent::TurnStarted => Some(LiveState::Running),
+        DriverEvent::TurnParked => Some(LiveState::Parked),
+        DriverEvent::TurnFinished { .. } => Some(LiveState::Idle),
+        DriverEvent::ProcessExited => Some(LiveState::Failed),
+        _ => None,
+    }
+}
+
+/// Applies a liveness transition, marking the row dirty only when the value
+/// actually changed.
+fn set_live_state(state: &mut PersistedState, session_id: Uuid, next: LiveState) -> bool {
+    let Some(session) = state
+        .sessions
+        .iter_mut()
+        .find(|session| session.id == session_id)
+    else {
+        return false;
+    };
+    if session.live_state == next {
+        return false;
+    }
+    session.live_state = next;
+    state.mark_session_dirty(session_id);
+    true
+}
+
 /// Replaces a stored session with a client's newer projection, keeping the
 /// fields the daemon owns.
 ///
@@ -1160,7 +1259,39 @@ fn adopt_client_projection(existing: &mut AgentSession, mut incoming: AgentSessi
     // Written only by `SetSessionArchived`; a save assembled before that landed
     // carries `None` and would silently un-archive the task.
     incoming.archived_at = existing.archived_at;
+    // Daemon-owned liveness, like the archive stamp above: a client's snapshot
+    // carries whatever value it last saw, and taking it would undo a state the
+    // daemon derived from events that client never saw. See ADR 0004.
+    incoming.live_state = existing.live_state;
+    // The queue is merged rather than replaced: see `merge_queued_messages`.
+    incoming.queued_messages = merge_queued_messages(existing, incoming.queued_messages);
     *existing = incoming;
+}
+
+/// Reconciles a client's queue snapshot with the daemon's copy.
+///
+/// The queue is control state that two clients mutate independently, but it
+/// travels inside the whole-session projection, so a plain replace made the
+/// second save win outright — a follow-up queued on the phone disappeared when
+/// the desktop next saved. Staleness cannot arbitrate here either: `updated_at`
+/// is whole seconds, so two saves inside one second are indistinguishable.
+///
+/// The rule is therefore additive and order-preserving: the daemon's own
+/// entries survive, and the client's are appended in its order when the daemon
+/// does not already hold that id. Removal is not expressible through a save —
+/// it goes through `RemoveQueuedMessage`, exactly as task removal goes through
+/// `RemoveSession` rather than a save that omits the task.
+fn merge_queued_messages(
+    existing: &AgentSession,
+    incoming: Vec<QueuedMessage>,
+) -> Vec<QueuedMessage> {
+    let mut merged = existing.queued_messages.clone();
+    for queued in incoming {
+        if !merged.iter().any(|candidate| candidate.id == queued.id) {
+            merged.push(queued);
+        }
+    }
+    merged
 }
 
 /// Ending checkpoints are produced and stored by the daemon. A second client
@@ -2078,6 +2209,7 @@ fn handle_driver_command(
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
         | Command::SetSessionArchived { .. }
+        | Command::RemoveQueuedMessage { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
@@ -2200,31 +2332,23 @@ fn drain_queued_prompt(
         driver,
         suppressed,
     } = request;
-    // The session's status is a client projection: the settling client flips
-    // it to Idle on its next save, which can trail the TurnFinished this
-    // request rode in on by a save interval. Poll briefly instead of bailing,
-    // or a follow-up queued behind a fast turn is stranded until the next
-    // settle — which without this drain never comes.
-    let deadline = Instant::now() + DRAIN_BUSY_WAIT;
-    let mut state;
-    let session_status_is_busy = loop {
-        state = task_state.lock();
-        match state
-            .sessions
-            .iter_mut()
-            .find(|s| s.id == session_id)
-            .map(|session| session.status.is_busy())
-        {
-            Some(false) => break false,
-            Some(true) if Instant::now() < deadline => {
-                drop(state);
-                std::thread::sleep(DRAIN_BUSY_POLL);
-            }
-            _ => return,
-        }
-    };
-    if session_status_is_busy {
-        return;
+    // The daemon owns this session's liveness, and it observed the settle that
+    // queued this drain, so the value is current by construction: no polling,
+    // and nothing to wait for from a client. A client's `status` is its own
+    // projection of the same events and can trail the settle or never arrive at
+    // all — the old gate here waited on that projection, which stranded a
+    // follow-up when the settling client had gone. See ADR 0004.
+    let mut state = task_state.lock();
+    match state
+        .sessions
+        .iter()
+        .find(|session| session.id == session_id)
+        .map(|session| session.live_state)
+    {
+        // Only a settled session drains. `Starting`, `Running`, `Parked` and
+        // `Failed` all mean the provider is not ready for a fresh prompt.
+        Some(LiveState::Idle) => {}
+        _ => return,
     }
     let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) else {
         return;
@@ -2690,6 +2814,112 @@ mod tests {
         assert_eq!(existing.runtime_event_cursor.unwrap().sequence, 10);
     }
 
+    /// Every event that moves the daemon-owned liveness, and one that must not.
+    #[test]
+    fn driver_events_map_onto_live_state() {
+        assert_eq!(
+            live_state_for_event(&DriverEvent::Connected {
+                provider_cursor: None
+            }),
+            Some(LiveState::Idle)
+        );
+        assert_eq!(
+            live_state_for_event(&DriverEvent::TurnStarted),
+            Some(LiveState::Running)
+        );
+        assert_eq!(
+            live_state_for_event(&DriverEvent::TurnParked),
+            Some(LiveState::Parked)
+        );
+        assert_eq!(
+            live_state_for_event(&DriverEvent::TurnFinished {
+                success: true,
+                summary: None
+            }),
+            Some(LiveState::Idle)
+        );
+        assert_eq!(
+            live_state_for_event(&DriverEvent::ProcessExited),
+            Some(LiveState::Failed)
+        );
+        // A streaming delta says nothing about liveness on its own.
+        assert_eq!(
+            live_state_for_event(&DriverEvent::TextDelta("hi".to_owned())),
+            None
+        );
+    }
+
+    /// Only a genuinely running or parked turn is "active"; `Idle`, `Starting`
+    /// and `Failed` all leave the provider free.
+    #[test]
+    fn only_a_running_or_parked_turn_is_active() {
+        assert!(!LiveState::Idle.is_active());
+        assert!(!LiveState::Starting.is_active());
+        assert!(LiveState::Running.is_active());
+        assert!(LiveState::Parked.is_active());
+        assert!(!LiveState::Failed.is_active());
+    }
+
+    /// Liveness is daemon-owned: a client save cannot move it, the same way it
+    /// cannot clear the archive stamp.
+    #[test]
+    fn a_client_save_cannot_change_live_state() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        existing.live_state = LiveState::Running;
+
+        let mut from_client = existing.clone();
+        from_client.live_state = LiveState::Idle;
+        from_client.updated_at = existing.updated_at + 1;
+
+        adopt_client_projection(&mut existing, from_client);
+
+        assert_eq!(
+            existing.live_state,
+            LiveState::Running,
+            "a client projection must not move daemon-owned liveness"
+        );
+    }
+
+    /// Two clients queueing at once must both keep their entry. The queue
+    /// rides inside the whole-session projection, so a plain replace made the
+    /// second save win and the first client's follow-up vanish.
+    #[test]
+    fn concurrent_queues_from_two_clients_both_survive() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        existing.queued_messages.push(QueuedMessage::new("from the phone"));
+
+        let mut from_desktop = existing.clone();
+        from_desktop.queued_messages.push(QueuedMessage::new("from the desktop"));
+
+        adopt_client_projection(&mut existing, from_desktop);
+
+        let contents = existing
+            .queued_messages
+            .iter()
+            .map(|queued| queued.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(contents, vec!["from the phone", "from the desktop"]);
+    }
+
+    /// A save that omits an entry must not erase it: removal is its own
+    /// command, so a snapshot taken before the removal cannot resurrect it
+    /// either — it is simply already gone from the daemon's copy.
+    #[test]
+    fn a_save_omitting_a_queued_entry_does_not_remove_it() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let kept = QueuedMessage::new("keep me");
+        let kept_id = kept.id;
+        existing.queued_messages.push(kept);
+
+        let mut stale = existing.clone();
+        stale.queued_messages.clear();
+        stale.updated_at = existing.updated_at + 1;
+
+        adopt_client_projection(&mut existing, stale);
+
+        assert_eq!(existing.queued_messages.len(), 1);
+        assert_eq!(existing.queued_messages[0].id, kept_id);
+    }
     #[test]
     fn client_projection_cannot_replace_a_daemon_checkpoint() {
         let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
@@ -2965,11 +3195,13 @@ mod tests {
         assert_eq!(session.queued_messages.len(), 1);
     }
 
+    /// A session the daemon considers live is never drained, whatever a
+    /// client's stale `status` happens to say.
     #[test]
-    fn busy_session_is_not_drained() {
+    fn a_live_session_is_not_drained() {
         let fixture = drain::fixture();
         drain::seed_queued(&fixture.task_state, &fixture.store, fixture.session_id, "later");
-        task_state_lock_sets_working(&fixture.task_state, fixture.session_id);
+        task_state_lock_sets_live(&fixture.task_state, fixture.session_id, LiveState::Running);
 
         let request = drain::make_request(fixture.session_id, fixture.driver.clone(), false);
         drain_queued_prompt(&fixture.task_state, &fixture.store, request);
@@ -2980,10 +3212,39 @@ mod tests {
         assert_eq!(session.queued_messages.len(), 1);
     }
 
-    fn task_state_lock_sets_working(task_state: &Mutex<PersistedState>, session_id: Uuid) {
+    /// The counterpart, and the bug this change fixes: a stale client `status`
+    /// of `Working` must NOT hold the queue back once the daemon has observed
+    /// the settle. The old gate waited on that projection and stranded the
+    /// follow-up whenever the settling client had gone.
+    #[test]
+    fn a_stale_client_status_does_not_block_the_drain() {
+        let fixture = drain::fixture();
+        drain::seed_queued(&fixture.task_state, &fixture.store, fixture.session_id, "run me");
+        task_state_lock_sets_live(&fixture.task_state, fixture.session_id, LiveState::Idle);
+        {
+            let mut state = fixture.task_state.lock();
+            let session = state
+                .sessions
+                .iter_mut()
+                .find(|s| s.id == fixture.session_id)
+                .unwrap();
+            session.status = SessionStatus::Working;
+        }
+
+        let request = drain::make_request(fixture.session_id, fixture.driver.clone(), false);
+        drain_queued_prompt(&fixture.task_state, &fixture.store, request);
+
+        assert_eq!(fixture.driver.prompts(), vec!["run me".to_owned()]);
+    }
+
+    fn task_state_lock_sets_live(
+        task_state: &Mutex<PersistedState>,
+        session_id: Uuid,
+        next: LiveState,
+    ) {
         let mut state = task_state.lock();
         if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
-            session.status = SessionStatus::Working;
+            session.live_state = next;
         }
     }
 }

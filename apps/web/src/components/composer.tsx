@@ -170,6 +170,7 @@ export function Composer({
     respondUserInput,
     saveSession,
     removeQueuedMessage,
+    attachSession,
     permissions,
     userInputs,
     runtimes,
@@ -214,6 +215,12 @@ export function Composer({
     ?? probe.data?.models[0]
   const hasDraft = Boolean(prompt.trim() || attachments.length)
   const canSteer = busy && session.status !== 'connecting' && runtime?.supportsSteer
+  // Recovery affordances for a session whose provider failed to start. Only a
+  // settled failure offers them: reloading under a live turn would strand the
+  // work the runtime is still driving.
+  const recoveryPrompt = session.status === 'failed' && !busy
+    ? [...session.messages].reverse().find((message) => message.role === 'user')
+    : undefined
   const workspace = session.workspace ?? { kind: 'local' as const }
   const projectChoices = selectableProjects(projects, project)
   const projectless = isProjectlessProject(project)
@@ -673,6 +680,23 @@ export function Composer({
             )}
           />
         )}
+
+        {recoveryPrompt !== undefined || session.status === 'failed' ? (
+          <RecoveryRow
+            onReload={() => {
+              // Re-attach rebuilds the transport; the transcript is untouched.
+              void attachSession(session).catch((error) => toast.error(errorMessage(error)))
+            }}
+            onRetry={
+              recoveryPrompt
+                ? () => {
+                    void sendPrompt(session, recoveryPrompt.content, recoveryPrompt.attachments ?? [])
+                      .catch((error) => toast.error(errorMessage(error)))
+                  }
+                : undefined
+            }
+          />
+        ) : null}
 
         <QueuedMessages
           canSteer={Boolean(canSteer)}
@@ -1553,6 +1577,40 @@ function AccessControl({
       menuClassName="w-[304px]"
       returnFocus={returnFocus}
     />
+  )
+}
+
+/**
+ * Recovery affordances for a session whose provider failed to start.
+ *
+ * A failed start used to be a dead end: the transcript carried the error and
+ * the only way forward was to retype the prompt. This surfaces the two things
+ * the user actually wants — rebuild the transport, or run the last prompt
+ * again — next to the error itself.
+ */
+function RecoveryRow({ onReload, onRetry }: { onReload: () => void; onRetry?: () => void }) {
+  const { t } = useI18n()
+  return (
+    <div className="mb-2 flex items-center gap-3 rounded-lg border border-danger/35 bg-danger/8 px-3.5 py-2.5">
+      <WakuIcon className="size-3.5 shrink-0 text-danger" name="x" />
+      <span className="min-w-0 flex-1 text-[12.5px] text-[var(--text-secondary)]">
+        {t('session.provider_failed_hint')}
+      </span>
+      <button
+        className="shrink-0 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--overlay-strong)]"
+        onClick={onReload}
+        type="button">
+        {t('session.reload_runtime')}
+      </button>
+      {onRetry && (
+        <button
+          className="shrink-0 rounded-md px-2.5 py-1 text-[12.5px] font-medium text-accent transition-colors hover:bg-[var(--overlay-strong)]"
+          onClick={onRetry}
+          type="button">
+          {t('session.retry_last_turn')}
+        </button>
+      )}
+    </div>
   )
 }
 

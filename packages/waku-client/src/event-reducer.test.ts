@@ -209,6 +209,7 @@ function runningSession(): AgentSession {
     provider: 'codex',
     runtime_mode: 'fullAccess',
     status: 'connecting',
+    live_state: 'starting',
     created_at: 100,
     updated_at: 100,
     provider_cursor: null,
