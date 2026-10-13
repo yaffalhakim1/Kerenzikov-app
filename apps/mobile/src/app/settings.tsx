@@ -17,6 +17,7 @@ import { Blocks } from '@/components/blocks';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ProviderIcon } from '@/components/provider-icon';
+import { ErrorLogRows } from '@/components/error-log-row';
 import { Sheet, SheetRow } from '@/components/sheet';
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import {
@@ -41,6 +42,14 @@ import {
 import { tapHaptic } from '@/lib/haptics';
 import { useDaemon } from '@/lib/daemon-context';
 import { providerLabel } from '@/lib/session-presentation';
+
+/**
+ * Expo Router renders this when the screen below throws, instead of tearing the
+ * whole tree down. See `route-error-boundary` — it also writes the error to
+ * disk, which is the only copy a release build has.
+ */
+export { ErrorBoundary } from '@/components/route-error-boundary';
+
 
 function UpdateRow() {
   const theme = useTheme();
@@ -354,6 +363,8 @@ export default function SettingsScreen() {
         ) : null}
 
         {Platform.OS === 'android' ? <UpdateRow /> : null}
+
+        <ErrorLogRows styles={styles} />
 
         <Text style={[styles.footer, { color: theme.textTertiary }]}>
           Settings are stored on the daemon and shared by every connected device.
