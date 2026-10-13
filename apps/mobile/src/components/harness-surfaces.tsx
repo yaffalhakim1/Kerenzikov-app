@@ -49,20 +49,37 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
         ? 'active'
         : todo.status === 'cancelled' ? 'skipped' : 'pending';
   return (
-    <Plan defaultOpen={!collapsed} onOpenChange={(open) => setCollapsed(!open)}>
-      <Plan.Header>
-        <Plan.Icon>
-          <AppSymbol
-            name={{ ios: 'list.bullet', android: 'format_list_bulleted', web: 'format_list_bulleted' }}
-            size={15}
-            tintColor={theme.textTertiary}
-          />
-        </Plan.Icon>
-        <Plan.Title>Tasks</Plan.Title>
-        <Plan.Action>
-          <Plan.Progress value={done} total={total} />
-        </Plan.Action>
-      </Plan.Header>
+    // `shadow-none`: `Plan`'s root carries `shadow-sm`, and this app's surfaces
+    // are flat with hairline borders — the same override the composer takes.
+    <Plan
+      className="mb-2 shadow-none"
+      defaultOpen={!collapsed}
+      onOpenChange={(open) => setCollapsed(!open)}
+    >
+      {/* The whole header row is the fold target. `Plan.Header` is a plain
+          View, so the pressable has to be `Plan.Trigger`; wrapping the row
+          keeps the icon, title and progress inside it and makes the entire
+          strip tappable rather than just the chevron. */}
+      <Plan.Trigger className="p-0">
+        <Plan.Header className="p-3">
+          <Plan.Icon>
+            <AppSymbol
+              name={{ ios: 'list.bullet', android: 'format_list_bulleted', web: 'format_list_bulleted' }}
+              size={15}
+              tintColor={theme.textTertiary}
+            />
+          </Plan.Icon>
+          <Plan.Title>Tasks</Plan.Title>
+          <Plan.Action>
+            <Plan.Progress value={done} total={total} />
+            <AppSymbol
+              name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
+              size={14}
+              tintColor={theme.textTertiary}
+            />
+          </Plan.Action>
+        </Plan.Header>
+      </Plan.Trigger>
       <Plan.Content>
         <Plan.Steps>
           {hiddenBefore > 0 ? (
@@ -103,6 +120,29 @@ function taskStatus(status: BackgroundWorkItem['status']): TaskStatus {
   }
 }
 
+/** A glyph per kind of work, so a process, a monitor and a subagent are
+ *  distinguishable before the title is read. */
+const WORK_ICONS = {
+  monitor: { ios: 'eye', android: 'visibility', web: 'visibility' },
+  process: { ios: 'terminal', android: 'terminal', web: 'terminal' },
+  subagent: { ios: 'person.2', android: 'group', web: 'group' },
+} as const satisfies Record<BackgroundWorkItem['key']['kind'], unknown>;
+
+function workTint(theme: Theme, status: BackgroundWorkItem['status']): string {
+  switch (status) {
+    case 'failed':
+    case 'lost':
+      return theme.danger;
+    case 'completed':
+      return theme.success;
+    case 'running':
+    case 'monitoring':
+      return theme.accent;
+    default:
+      return theme.textTertiary;
+  }
+}
+
 function isLiveWork(status: BackgroundWorkItem['status']): boolean {
   return status === 'running' || status === 'monitoring' || status === 'stopping';
 }
@@ -127,6 +167,7 @@ export const BackgroundWorkBar = memo(function BackgroundWorkBar({
   sessionId: string;
   items: BackgroundWorkItem[];
 }) {
+  const theme = useTheme();
   const runtime = useRuntime();
   const [stopping, setStopping] = useState<string | null>(null);
   const live = items.filter((item) => isLiveWork(item.status));
@@ -151,22 +192,51 @@ export const BackgroundWorkBar = memo(function BackgroundWorkBar({
     >
       <Task.Trigger title={summary} />
       <Task.Content>
+        {/*
+          One nested `Task` per piece of work, not a `Task.Item` line: each has
+          its own status, so it gets its own glyph and shimmer, and its own body
+          for the command and output. A text line per item flattened all of that
+          into a status word, which read as a list of strings rather than a list
+          of jobs.
+        */}
         {items.map((item) => (
-          <Task.Item key={`${item.key.kind}:${item.key.providerId}`}>
-            {item.title || item.key.providerId}
-            {`  ${item.status}`}
-            {item.canStop && item.status !== 'stopping' ? (
-              <Button
-                accessibilityLabel={`Stop ${item.title || item.key.providerId}`}
-                disabled={stopping === item.key.providerId}
-                onPress={() => stop(item)}
-                size="xs"
-                variant="ghost"
-              >
-                Stop
-              </Button>
-            ) : null}
-          </Task.Item>
+          <Task
+            defaultOpen={isLiveWork(item.status)}
+            key={`${item.key.kind}:${item.key.providerId}`}
+            status={taskStatus(item.status)}
+          >
+            <Task.Trigger
+              icon={
+                <AppSymbol
+                  name={WORK_ICONS[item.key.kind]}
+                  size={15}
+                  tintColor={workTint(theme, item.status)}
+                />
+              }
+              title={item.title || item.key.providerId}
+            />
+            <Task.Content>
+              {item.detail ? <Task.Item>{item.detail}</Task.Item> : null}
+              {item.command ? <Task.Item>{item.command}</Task.Item> : null}
+              {item.cwd ? <Task.Item>{item.cwd}</Task.Item> : null}
+              {item.output ? <Task.Item>{item.output}</Task.Item> : null}
+              {item.durationMs != null ? (
+                <Task.Item>{`${(item.durationMs / 1000).toFixed(1)}s`}</Task.Item>
+              ) : null}
+              <Task.Item>{item.status}</Task.Item>
+              {item.canStop && item.status !== 'stopping' ? (
+                <Button
+                  accessibilityLabel={`Stop ${item.title || item.key.providerId}`}
+                  disabled={stopping === item.key.providerId}
+                  onPress={() => stop(item)}
+                  size="xs"
+                  variant="ghost"
+                >
+                  Stop
+                </Button>
+              ) : null}
+            </Task.Content>
+          </Task>
         ))}
       </Task.Content>
     </Task>

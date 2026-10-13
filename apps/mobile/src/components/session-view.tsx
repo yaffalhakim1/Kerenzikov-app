@@ -21,6 +21,7 @@ import {
 import { ConnectionBanner } from '@/components/connection-banner';
 import { ContextGaugeButton } from '@/components/context-gauge';
 import { BackgroundWorkBar, ComputerUseChip, TodoStrip } from '@/components/harness-surfaces';
+import { devBackgroundWorkItems, devTodoItems } from '@/lib/dev-fixtures';
 import Constants from 'expo-constants';
 
 import { ComposerV2 } from '@/components/composer-v2';
@@ -110,6 +111,7 @@ export function SessionView({
   sessionId,
   devPrompt,
   devError,
+  devFixtures,
 }: {
   sessionId: string | undefined;
   /** Dev-only: auto-submit this prompt through the composer path once the
@@ -119,6 +121,10 @@ export function SessionView({
    * be looked at without staging a real failure. Reach it with
    * `?devError=...` on a session route. */
   devError?: string;
+  /** Dev-only: render the harness surfaces (background work, the plan) from
+   * sample data instead of the runtime's, so their states can be looked at
+   * without a daemon producing them. `?devFixtures=1`. */
+  devFixtures?: boolean;
 }) {
   const theme = useTheme();
   const scheme = useColorScheme();
@@ -136,9 +142,13 @@ export function SessionView({
   // agent's task list and any live background work. Both are cheap reads of
   // runtime state; neither re-renders on stream deltas unless the data
   // changed.
-  const backgroundWorkItems = session
-    ? (runtime.backgroundWork[session.id] ?? [])
-    : [];
+  // Dev-only: `?devFixtures=1` swaps the harness surfaces onto sample data, so
+  // their states can be looked at without a daemon producing them.
+  const backgroundWorkItems = devFixtures
+    ? devBackgroundWorkItems()
+    : session
+      ? (runtime.backgroundWork[session.id] ?? [])
+      : [];
   const computerUse = session ? runtime.computerUse[session.id] : undefined;
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<TranscriptListHandle>(null);
@@ -545,8 +555,11 @@ export function SessionView({
       </View>
       {session && (
         <View style={styles.harnessSurfaces}>
-          {session.todos && session.todos.length > 0 && (
-            <TodoStrip key={`todo-strip:${session.id}`} todos={session.todos} />
+          {(devFixtures || (session.todos && session.todos.length > 0)) && (
+            <TodoStrip
+              key={`todo-strip:${session.id}`}
+              todos={devFixtures ? devTodoItems() : session.todos ?? []}
+            />
           )}
           {backgroundWorkItems.length > 0 && (
             <BackgroundWorkBar items={backgroundWorkItems} sessionId={session.id} />
