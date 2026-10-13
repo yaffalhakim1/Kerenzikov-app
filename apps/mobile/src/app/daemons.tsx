@@ -21,6 +21,14 @@ import { useDaemon } from '@/lib/daemon-context';
 import { tapHaptic } from '@/lib/haptics';
 import type { DaemonProfile } from '@/lib/daemon-profile';
 
+/**
+ * Expo Router renders this when the screen below throws, instead of tearing the
+ * whole tree down. See `route-error-boundary` — it also writes the error to
+ * disk, which is the only copy a release build has.
+ */
+export { ErrorBoundary } from '@/components/route-error-boundary';
+
+
 export default function DaemonsScreen() {
   const theme = useTheme();
   const daemon = useDaemon();

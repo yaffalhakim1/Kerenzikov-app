@@ -33,6 +33,10 @@ import {
   showNotificationsInForeground,
 } from "@/lib/push-notifications";
 import { useNotificationDeepLink } from "@/hooks/use-notification-deep-link";
+import {
+  installGlobalErrorLogging,
+  installUnhandledRejectionLogging,
+} from "@/lib/global-error-handler";
 import { ThemePreferenceProvider } from "@/lib/theme-preference-context";
 
 /** Deep links and state restores keep the new-task home as the stack anchor. */
@@ -70,6 +74,18 @@ export default function RootLayout() {
   useEffect(() => {
     showNotificationsInForeground();
     void ensureAndroidChannel();
+  }, []);
+
+  /*
+   * Installed once, before any screen renders, so an error thrown during the
+   * first frame is already recorded. The route `ErrorBoundary` only sees
+   * render errors; these catch what it cannot — native callbacks, timers,
+   * unawaited promises — which is the class of failure that leaves no trace in
+   * a release build. See `global-error-handler`.
+   */
+  useEffect(() => {
+    installGlobalErrorLogging();
+    installUnhandledRejectionLogging();
   }, []);
   useNotificationDeepLink();
   return (

@@ -40,6 +40,14 @@ import {
   usageWindowLabel,
 } from '@/lib/usage-presentation';
 
+/**
+ * Expo Router renders this when the screen below throws, instead of tearing the
+ * whole tree down. See `route-error-boundary` — it also writes the error to
+ * disk, which is the only copy a release build has.
+ */
+export { ErrorBoundary } from '@/components/route-error-boundary';
+
+
 export default function UsageScreen() {
   const theme = useTheme();
   const taskState = useTaskState();

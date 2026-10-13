@@ -83,6 +83,14 @@ import {
 import { useRuntime } from '@/lib/runtime-context';
 import { providerLabel } from '@/lib/session-presentation';
 
+/**
+ * Expo Router renders this when the screen below throws, instead of tearing the
+ * whole tree down. See `route-error-boundary` — it also writes the error to
+ * disk, which is the only copy a release build has.
+ */
+export { ErrorBoundary } from '@/components/route-error-boundary';
+
+
 type SheetKind =
   | 'daemon'
   | 'project'
