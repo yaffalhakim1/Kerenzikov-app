@@ -58,6 +58,30 @@ export function TaskRowMenu({
       // and a long press just ran the inner onPress (opening the task).
       shouldOpenOnLongPress
       style={style}>
+      {/*
+        PanelUI's own pressable primitive, so the row's touch handling and the
+        scale/opacity feedback run on the UI thread rather than through a
+        JavaScript-driven press. `pressScale={1}` because this is a full-width
+        row: PanelUI's rule is that a wide target which shrinks reads as a card
+        rather than as a press, and the row already draws its own pressed state
+        through `renderTrigger`. The Material ripple is kept explicitly — it is
+        the one piece of Android press feedback PanelUI has no equivalent for,
+        and the row's list would otherwise be the only one in the app without
+        it.
+      */}
+      {/*
+        `AppPressable`, not PanelUI's `AnimatedPressable`, and this is
+        load-bearing: `MenuView` is an `@expo/ui` Compose host, and a Reanimated
+        pressable inside it makes Reanimated's mount pass measure through that
+        host, which throws
+
+          IllegalArgumentException: performMeasureAndLayout called during
+          measure layout
+
+        and takes the drawer down as it opens. A plain RN `Pressable` never
+        touches the Compose host on the UI thread, which is what this row used
+        before the PanelUI conversion.
+      */}
       <AppPressable
         accessibilityHint="Long press for actions"
         accessibilityLabel={accessibilityLabel}

@@ -248,10 +248,11 @@ async function startDetachedMetro(): Promise<boolean> {
 /** Runs Metro in THIS process so its logs stream and Ctrl+C stops everything —
  *  the desktop dev.ts experience. Resolves only when the server exits. */
 function runMetroForeground(): Promise<void> {
-  const expo = join("node_modules", "expo", "bin", "cli");
   clearMetroCache();
   console.log(`metro: starting in this terminal (Ctrl+C to stop)`);
-  const proc = Bun.spawn(["bun", expo, "start", "--port", String(METRO_PORT)], {
+  // `bun x expo` rather than the relative node_modules path: workspaces hoist
+  // expo to the repo root's node_modules, so apps/mobile has no copy to spawn.
+  const proc = Bun.spawn(["bun", "x", "expo", "start", "--port", String(METRO_PORT)], {
     cwd: join(import.meta.dir, "..", "apps", "mobile"),
     env: { ...process.env, ...SDK_ENV, CI: undefined },
     stdin: "inherit",

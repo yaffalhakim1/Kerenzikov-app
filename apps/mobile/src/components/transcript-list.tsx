@@ -11,7 +11,6 @@ import {
   type Ref,
 } from 'react';
 import {
-  Animated,
   Keyboard,
   ScrollView,
   StyleSheet,
@@ -20,12 +19,15 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { ScrollViewMarker } from 'react-native-screens/experimental';
 
-import { AppPressable } from '@/components/app-pressable';
 
 import { AppSymbol } from '@/components/app-symbol';
-import { GlassSurface } from '@/components/glass-surface';
 import { useMarkdownStyles, VeilRegistry } from '@/components/md-block-row';
 import { RowAnchorProvider } from '@/components/transcript-anchor';
 import {
@@ -34,8 +36,9 @@ import {
   TranscriptRowView,
   WorkingStrip,
 } from '@/components/transcript-rows';
-import { Radius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
+import { Fab } from 'panelui-native/components/fab';
 import { useTheme } from '@/hooks/use-theme';
 import {
   buildTranscriptPipeline,
@@ -467,14 +470,16 @@ export function TranscriptList({
   }), [anchorIndex, liveSkip, readerOffTail, touching]);
 
   // ── Jump button ─────────────────────────────────────────────────────────
-  const [jumpOpacity] = useState(() => new Animated.Value(0));
+  // Reanimated, not core `Animated`: PanelUI's performance rules forbid the
+  // core API alongside the library. The jump button fades on every scroll
+  // settle, so it is on a path that must not reach JavaScript.
+  const jumpProgress = useSharedValue(0);
   useEffect(() => {
-    Animated.timing(jumpOpacity, {
+    jumpProgress.value = withTiming(jump ? 1 : 0, {
       duration: reducedMotion ? 0 : 160,
-      toValue: jump ? 1 : 0,
-      useNativeDriver: true,
-    }).start();
-  }, [jump, jumpOpacity, reducedMotion]);
+    });
+  }, [jump, jumpProgress, reducedMotion]);
+  const jumpStyle = useAnimatedStyle(() => ({ opacity: jumpProgress.value }));
 
   const showEmpty = hydrated && !running && rows.length === 0;
 
@@ -537,22 +542,31 @@ export function TranscriptList({
       )}
       <Animated.View
         pointerEvents={jump ? 'auto' : 'none'}
-        style={[styles.jumpFrame, { opacity: jumpOpacity }]}>
-        <GlassSurface fallbackColor={theme.surface} interactive style={styles.jumpButton}>
-          <AppPressable
-            accessibilityHint={unseen ? 'New content arrived below' : undefined}
-            accessibilityLabel="Scroll to latest"
-            accessibilityRole="button"
-            onPress={() => scrollToLatest(true)}
-            style={({ pressed }) => [styles.jumpButtonInner, { opacity: pressed ? 0.6 : 1 }]}>
+        style={[styles.jumpFrame, jumpStyle]}>
+        <Fab
+          accessibilityHint={unseen ? 'New content arrived below' : undefined}
+          accessibilityLabel="Scroll to latest"
+          glass
+          haptics
+          icon={
             <AppSymbol
               name={{ ios: 'arrow.down', android: 'arrow_downward', web: 'arrow_downward' }}
               size={15}
               tintColor={theme.textSecondary}
             />
-            {unseen && <View style={[styles.unseenDot, { backgroundColor: theme.accent, borderColor: theme.surface }]} />}
-          </AppPressable>
-        </GlassSurface>
+          }
+          onPress={() => scrollToLatest(true)}
+          size="sm"
+          variant="surface"
+        />
+        {unseen ? (
+          <View
+            style={[
+              styles.unseenDot,
+              { backgroundColor: theme.accent, borderColor: theme.surface },
+            ]}
+          />
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -625,17 +639,16 @@ const TranscriptRowFrame = memo(function TranscriptRowFrame({
 function FoldReveal({ reveal, children }: { reveal: boolean; children: ReactNode }) {
   const reducedMotion = useReducedMotion();
   const animate = useRef(reveal && !reducedMotion).current;
-  const opacity = useRef(new Animated.Value(animate ? 0 : 1)).current;
+  // Reanimated, not core `Animated`: PanelUI's performance rules forbid the
+  // core API alongside the library.
+  const progress = useSharedValue(animate ? 0 : 1);
   useEffect(() => {
     if (!animate) return;
-    Animated.timing(opacity, {
-      duration: REVEAL_MS,
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
-  }, [animate, opacity]);
+    progress.value = withTiming(1, { duration: REVEAL_MS });
+  }, [animate, progress]);
+  const style = useAnimatedStyle(() => ({ opacity: progress.value }));
   if (!animate) return <>{children}</>;
-  return <Animated.View style={{ opacity }}>{children}</Animated.View>;
+  return <Animated.View style={style}>{children}</Animated.View>;
 }
 
 const styles = StyleSheet.create({
@@ -659,12 +672,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: 14,
   },
-  jumpButton: {
-    borderRadius: Radius.pill,
-    height: 40,
-    width: 40,
-  },
-  jumpButtonInner: { alignItems: 'center', flex: 1, justifyContent: 'center' },
   unseenDot: {
     borderRadius: 5,
     borderWidth: 1.5,

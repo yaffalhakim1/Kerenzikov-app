@@ -47,3 +47,8 @@ yarn-error.*
 /ios
 
 # The android project is committed: CI assembles the release APK from it.
+
+# NOTE: uniwind-types.d.ts is deliberately NOT ignored. It is generated, but
+# it carries the `uniwind/types` reference that gives React Native components
+# their `className` prop — without it a fresh checkout fails typecheck on
+# every `className`, so it has to be in the repo.

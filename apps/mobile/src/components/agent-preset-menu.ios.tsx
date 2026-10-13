@@ -53,19 +53,25 @@ export function AgentPresetMenu({
             <View
               accessible={false}
               style={
-                inline ? styles.inlineTrigger : [styles.trigger, { borderColor: theme.border }]
+                variant === 'icon'
+                  ? [styles.iconTrigger, { backgroundColor: theme.surfaceMuted }]
+                  : inline
+                    ? styles.inlineTrigger
+                    : [styles.trigger, { borderColor: theme.border }]
               }>
               {inline ? null : (
                 <AppSymbol name={PERSON_ICON} size={15} tintColor={theme.textSecondary} />
               )}
-              <Text
-                style={[
-                  inline ? styles.inlineLabel : styles.label,
-                  { color: inline ? theme.accent : theme.textSecondary },
-                ]}
-                numberOfLines={1}>
-                {label}
-              </Text>
+              {variant === 'icon' ? null : (
+                <Text
+                  style={[
+                    inline ? styles.inlineLabel : styles.label,
+                    { color: inline ? theme.accent : theme.textSecondary },
+                  ]}
+                  numberOfLines={1}>
+                  {label}
+                </Text>
+              )}
             </View>
           </RNHostView>
         )}
@@ -128,6 +134,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexShrink: 1,
     gap: 5,
+  },
+  // The composer's round action: a bare circle holding the glyph, matching the
+  // toolbar's other controls rather than reading as a labelled chip.
+  iconTrigger: {
+    alignItems: 'center',
+    borderRadius: Radius.pill,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
   },
   inlineLabel: {
     fontSize: 13,

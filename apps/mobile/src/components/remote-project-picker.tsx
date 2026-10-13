@@ -2,6 +2,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Project, WorkingTreeEntry } from '@waku/client';
 import * as Crypto from 'expo-crypto';
 import * as Haptics from 'expo-haptics';
+import { Alert } from 'panelui-native/components/alert';
+import { Button } from 'panelui-native/components/button';
+import { Chip } from 'panelui-native/components/chip';
+import { EmptyState } from 'panelui-native/components/empty-state';
+import { Input } from 'panelui-native/components/input';
+import { Item } from 'panelui-native/components/item';
+import { Spinner } from 'panelui-native/components/spinner';
+import { Typography } from 'panelui-native/components/typography';
 import { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
@@ -9,17 +17,13 @@ import {
   Modal,
   Platform,
   StyleSheet,
-  Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppSymbol } from './app-symbol';
-import { AppPressable } from '@/components/app-pressable';
-import { Blocks } from '@/components/blocks';
 
-import { Radius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
   browseDaemonDirectory,
@@ -119,6 +123,8 @@ export function RemoteProjectPicker({
     }
   }
 
+  const message = error ?? (directory.error ? errorMessage(directory.error) : null);
+
   return (
     <Modal
       animationType="slide"
@@ -130,63 +136,66 @@ export function RemoteProjectPicker({
         style={[styles.screen, { backgroundColor: theme.background, paddingBottom: keyboardHeight }]}>
         <SafeAreaView edges={['top', 'bottom']} style={styles.screen}>
           <View style={[styles.header, { borderBottomColor: theme.separator }]}>
-            <AppPressable
-              accessibilityRole="button"
+            <Button
+              className="min-w-16"
               disabled={Boolean(submitting)}
-              hitSlop={8}
+              labelClassName="text-primary"
               onPress={onDismiss}
-              style={({ pressed }) => [styles.headerButton, { opacity: pressed ? 0.5 : 1 }]}>
-              <Text style={[styles.headerButtonText, { color: theme.accent }]}>Cancel</Text>
-            </AppPressable>
-            <Text style={[styles.title, { color: theme.text }]}>Choose Project</Text>
-            <AppPressable
+              variant="ghost">
+              Cancel
+            </Button>
+            <Typography.Heading align="center" className="flex-1" type="h5">
+              Choose Project
+            </Typography.Heading>
+            <Button
               accessibilityLabel="Add current folder"
-              accessibilityRole="button"
+              className="min-w-16"
               disabled={!directory.data?.path || Boolean(submitting)}
-              hitSlop={8}
+              labelClassName="text-primary"
+              loading={submitting === 'folder'}
               onPress={() => void addFolder()}
-              style={({ pressed }) => [styles.headerButton, styles.headerButtonTrailing, { opacity: pressed ? 0.5 : 1 }]}>
-              {submitting === 'folder'
-                ? <Blocks color={theme.accent} size={16} />
-                : <Text style={[styles.headerButtonText, { color: directory.data?.path ? theme.accent : theme.textTertiary }]}>Add</Text>}
-            </AppPressable>
+              variant="ghost">
+              Add
+            </Button>
           </View>
 
           <View style={styles.pathArea}>
-            <View style={[styles.pathField, { backgroundColor: theme.surface }]}>
-              <AppSymbol
-                name={{ ios: 'folder', android: 'folder', web: 'folder' }}
-                size={16}
-                tintColor={theme.textTertiary}
-              />
-              <TextInput
-                accessibilityLabel="Path on daemon host"
-                autoCapitalize="none"
-                autoCorrect={false}
-                onChangeText={setPathDraft}
-                onSubmitEditing={() => visit(pathDraft.trim() || null)}
-                placeholder="Path on daemon host"
-                placeholderTextColor={theme.textTertiary}
-                returnKeyType="go"
-                selectTextOnFocus
-                spellCheck={false}
-                style={[styles.pathInput, { color: theme.text }]}
-                value={pathDraft}
-              />
-              <AppPressable
-                accessibilityLabel="Open entered path"
-                accessibilityRole="button"
-                disabled={!pathDraft.trim() || Boolean(submitting)}
-                hitSlop={8}
-                onPress={() => visit(pathDraft.trim() || null)}
-                style={({ pressed }) => [styles.goButton, { opacity: pressed ? 0.45 : 1 }]}>
-                <AppSymbol
-                  name={{ ios: 'arrow.right.circle.fill', android: 'arrow_circle_right', web: 'arrow_circle_right' }}
-                  size={22}
-                  tintColor={pathDraft.trim() ? theme.accent : theme.textTertiary}
-                />
-              </AppPressable>
-            </View>
+            <Input
+              accessibilityLabel="Path on daemon host"
+              autoCapitalize="none"
+              autoCorrect={false}
+              endContent={(
+                <Button
+                  accessibilityLabel="Open entered path"
+                  disabled={!pathDraft.trim() || Boolean(submitting)}
+                  onPress={() => visit(pathDraft.trim() || null)}
+                  size="sm"
+                  variant="ghost">
+                  <AppSymbol
+                    name={{ ios: 'arrow.right.circle.fill', android: 'arrow_circle_right', web: 'arrow_circle_right' }}
+                    size={20}
+                    tintColor={pathDraft.trim() ? theme.accent : theme.textTertiary}
+                  />
+                </Button>
+              )}
+              onChangeText={setPathDraft}
+              onSubmitEditing={() => visit(pathDraft.trim() || null)}
+              placeholder="Path on daemon host"
+              returnKeyType="go"
+              selectTextOnFocus
+              spellCheck={false}
+              startContent={(
+                <View pointerEvents="none">
+                  <AppSymbol
+                    name={{ ios: 'folder', android: 'folder', web: 'folder' }}
+                    size={16}
+                    tintColor={theme.textTertiary}
+                  />
+                </View>
+              )}
+              value={pathDraft}
+              variant="filled"
+            />
             <View style={styles.locations}>
               <LocationButton
                 label="Home"
@@ -207,11 +216,18 @@ export function RemoteProjectPicker({
             </View>
           </View>
 
-          {error || directory.error ? (
-            <View accessibilityLiveRegion="polite" style={[styles.error, { backgroundColor: theme.accentSoft }]}>
-              <Text style={[styles.errorText, { color: theme.danger }]}>
-                {error ?? errorMessage(directory.error)}
-              </Text>
+          {message ? (
+            <View style={styles.errorArea}>
+              <Alert accessibilityLiveRegion="polite" variant="destructive">
+                <Alert.Indicator iconProps={{ color: theme.danger }} />
+                <Alert.Content>
+                  {/* This app redefines `--color-destructive-foreground` as the
+                      contrast pair for a *solid* destructive fill, so the
+                      variant's own foreground lands white-on-pink here. The
+                      glyph and the text take the house danger colour instead. */}
+                  <Alert.Title className="text-destructive">{message}</Alert.Title>
+                </Alert.Content>
+              </Alert>
             </View>
           ) : null}
 
@@ -229,18 +245,23 @@ export function RemoteProjectPicker({
           />
 
           <View style={[styles.footer, { borderTopColor: theme.separator }]}>
-            <AppPressable
+            <Button
               accessibilityHint="Creates a private workspace on the daemon host"
-              accessibilityRole="button"
               disabled={Boolean(submitting)}
+              loading={submitting === 'empty'}
               onPress={() => void addEmptyWorkspace()}
-              style={({ pressed }) => [styles.emptyWorkspaceButton, { opacity: pressed ? 0.5 : 1 }]}>
-              {submitting === 'empty' && <Blocks color={theme.textSecondary} size={16} />}
-              <Text style={[styles.emptyWorkspaceText, { color: theme.textSecondary }]}>New empty workspace</Text>
-            </AppPressable>
-            <Text numberOfLines={1} style={[styles.footerPath, { color: theme.textTertiary }]}>
+              size="sm"
+              variant="ghost">
+              New empty workspace
+            </Button>
+            <Typography.Paragraph
+              align="right"
+              className="flex-1"
+              muted
+              numberOfLines={1}
+              type="body-xs">
               {directory.data?.path ?? 'Loading folder…'}
-            </Text>
+            </Typography.Paragraph>
           </View>
         </SafeAreaView>
       </KeyboardAvoidingView>
@@ -248,6 +269,8 @@ export function RemoteProjectPicker({
   );
 }
 
+/** One of the three jumps out of the current directory — a labelled pill, so
+ *  the row reads as places rather than as another toolbar of glyphs. */
 function LocationButton({
   label,
   icon = { ios: 'house', android: 'home', web: 'home' },
@@ -261,65 +284,75 @@ function LocationButton({
 }) {
   const theme = useTheme();
   return (
-    <AppPressable
-      accessibilityRole="button"
+    <Chip
       disabled={disabled}
+      hitSlop={8}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.locationButton,
-        { backgroundColor: theme.surfaceMuted, opacity: disabled ? 0.35 : pressed ? 0.55 : 1 },
-      ]}>
-      <AppSymbol name={icon} size={13} tintColor={theme.textSecondary} />
-      <Text style={[styles.locationText, { color: theme.textSecondary }]}>{label}</Text>
-    </AppPressable>
+      size="md"
+      start={<AppSymbol name={icon} size={13} tintColor={theme.textSecondary} />}>
+      {label}
+    </Chip>
   );
 }
 
+/** A folder in the listing: its tile, its name, and the chevron that says the
+ *  row goes somewhere. The row itself is the PanelUI `Item`, so the press
+ *  animation, role and disabled announcement come from the library.
+ *
+ *  The row keeps the app's own `surface` fill — `bg-card`, the token this
+ *  app's palette maps it to — rather than taking `variant="muted"`. The tile
+ *  inside the row is drawn on `surfaceMuted`, and a row in that same fill
+ *  would swallow the tile that carries the folder glyph. */
 function FolderRow({ entry, onOpen }: { entry: WorkingTreeEntry; onOpen: () => void }) {
   const theme = useTheme();
   return (
-    <AppPressable
+    <Item
       accessibilityHint="Opens this folder"
-      accessibilityRole="button"
+      className="bg-card"
       onPress={onOpen}
-      style={({ pressed }) => [
-        styles.folderRow,
-        { backgroundColor: pressed ? theme.backgroundSelected : theme.surface },
-      ]}>
-      <View style={[styles.folderIcon, { backgroundColor: theme.surfaceMuted }]}>
+      size="sm">
+      <Item.Media variant="icon">
         <AppSymbol
           name={{ ios: 'folder.fill', android: 'folder', web: 'folder' }}
-          size={18}
+          size={16}
           tintColor={theme.textSecondary}
         />
-      </View>
-      <Text numberOfLines={1} style={[styles.folderName, { color: theme.text }]}>{entry.name}</Text>
-      <AppSymbol
-        name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-        size={14}
-        tintColor={theme.textTertiary}
-      />
-    </AppPressable>
+      </Item.Media>
+      <Item.Content>
+        <Item.Title numberOfLines={1}>{entry.name}</Item.Title>
+      </Item.Content>
+      <Item.Actions>
+        <AppSymbol
+          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+          size={14}
+          tintColor={theme.textTertiary}
+        />
+      </Item.Actions>
+    </Item>
   );
 }
 
+/** The listing's own two states — a browse in flight, and a folder with no
+ *  subdirectories in it. They share a shape because they share a slot. */
 function DirectoryEmpty({ loading }: { loading: boolean }) {
   const theme = useTheme();
   return (
-    <View style={styles.empty}>
-      {loading ? <Blocks color={theme.textTertiary} size={20} /> : (
-        <View style={[styles.emptyIcon, { backgroundColor: theme.surfaceMuted }]}>
-          <AppSymbol
-            name={{ ios: 'folder', android: 'folder_open', web: 'folder_open' }}
-            size={24}
-            tintColor={theme.textTertiary}
-          />
-        </View>
-      )}
-      <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
-        {loading ? 'Loading folder…' : 'No folders here'}
-      </Text>
-    </View>
+    <EmptyState size="sm">
+      <EmptyState.Header>
+        <EmptyState.Media variant="icon">
+          {loading ? (
+            <Spinner />
+          ) : (
+            <AppSymbol
+              name={{ ios: 'folder', android: 'folder_open', web: 'folder_open' }}
+              size={18}
+              tintColor={theme.textTertiary}
+            />
+          )}
+        </EmptyState.Media>
+        <EmptyState.Title>{loading ? 'Loading folder…' : 'No folders here'}</EmptyState.Title>
+      </EmptyState.Header>
+    </EmptyState>
   );
 }
 
@@ -330,29 +363,10 @@ function errorMessage(cause: unknown): string {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   header: { alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', minHeight: 52, paddingHorizontal: 8 },
-  headerButton: { justifyContent: 'center', minHeight: 44, minWidth: 64, paddingHorizontal: 8 },
-  headerButtonTrailing: { alignItems: 'flex-end' },
-  headerButtonText: { fontSize: 16, fontWeight: '600' },
-  title: { flex: 1, fontSize: 17, fontWeight: '700', textAlign: 'center' },
   pathArea: { gap: 9, paddingHorizontal: Spacing.three, paddingTop: 13 },
-  pathField: { alignItems: 'center', borderRadius: Radius.medium, flexDirection: 'row', minHeight: 45, paddingLeft: 12, paddingRight: 7 },
-  pathInput: { flex: 1, fontSize: 14, minHeight: 44, paddingHorizontal: 9, paddingVertical: 8 },
-  goButton: { alignItems: 'center', height: 36, justifyContent: 'center', width: 36 },
+  errorArea: { paddingHorizontal: Spacing.three, paddingTop: 11 },
   locations: { flexDirection: 'row', gap: 7 },
-  locationButton: { alignItems: 'center', borderRadius: Radius.pill, flexDirection: 'row', gap: 5, minHeight: 32, paddingHorizontal: 10 },
-  locationText: { fontSize: 11.5, fontWeight: '600' },
-  error: { borderRadius: Radius.medium, marginHorizontal: Spacing.three, marginTop: 11, padding: 10 },
-  errorText: { fontSize: 12.5, fontWeight: '600', lineHeight: 17 },
   list: { gap: 7, padding: Spacing.three, paddingBottom: 28 },
   emptyList: { flexGrow: 1 },
-  folderRow: { alignItems: 'center', borderRadius: Radius.medium, flexDirection: 'row', gap: 10, minHeight: 54, paddingHorizontal: 11 },
-  folderIcon: { alignItems: 'center', borderRadius: Radius.small, height: 34, justifyContent: 'center', width: 34 },
-  folderName: { flex: 1, fontSize: 14.5, fontWeight: '600' },
-  empty: { alignItems: 'center', flex: 1, justifyContent: 'center', minHeight: 220 },
-  emptyIcon: { alignItems: 'center', borderRadius: 18, height: 58, justifyContent: 'center', width: 58 },
-  emptyTitle: { fontSize: 14, fontWeight: '600', marginTop: 12 },
   footer: { alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', gap: 12, minHeight: 58, paddingHorizontal: Spacing.three },
-  emptyWorkspaceButton: { alignItems: 'center', flexDirection: 'row', gap: 6, minHeight: 42 },
-  emptyWorkspaceText: { fontSize: 12.5, fontWeight: '600' },
-  footerPath: { flex: 1, fontSize: 10.5, textAlign: 'right' },
 });

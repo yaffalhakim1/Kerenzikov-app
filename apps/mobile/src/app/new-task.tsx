@@ -18,13 +18,13 @@ import {
   Text,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
 
+import { Chip } from 'panelui-native/components/chip';
+import { AIInput } from 'panelui-native/components/ai-input';
+import { Item } from 'panelui-native/components/item';
 import { AppSymbol } from '@/components/app-symbol';
-import { AttachmentChip } from '@/components/attachment-chip';
 import { AgentPresetMenu } from '@/components/agent-preset-menu';
 import { ComposerAccessMenu } from '@/components/composer-access-menu';
 import {
@@ -32,13 +32,8 @@ import {
   type ComposerAttachmentSource,
 } from '@/components/composer-attachment-menu';
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
-import {
-  ComposerCard,
-  ComposerHeader,
-  ComposerIconButton,
-  ComposerTargetChip,
-  SendButton,
-} from '@/components/mobile-composer';
+import { SendButton } from '@/components/mobile-composer';
+import { ComposerModelPill, ComposerSurface } from '@/components/composer-surface';
 import { ProviderIcon } from '@/components/provider-icon';
 import { RemoteProjectPicker } from '@/components/remote-project-picker';
 import { ResumeSessionSheet } from '@/components/session-option-sheets';
@@ -53,14 +48,20 @@ import { Radius, Spacing } from '@/constants/theme';
 import {
   useAllProviderModels,
   useComposerCommands,
+  useProjectFiles,
   useProviderCatalog,
   useProviderModels,
   useTaskState,
 } from '@/hooks/use-daemon-data';
-import { resolvedComposerSubmission } from '@/lib/composer-commands';
+import {
+  detectComposerTrigger,
+  filterComposerCommands,
+  filterComposerFiles,
+  replaceComposerFileTrigger,
+  resolvedComposerSubmission,
+} from '@/lib/composer-commands';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useTheme } from '@/hooks/use-theme';
-import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { daemonKeys, inspectBranches } from '@/lib/daemon-api';
 import {
   imagePickerFiles,
@@ -140,8 +141,6 @@ const PROMPT_TEMPLATES = [
 
 export default function NewTaskScreen() {
   const theme = useTheme();
-  const insets = useSafeAreaInsets();
-  const keyboardHeight = useKeyboardHeight();
   const headerInset = useScreenHeaderInset();
   const daemon = useDaemon();
   const runtime = useRuntime();
@@ -506,6 +505,26 @@ export default function NewTaskScreen() {
     ?? branches.data?.default_branch
     ?? branches.data?.current
     ?? 'Default branch';
+  // The trigger is read from the draft, the same as the session composer, so a
+  // command typed as the first prompt gets its own suggestion list.
+  const composerTrigger = detectComposerTrigger(prompt, prompt.length);
+  const commandNames =
+    composerTrigger?.kind === 'command'
+      ? filterComposerCommands(commandCatalog.data ?? [], composerTrigger.query).map(
+          (command) => command.name,
+        )
+      : [];
+  const projectFiles = useProjectFiles(
+    selectedProject?.path,
+    composerTrigger?.kind === 'file',
+  );
+  const fileSuggestions = useMemo(
+    () =>
+      composerTrigger?.kind === 'file'
+        ? filterComposerFiles(projectFiles.data ?? [], composerTrigger.query)
+        : [],
+    [composerTrigger, projectFiles.data],
+  );
   const startDisabled = !selectedProject
     || !provider
     || (!prompt.trim() && attachments.length === 0)
@@ -528,29 +547,19 @@ export default function NewTaskScreen() {
         style={styles.scroll}>
         <View style={styles.templates}>
           {PROMPT_TEMPLATES.map((template) => (
-            <AppPressable
+            <Chip
               accessibilityLabel={`Start from: ${template.title}`}
-              accessibilityRole="button"
               key={template.title}
               onPress={() => {
                 tapHaptic();
                 setPrompt(template.prompt);
               }}
-              style={({ pressed }) => [
-                styles.templateChip,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.border,
-                  opacity: pressed ? 0.6 : 1,
-                },
-              ]}>
-              <AppSymbol name={template.icon} size={13} tintColor={theme.textSecondary} />
-              <Text
-                numberOfLines={1}
-                style={[styles.templateLabel, { color: theme.text }]}>
-                {template.title}
-              </Text>
-            </AppPressable>
+              size="sm"
+              start={<AppSymbol name={template.icon} size={13} tintColor={theme.textSecondary} />}
+              variant="outline"
+            >
+              <Chip.Label>{template.title}</Chip.Label>
+            </Chip>
           ))}
         </View>
 
@@ -603,115 +612,91 @@ export default function NewTaskScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.composerShell, { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 }]}>
-        {error && (
+      <ComposerSurface
+        attachments={attachments}
+        commands={commandNames.length > 0 ? commandNames : undefined}
+        editable={!submitting}
+        error={error ? (
           <View
             accessibilityLiveRegion="polite"
             style={[styles.error, { backgroundColor: theme.dangerSoft }]}>
             <Text style={[styles.errorText, { color: theme.danger }]}>{error}</Text>
           </View>
-        )}
-        <ComposerCard
-          accessibilityLabel="Task prompt"
-          autoFocus
-          editable={!submitting}
-          beforeInput={attachments.length || importingAttachments ? (
-            <View style={styles.attachmentStack}>
-              {attachments.map((attachment, index) => (
-                <View
-                  key={`${attachment.blob_reference ?? attachment.path}:${index}`}
-                  style={styles.attachmentItem}>
-                  <AttachmentChip attachment={attachment} />
-                  <AppPressable
-                    accessibilityLabel={`Remove ${attachment.name}`}
-                    accessibilityRole="button"
-                    disabled={submitting}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                    onPress={() => {
-                      draftSync.markEdited();
-                      setAttachments((current) => current.filter((_, item) => item !== index));
-                    }}
-                    style={({ pressed }) => [
-                      styles.attachmentRemove,
-                      { backgroundColor: theme.overlayStrong, opacity: pressed ? 0.6 : 1 },
-                    ]}>
-                    <AppSymbol
-                      name={{ ios: 'xmark', android: 'close', web: 'close' }}
-                      size={11}
-                      tintColor={theme.textSecondary}
-                    />
-                  </AppPressable>
-                </View>
-              ))}
-              {importingAttachments && (
-                <View style={[styles.attachmentChipLoading, { backgroundColor: theme.overlayStrong }]}>
-                  <Blocks color={theme.accent} size={14} />
-                  <Text style={[styles.attachmentName, { color: theme.textSecondary }]}>
-                    Attaching…
-                  </Text>
-                </View>
-              )}
-            </View>
-          ) : undefined}
-          header={provider ? (
-            <ComposerHeader>
-              <ComposerTargetChip
-                accessibilityLabel={`Model, ${modelLabel}`}
-                color={theme.text}
-                label={modelLabel}
-                leading={<ProviderIcon provider={provider} size={15} />}
-                onPress={() => setOpenSheet('model')}
+        ) : null}
+        header={provider && supportsAgentPreset && agentPresets.length > 0 && !submitting ? (
+          // The agent preset is the one control the session composer has no
+          // equivalent for — it is chosen here, and fixed for the session's
+          // life. It sits at the card's top-left as a round action, matching
+          // the toolbar's other controls, so the header costs one row of
+          // nothing else.
+          <View className="flex-row items-center px-1 pb-1 pt-1.5" style={styles.agentPicker}>
+            <AgentPresetMenu
+              agentPreset={agentPreset}
+              onApply={(selection) => {
+                tapHaptic();
+                setAgentPreset(selection.agentPreset);
+              }}
+              provider={provider}
+              variant="icon"
+            />
+          </View>
+        ) : undefined}
+        files={fileSuggestions}
+        onPickCommand={(name) => {
+          tapHaptic();
+          setPrompt(`/${name} `);
+        }}
+        onPickFile={(file) => {
+          // Replace the `@query`, not the whole draft.
+          if (composerTrigger?.kind !== 'file') return;
+          draftSync.markEdited();
+          setPrompt(replaceComposerFileTrigger(prompt, composerTrigger, file).text);
+          tapHaptic();
+        }}
+        onRemoveAttachment={(index) => {
+          draftSync.markEdited();
+          setAttachments((current) => current.filter((_, item) => item !== index));
+        }}
+        onSubmit={() => void start()}
+        onValueChange={(value) => {
+          draftSync.markEdited();
+          setPrompt(value);
+        }}
+        pendingFiles={importingAttachments ? [{ id: 0, name: 'Attaching…' }] : undefined}
+        placeholder={`Work on ${daemon.activeProfile?.name ?? 'your daemon'}`}
+        toolbar={
+          <AIInput.Toolbar>
+            <ComposerAttachmentMenu
+              disabled={disconnected || submitting || importingAttachments}
+              onChoose={(source) => void chooseAttachment(source)}
+            />
+            <ComposerAccessMenu
+              mode={runtimeMode}
+              onApply={setRuntimeMode}
+            />
+            <ComposerModelPill
+              accessibilityLabel={`Model, ${modelLabel}`}
+              label={modelLabel}
+              onPress={() => setOpenSheet('model')}
+            />
+            {activeModel && modelHasConfigurableTraits(activeModel) && (
+              <AIInput.Action
+                icon={<ProviderIcon provider={provider!} size={15} />}
+                label="Reasoning and model options"
+                onPress={() => setOpenSheet('traits')}
               />
-              {supportsAgentPreset && agentPresets.length > 0 && !submitting && (
-                <AgentPresetMenu
-                  agentPreset={agentPreset}
-                  onApply={(selection) => {
-                    tapHaptic();
-                    setAgentPreset(selection.agentPreset);
-                  }}
-                  provider={provider}
-                  variant="inline"
-                />
-              )}
-            </ComposerHeader>
-          ) : undefined}
-          left={(
-            <>
-              <ComposerAttachmentMenu
-                disabled={disconnected || submitting || importingAttachments}
-                onChoose={(source) => void chooseAttachment(source)}
-              />
-              <ComposerAccessMenu
-                mode={runtimeMode}
-                onApply={setRuntimeMode}
-              />
-              {activeModel && modelHasConfigurableTraits(activeModel) && (
-                <ComposerIconButton
-                  icon={{ ios: 'brain.head.profile', android: 'psychology', web: 'psychology' }}
-                  label="Reasoning and model options"
-                  onPress={() => setOpenSheet('traits')}
-                />
-              )}
-            </>
-          )}
-          placeholder={`Work on ${daemon.activeProfile?.name ?? 'your daemon'}`}
-          right={(
-            <>
-              <SendButton
-                busy={submitting}
-                disabled={startDisabled}
-                label="Start task"
-                onPress={() => void start()}
-              />
-            </>
-          )}
-          value={prompt}
-          onChangeText={(value) => {
-            draftSync.markEdited();
-            setPrompt(value);
-          }}
-        />
-      </View>
+            )}
+            <AIInput.Spacer />
+            <SendButton
+              busy={submitting}
+              disabled={startDisabled}
+              label="Start task"
+              onPress={() => void start()}
+            />
+          </AIInput.Toolbar>
+        }
+        value={prompt}
+      />
 
       <DaemonPickerSheet
         onDismiss={() => setOpenSheet(null)}
@@ -845,26 +830,31 @@ function SelectorRow({
 }) {
   const theme = useTheme();
   return (
-    <AppPressable
+    <Item
       accessibilityLabel={`${label}: ${value}`}
-      accessibilityRole="button"
       disabled={loading}
       onPress={onPress}
-      style={[styles.row, { backgroundColor: theme.surface }]}>
-      <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
-      {loading ? (
-        <Blocks color={theme.accent} size={16} />
-      ) : (
-        <Text numberOfLines={1} style={[styles.rowValue, { color: theme.text }]}>
-          {value}
-        </Text>
-      )}
-      <AppSymbol
-        name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
-        size={13}
-        tintColor={theme.textTertiary}
-      />
-    </AppPressable>
+      pressScale={1}
+      size="sm"
+    >
+      <Item.Media>
+        <AppSymbol name={icon} size={19} tintColor={theme.textSecondary} />
+      </Item.Media>
+      <Item.Content>
+        {loading ? (
+          <Blocks color={theme.accent} size={16} />
+        ) : (
+          <Item.Title numberOfLines={1}>{value}</Item.Title>
+        )}
+      </Item.Content>
+      <Item.Actions>
+        <AppSymbol
+          name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
+          size={13}
+          tintColor={theme.textTertiary}
+        />
+      </Item.Actions>
+    </Item>
   );
 }
 
@@ -881,54 +871,10 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     paddingHorizontal: Spacing.three,
   },
-  templateChip: {
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  templateLabel: { fontSize: 13, fontWeight: '500' },
   rows: { gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three },
-  row: {
-    alignItems: 'center',
-    borderRadius: Radius.medium,
-    flexDirection: 'row',
-    gap: 14,
-    minHeight: 52,
-    paddingHorizontal: 6,
-  },
-  rowValue: { flexShrink: 1, fontSize: 16.5, fontWeight: '500' },
-  composerShell: { paddingHorizontal: 12 },
-  attachmentStack: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    paddingHorizontal: 4,
-    paddingTop: 4,
-  },
-  attachmentItem: { position: 'relative' },
-  attachmentRemove: {
-    alignItems: 'center',
-    borderRadius: 10,
-    height: 20,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: -4,
-    top: -4,
-    width: 20,
-  },
-  attachmentChipLoading: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    flexDirection: 'row',
-    gap: 6,
-    height: 30,
-    paddingHorizontal: 9,
-  },
-  attachmentName: { fontSize: 12, fontWeight: '600' },
+  // A nudge in from the card's corner: the round action sits on the field's
+  // own inset, which is tighter than a circle wants against the edge.
+  agentPicker: { marginLeft: 2, marginTop: 2 },
   error: { borderRadius: Radius.medium, marginBottom: 8, padding: 11 },
   errorText: { fontSize: 12.5, fontWeight: '600', lineHeight: 17 },
   sheetLoading: { alignItems: 'center', paddingVertical: 14 },

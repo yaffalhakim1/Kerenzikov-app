@@ -18,10 +18,13 @@ import {
   View,
 } from 'react-native';
 
-import { ActivitySheetHost } from '@/components/activity-sheet';
 import { ConnectionBanner } from '@/components/connection-banner';
 import { ContextGaugeButton } from '@/components/context-gauge';
 import { BackgroundWorkBar, ComputerUseChip, TodoStrip } from '@/components/harness-surfaces';
+import { devBackgroundWorkItems, devTodoItems } from '@/lib/dev-fixtures';
+import Constants from 'expo-constants';
+
+import { ComposerV2 } from '@/components/composer-v2';
 import { MobileComposer } from '@/components/mobile-composer';
 import { RenameDialog } from '@/components/rename-dialog';
 import {
@@ -99,14 +102,29 @@ const TASK_MENU_COMMANDS = [
 
 
 
+/** Whether the composer is PanelUI's `AIInput` composition (`composer-v2`)
+ * or the app's own surface. Flipped in `expo.extra` so it can be changed
+ * without a code edit; both composers stay in the tree. */
+const composerV2 = Constants.expoConfig?.extra?.composerV2 === true;
+
 export function SessionView({
   sessionId,
   devPrompt,
+  devError,
+  devFixtures,
 }: {
   sessionId: string | undefined;
   /** Dev-only: auto-submit this prompt through the composer path once the
    * session loads — lets headless rigs exercise the exact user flow. */
   devPrompt?: string;
+  /** Dev-only: show this text as the composer's error, so the error state can
+   * be looked at without staging a real failure. Reach it with
+   * `?devError=...` on a session route. */
+  devError?: string;
+  /** Dev-only: render the harness surfaces (background work, the plan) from
+   * sample data instead of the runtime's, so their states can be looked at
+   * without a daemon producing them. `?devFixtures=1`. */
+  devFixtures?: boolean;
 }) {
   const theme = useTheme();
   const scheme = useColorScheme();
@@ -124,9 +142,13 @@ export function SessionView({
   // agent's task list and any live background work. Both are cheap reads of
   // runtime state; neither re-renders on stream deltas unless the data
   // changed.
-  const backgroundWorkItems = session
-    ? (runtime.backgroundWork[session.id] ?? [])
-    : [];
+  // Dev-only: `?devFixtures=1` swaps the harness surfaces onto sample data, so
+  // their states can be looked at without a daemon producing them.
+  const backgroundWorkItems = devFixtures
+    ? devBackgroundWorkItems()
+    : session
+      ? (runtime.backgroundWork[session.id] ?? [])
+      : [];
   const computerUse = session ? runtime.computerUse[session.id] : undefined;
   const running = Boolean(session && sessionBusy(session));
   const listRef = useRef<TranscriptListHandle>(null);
@@ -498,16 +520,14 @@ export function SessionView({
       <Stack.Screen options={headerOptions} />
       <View style={styles.body}>
         {session && transcriptMounted ? (
-          <ActivitySheetHost key={`activity-sheet:${session.id}`} session={session}>
-            <TranscriptList
-              headerInset={headerInset}
-              hydrated={!query.isPlaceholderData}
-              ref={listRef}
-              running={running}
-              session={session}
-              onDevSample={devPrompt ? probe.sample : undefined}
-            />
-          </ActivitySheetHost>
+          <TranscriptList
+            headerInset={headerInset}
+            hydrated={!query.isPlaceholderData}
+            ref={listRef}
+            running={running}
+            session={session}
+            onDevSample={devPrompt ? probe.sample : undefined}
+          />
         ) : session ? (
           // The session is in hand and the transcript is a frame or two behind
           // it by design (see the mount effect above). Rendering an empty body
@@ -535,8 +555,11 @@ export function SessionView({
       </View>
       {session && (
         <View style={styles.harnessSurfaces}>
-          {session.todos && session.todos.length > 0 && (
-            <TodoStrip key={`todo-strip:${session.id}`} todos={session.todos} />
+          {(devFixtures || (session.todos && session.todos.length > 0)) && (
+            <TodoStrip
+              key={`todo-strip:${session.id}`}
+              todos={devFixtures ? devTodoItems() : session.todos ?? []}
+            />
           )}
           {backgroundWorkItems.length > 0 && (
             <BackgroundWorkBar items={backgroundWorkItems} sessionId={session.id} />
@@ -547,11 +570,20 @@ export function SessionView({
         </View>
       )}
       {session && (
-        <MobileComposer
-          key={`composer:${session.id}`}
-          session={session}
-          onSubmitted={() => listRef.current?.followNextGrowth()}
-        />
+        composerV2 ? (
+          <ComposerV2
+            devError={devError}
+            key={`composer-v2:${session.id}`}
+            onSubmitted={() => listRef.current?.followNextGrowth()}
+            session={session}
+          />
+        ) : (
+          <MobileComposer
+            key={`composer:${session.id}`}
+            onSubmitted={() => listRef.current?.followNextGrowth()}
+            session={session}
+          />
+        )
       )}
 
       {session && (

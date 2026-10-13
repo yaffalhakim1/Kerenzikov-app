@@ -1,19 +1,33 @@
-import { MenuView, type MenuAction } from '@expo/ui/community/menu';
-import { StyleSheet, View } from 'react-native';
+import { AIInput } from 'panelui-native/components/ai-input';
+import { useState } from 'react';
 
 import { AppSymbol } from './app-symbol';
-import { Radius } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+
 import { useTheme } from '@/hooks/use-theme';
 
 export type ComposerAttachmentSource = 'files' | 'camera' | 'photo';
 
-const AttachmentActions: MenuAction[] = [
-  { id: 'files', title: 'Files', image: 'folder' },
-  { id: 'camera', title: 'Camera', image: 'camera' },
-  { id: 'photo', title: 'Photo', image: 'photo' },
-];
+const ATTACHMENT_SOURCES = [
+  { id: 'files', label: 'Files', description: 'Anything already on this device.', icon: 'folder' },
+  { id: 'camera', label: 'Camera', description: 'Take a photo now.', icon: 'camera' },
+  { id: 'photo', label: 'Photo', description: 'Pick from your library.', icon: 'photo' },
+] as const satisfies readonly {
+  id: ComposerAttachmentSource;
+  label: string;
+  description: string;
+  icon: Parameters<typeof AppSymbol>[0]['name'] extends infer N ? N : never;
+}[];
 
+/**
+ * The composer's attachment picker.
+ *
+ * A PanelUI `AIInput.Sheet`, which is the sheet the library documents for the
+ * controls in a composer toolbar. It replaced `@expo/ui`'s native `MenuView`:
+ * `MenuView` wraps its child in its own Pressable, so the `AIInput.Action`
+ * trigger could not be one — the nested pressable swallowed the gesture and
+ * the menu never opened. The sheet has no such constraint, because the action
+ * opens it through context rather than by being wrapped in a pressable.
+ */
 export function ComposerAttachmentMenu({
   disabled = false,
   onChoose,
@@ -22,46 +36,52 @@ export function ComposerAttachmentMenu({
   onChoose: (source: ComposerAttachmentSource) => void;
 }) {
   const theme = useTheme();
-  const scheme = useColorScheme();
-  const trigger = (
-    <View
-      accessible
-      accessibilityLabel="Add attachment"
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      style={[styles.trigger, { opacity: disabled ? 0.35 : 1 }]}>
-      <AppSymbol
-        name={{ ios: 'plus', android: 'add', web: 'add' }}
-        size={19}
-        tintColor={theme.textSecondary}
-      />
-    </View>
-  );
-  if (disabled) return trigger;
+  const [open, setOpen] = useState(false);
 
   return (
-    <MenuView
-      actions={AttachmentActions}
-      colorScheme={scheme}
-      onPressAction={({ nativeEvent }) => {
-        const source = nativeEvent.event as ComposerAttachmentSource;
-        // Let the native menu finish dismissing before presenting a picker.
-        setTimeout(() => onChoose(source), 160);
-      }}>
-      {trigger}
-    </MenuView>
+    <>
+      <AIInput.Action
+        disabled={disabled}
+        icon={
+          <AppSymbol
+            name={{ ios: 'plus', android: 'add', web: 'add' }}
+            size={19}
+            tintColor={theme.textSecondary}
+          />
+        }
+        label="Add attachment"
+        onPress={() => setOpen(true)}
+      />
+      <AIInput.Sheet onOpenChange={setOpen} open={open} size="auto">
+        <AIInput.Sheet.Screen id="attachments" title="Add to chat">
+          <AIInput.Sheet.Group>
+            {ATTACHMENT_SOURCES.map((source) => (
+              <AIInput.Sheet.Row
+                description={source.description}
+                icon={
+                  <AppSymbol
+                    name={{
+                      ios: source.icon === 'folder' ? 'folder' : source.icon,
+                      android: source.icon === 'folder' ? 'folder' : source.icon,
+                      web: source.icon,
+                    }}
+                    size={17}
+                    tintColor={theme.textSecondary}
+                  />
+                }
+                key={source.id}
+                label={source.label}
+                onPress={() => {
+                  setOpen(false);
+                  // Let the sheet finish dismissing before presenting the
+                  // platform picker, which takes over the screen.
+                  setTimeout(() => onChoose(source.id), 160);
+                }}
+              />
+            ))}
+          </AIInput.Sheet.Group>
+        </AIInput.Sheet.Screen>
+      </AIInput.Sheet>
+    </>
   );
 }
-
-const styles = StyleSheet.create({
-  // A plain plus at the same 36pt footprint as its neighbours: the ring made
-  // this one control a different shape from the rest of the row, and at the
-  // shared icon size the strokes sat too close to it to read cleanly.
-  trigger: {
-    alignItems: 'center',
-    borderRadius: Radius.pill,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-});

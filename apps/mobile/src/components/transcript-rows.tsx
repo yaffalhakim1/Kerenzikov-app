@@ -2,10 +2,21 @@ import type { AgentSession, Checkpoint, Message } from '@waku/client';
 import { formatMessageTime } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
+import { Item } from 'panelui-native/components/item';
+import { Button } from 'panelui-native/components/button';
+import { Message as MessageBubble } from 'panelui-native/components/message';
+import { Shimmer } from 'panelui-native/components/shimmer';
+import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
 import { memo, useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { Collapsible } from 'panelui-native/components/collapsible';
 
-import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
 
 import { ActivityGroup } from '@/components/activity-group';
@@ -105,7 +116,7 @@ export const TranscriptRowView = memo(function TranscriptRowView({
         </>
       );
     case 'activities':
-      return <ActivityGroup block={row.block} blockIndex={row.blockIndex} live={row.live} />;
+      return <ActivityGroup block={row.block} live={row.live} />;
     case 'fold':
       return (
         <FoldRow
@@ -134,46 +145,52 @@ function FoldRow({
 }) {
   const theme = useTheme();
   const keepTop = useRowAnchor();
-  // The chevron rotates on the compositor as the fold opens or closes, so the
-  // direction change reads as motion rather than a swap. Native driver only:
-  // transform, never layout.
+  // The chevron rotates on the UI thread as the fold opens or closes, so the
+  // direction change reads as motion rather than a swap. Transform only, never
+  // layout. Reanimated rather than core `Animated`: the two do not compose, and
+  // core `Animated` would put these frames back on the JS thread.
+  //
+  // Not a PanelUI `Collapsible`: that component animates the height of a body
+  // it owns, and this disclosure's body is the turn's rows, rendered by the
+  // transcript list above it. The trigger is all there is here.
   const reducedMotion = useReducedMotion();
-  const rotation = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  const rotation = useSharedValue(expanded ? 1 : 0);
   useEffect(() => {
-    if (reducedMotion) {
-      rotation.setValue(expanded ? 1 : 0);
-      return;
-    }
-    Animated.timing(rotation, {
-      duration: 140,
-      easing: Easing.out(Easing.ease),
-      toValue: expanded ? 1 : 0,
-      useNativeDriver: true,
-    }).start();
+    rotation.value = reducedMotion
+      ? expanded ? 1 : 0
+      : withTiming(expanded ? 1 : 0, { duration: 140, easing: Easing.out(Easing.ease) });
   }, [expanded, reducedMotion, rotation]);
-  const spin = rotation.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '90deg'] });
+  const spin = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${rotation.value * 90}deg` }],
+  }));
   return (
-    <AppPressable
+    <Item
       accessibilityHint={expanded ? 'Collapses the agent’s work' : 'Shows the agent’s work'}
       accessibilityLabel={label}
-      accessibilityRole="button"
-      accessibilityState={{ expanded }}
+      className="justify-center"
       hitSlop={{ top: 6, bottom: 6 }}
       onPress={() => keepTop(() => onToggle(turnId))}
-      style={({ pressed }) => [styles.foldRow, { opacity: pressed ? 0.6 : 1 }]}>
+      pressOpacity={0.6}
+      pressScale={1}
+      size="xs"
+    >
       <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
-      <Text numberOfLines={1} style={[styles.foldLabel, { color: theme.textTertiary }]}>
-        {label}
-      </Text>
-      <Animated.View style={{ transform: [{ rotate: spin }] }}>
-        <AppSymbol
-          name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-          size={10}
-          tintColor={theme.textGhost}
-        />
-      </Animated.View>
+      <Item.Content>
+        <Item.Title numberOfLines={1} className="text-xs text-muted-foreground text-center">
+          {label}
+        </Item.Title>
+      </Item.Content>
+      <Item.Actions>
+        <Animated.View style={spin}>
+          <AppSymbol
+            name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
+            size={10}
+            tintColor={theme.textGhost}
+          />
+        </Animated.View>
+      </Item.Actions>
       <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
-    </AppPressable>
+    </Item>
   );
 }
 
@@ -190,10 +207,8 @@ function CopyButton({ label, text }: { label: string; text: string }) {
   }, [copied]);
 
   return (
-    <AppPressable
+    <Button
       accessibilityLabel={copied ? 'Copied' : label}
-      accessibilityRole="button"
-      hitSlop={10}
       onPress={() => {
         void Clipboard.setStringAsync(text)
           .then(async () => {
@@ -202,7 +217,9 @@ function CopyButton({ label, text }: { label: string; text: string }) {
           })
           .catch(() => {});
       }}
-      style={({ pressed }) => [styles.copyButton, { opacity: pressed ? 0.5 : 1 }]}>
+      size="xs"
+      variant="ghost"
+    >
       <AppSymbol
         name={copied
           ? { ios: 'checkmark', android: 'check', web: 'check' }
@@ -210,7 +227,7 @@ function CopyButton({ label, text }: { label: string; text: string }) {
         size={13}
         tintColor={copied ? theme.success : theme.textGhost}
       />
-    </AppPressable>
+    </Button>
   );
 }
 
@@ -229,43 +246,48 @@ function UserBubbleInner({ message }: { message: Message }) {
 
   return (
     <View style={styles.userFrame}>
-      <AppPressable
-        accessibilityHint="Long press to copy"
-        accessibilityLabel={message.display_content ?? message.content}
-        accessibilityRole="button"
-        delayLongPress={350}
-        onLongPress={() => {
-          void Clipboard.setStringAsync(message.content)
-            .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
-            .catch(() => {});
-        }}
-        style={[styles.userBubble, { backgroundColor: theme.raised }]}>
-        {content ? (
-          <Text selectable style={[styles.userText, { color: theme.text }]}>
-            {mentionSegments(content).map((segment, index) => (
-              segment.kind === 'mention' ? (
-                <Text
-                  key={index}
-                  style={{ color: theme.accent, fontWeight: '600' }}>
-                  {segment.value}
-                </Text>
-              ) : (
-                <Text key={index}>{segment.value}</Text>
-              )
-            ))}
-          </Text>
-        ) : null}
-        {message.attachments?.length ? (
-          <View style={styles.attachments}>
-            {message.attachments.map((attachment) => (
-              <AttachmentChip
-                attachment={attachment}
-                key={`${attachment.path}:${attachment.name}`}
-              />
-            ))}
-          </View>
-        ) : null}
-      </AppPressable>
+      <MessageBubble align="end">
+        <MessageBubble.Content>
+          <MessageBubble.Bubble>
+            <Pressable
+              accessibilityHint="Long press to copy"
+              accessibilityLabel={message.display_content ?? message.content}
+              delayLongPress={350}
+              onLongPress={() => {
+                void Clipboard.setStringAsync(message.content)
+                  .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success))
+                  .catch(() => {});
+              }}
+            >
+              {content ? (
+                <MessageBubble.BubbleContent selectable>
+                  {mentionSegments(content).map((segment, index) => (
+                    segment.kind === 'mention' ? (
+                      <Text
+                        key={index}
+                        style={{ color: theme.accent, fontWeight: '600' }}>
+                        {segment.value}
+                      </Text>
+                    ) : (
+                      <Text key={index}>{segment.value}</Text>
+                    )
+                  ))}
+                </MessageBubble.BubbleContent>
+              ) : null}
+            </Pressable>
+            {message.attachments?.length ? (
+              <View style={styles.attachments}>
+                {message.attachments.map((attachment) => (
+                  <AttachmentChip
+                    attachment={attachment}
+                    key={`${attachment.path}:${attachment.name}`}
+                  />
+                ))}
+              </View>
+            ) : null}
+          </MessageBubble.Bubble>
+        </MessageBubble.Content>
+      </MessageBubble>
       {content.trim() ? (
         <View style={styles.userFooterRow}>
           <CopyButton label="Copy message" text={message.content} />
@@ -280,34 +302,29 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
   const keepTop = useRowAnchor();
   const [open, setOpen] = useState(false);
   return (
-    <View style={[styles.changedCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-      <AppPressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        onPress={() => keepTop(() => setOpen((value) => !value))}
-        style={({ pressed }) => [styles.changedHeader, { opacity: pressed ? 0.6 : 1 }]}>
+    <Collapsible
+      className="mb-1 rounded-lg border border-border"
+      onOpenChange={() => keepTop(() => setOpen((value) => !value))}
+      open={open}
+      variant="surface"
+    >
+      <Collapsible.Trigger accessibilityRole="button">
         <AppSymbol
           name={{ ios: 'plusminus', android: 'difference', web: 'difference' }}
           size={13}
           tintColor={theme.textSecondary}
         />
-        <Text style={[styles.changedTitle, { color: theme.textSecondary }]}>
+        <Collapsible.Title className="text-sm">
           {checkpoint.files.length} file{checkpoint.files.length === 1 ? '' : 's'} changed
-        </Text>
+        </Collapsible.Title>
         <Text style={styles.changedStats}>
           <Text style={{ color: theme.success }}>+{checkpoint.additions}</Text>
           <Text style={{ color: theme.textGhost }}> </Text>
           <Text style={{ color: theme.danger }}>−{checkpoint.deletions}</Text>
         </Text>
-        <AppSymbol
-          name={open
-            ? { ios: 'chevron.up', android: 'keyboard_arrow_up', web: 'keyboard_arrow_up' }
-            : { ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
-          size={11}
-          tintColor={theme.textGhost}
-        />
-      </AppPressable>
-      {open && (
+        <Collapsible.Indicator />
+      </Collapsible.Trigger>
+      <Collapsible.Content>
         <View style={[styles.changedFiles, { borderTopColor: theme.border }]}>
           {checkpoint.files.map((file) => (
             <View key={file.path} style={styles.changedFileRow}>
@@ -322,8 +339,8 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
             </View>
           ))}
         </View>
-      )}
-    </View>
+      </Collapsible.Content>
+    </Collapsible>
   );
 }
 
@@ -360,14 +377,19 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
     return () => clearInterval(timer);
   }, []);
   const elapsed = startedAt ? Math.max(0, now - startedAt) : 0;
-  const word = session.status === 'waiting'
+  const waiting = session.status === 'waiting';
+  const word = waiting
     ? 'Waiting for you'
     : `${FLAVOUR_WORDS[(flavourSeed(session.id) + Math.floor(elapsed / 7)) % FLAVOUR_WORDS.length]}…`;
   return (
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
-      <Blocks color={theme.accent} size={14} />
-      <Text style={[styles.workingText, { color: theme.textTertiary }]}>{word}</Text>
-      {startedAt != null && session.status !== 'waiting' && (
+      {/* The orb's silhouette names the kind of busy; the word shimmers while
+          it changes every 7s so a swap never reads as a static relabel. */}
+      <ThinkingOrb size={18} state={waiting ? 'listening' : 'working'} />
+      <Shimmer enabled={!waiting} textClassName="text-[12.5px] font-medium">
+        {word}
+      </Shimmer>
+      {startedAt != null && !waiting && (
         <Text style={[styles.workingElapsed, { color: theme.textTertiary }]}>
           {formatElapsed(elapsed)}
         </Text>
@@ -412,15 +434,9 @@ export function SessionEmpty({
         </Text>
       )}
       {Boolean(error) && onRetry && (
-        <AppPressable
-          accessibilityRole="button"
-          onPress={onRetry}
-          style={({ pressed }) => [
-            styles.emptyRetry,
-            { borderColor: theme.border, opacity: pressed ? 0.6 : 1 },
-          ]}>
-          <Text style={[styles.emptyRetryText, { color: theme.text }]}>Try again</Text>
-        </AppPressable>
+        <Button onPress={onRetry} size="sm" variant="outline">
+          Try again
+        </Button>
       )}
     </View>
   );
@@ -429,14 +445,6 @@ export function SessionEmpty({
 const styles = StyleSheet.create({
   earlier: { alignItems: 'center', paddingVertical: 10 },
   userFrame: { alignItems: 'flex-end' },
-  userBubble: {
-    borderRadius: Radius.large,
-    borderBottomRightRadius: 6,
-    maxWidth: '88%',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  userText: { fontSize: 16, lineHeight: 23 },
   messageFooterRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -455,13 +463,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     minHeight: 20,
   },
-  copyButton: {
-    alignItems: 'center',
-    borderRadius: Radius.small,
-    height: 20,
-    justifyContent: 'center',
-    width: 24,
-  },
   systemFrame: { alignItems: 'center' },
   systemMessage: {
     borderRadius: Radius.pill,
@@ -473,27 +474,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   attachments: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 9 },
-  foldRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 9,
-    minHeight: 28,
-  },
   foldLine: { flex: 1, height: StyleSheet.hairlineWidth },
-  foldLabel: { flexShrink: 1, fontSize: 12, fontWeight: '500' },
-  changedCard: {
-    borderRadius: Radius.medium,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  changedHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    minHeight: 40,
-    paddingHorizontal: 11,
-  },
-  changedTitle: { flex: 1, fontSize: 12.5, fontWeight: '600' },
   changedStats: { fontSize: 11.5, fontVariant: ['tabular-nums'], fontWeight: '600' },
   changedFiles: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -515,13 +496,4 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', paddingHorizontal: 32 },
   emptyTitle: { fontSize: 17, fontWeight: '700', textAlign: 'center' },
   emptyBody: { fontSize: 13.5, lineHeight: 19, marginTop: 8, textAlign: 'center' },
-  emptyRetry: {
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-    justifyContent: 'center',
-    marginTop: 16,
-    minHeight: 44,
-    paddingHorizontal: 22,
-  },
-  emptyRetryText: { fontSize: 14, fontWeight: '600' },
 });

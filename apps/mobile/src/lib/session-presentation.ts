@@ -471,30 +471,6 @@ export function contextPercent(session: AgentSession): number | null {
 }
 
 /**
- * Locator for one tool group, as handed to the activity sheet. Every stream
- * commit deep-clones the session, so the sheet keeps this rather than the
- * block and re-resolves it against the freshest session on each render. The
- * index is a hint checked against the anchor; a block that moved (a rewind
- * dropped an earlier turn) is found again by its anchor.
- */
-export interface ActivityGroupTarget {
-  blockIndex: number;
-  turnId: string | null;
-  afterMessage: number;
-}
-
-export function findActivityBlock(
-  session: AgentSession,
-  target: ActivityGroupTarget,
-): TranscriptBlock | null {
-  const matches = (block: TranscriptBlock) =>
-    block.turn_id === target.turnId && block.after_message === target.afterMessage;
-  const hinted = session.transcript_blocks[target.blockIndex];
-  if (hinted && matches(hinted)) return hinted;
-  return session.transcript_blocks.find(matches) ?? null;
-}
-
-/**
  * Message-granular pipeline rows — the cheap, parse-free skeleton of the
  * transcript. Assistant messages expand into `md` block rows only for the
  * slice that is actually rendered (see `expandTranscriptRows`), so opening a

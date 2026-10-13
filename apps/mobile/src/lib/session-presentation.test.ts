@@ -12,7 +12,6 @@ import {
   displaySessionTitle,
   expandTranscriptRows,
   filterArchivedSessions,
-  findActivityBlock,
   foldGroups,
   groupSessions,
   messageSearchRows,
@@ -537,26 +536,6 @@ describe('mobile session presentation', () => {
   });
 });
 
-describe('activity sheet locator', () => {
-  test('trusts the index hint only while the anchor still matches', () => {
-    const first = activityBlock(0, 'turn');
-    const second = activityBlock(1, 'turn');
-    const current = session({ transcript_blocks: [first, second] });
-    expect(findActivityBlock(current, { blockIndex: 1, turnId: 'turn', afterMessage: 1 })).toBe(second);
-    // A rewind dropped a block in front: the hint is stale, the anchor is not.
-    expect(findActivityBlock(current, { blockIndex: 1, turnId: 'turn', afterMessage: 0 })).toBe(first);
-    expect(findActivityBlock(current, { blockIndex: 0, turnId: 'other', afterMessage: 0 })).toBeNull();
-  });
-
-  test('survives the per-commit clone by resolving against the new session', () => {
-    const before = session({ transcript_blocks: [activityBlock(0, 'turn')] });
-    const after = JSON.parse(JSON.stringify(before)) as AgentSession;
-    activitiesForBlock(after.transcript_blocks[0]!)[0]!.output = 'streamed';
-    const target = { blockIndex: 0, turnId: 'turn', afterMessage: 0 };
-    expect(activitiesForBlock(findActivityBlock(before, target)!)[0]!.output).toBeUndefined();
-    expect(activitiesForBlock(findActivityBlock(after, target)!)[0]!.output).toBe('streamed');
-  });
-});
 
 function activityBlock(afterMessage: number, turnId: string): AgentSession['transcript_blocks'][number] {
   return {

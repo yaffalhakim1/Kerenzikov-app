@@ -107,7 +107,8 @@
     "extra": {
       "eas": {
         "projectId": "aaf2bb3c-4629-4310-9e96-4c0dabdb84bb"
-      }
+      },
+      "composerV2": true
     }
   }
 }

@@ -16,6 +16,11 @@ import type {
 } from "@waku/client";
 import { TerminalView, type TerminalViewRef } from "expo-libghostty";
 import * as Crypto from "expo-crypto";
+import { Alert } from "panelui-native/components/alert";
+import { Button } from "panelui-native/components/button";
+import { EmptyState } from "panelui-native/components/empty-state";
+import { Item } from "panelui-native/components/item";
+import { Spinner } from "panelui-native/components/spinner";
 import {
   useCallback,
   useEffect,
@@ -34,7 +39,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppPressable } from "@/components/app-pressable";
 import { AppSymbol } from "@/components/app-symbol";
-import { Blocks } from "@/components/blocks";
 import { DiffView } from "@/components/diff-view";
 import { liquidGlass } from "@/components/glass-surface";
 import { MonoFont, NativeTint, Radius } from "@/constants/theme";
@@ -154,6 +158,10 @@ function SurfaceBody({
   return <ReviewSurface root={root} session={session} />;
 }
 
+/** The sheet's title bar: a PanelUI `Item` with no press handler, so it reads
+ *  as a static row rather than announcing itself as a control. The icon tile,
+ *  the title and the subtitle are its media and text slots; the caller's
+ *  action — a Refresh button — is its trailing slot. */
 function SurfaceHeader({
   surface,
   subtitle,
@@ -166,30 +174,28 @@ function SurfaceHeader({
   const theme = useTheme();
   const details = SURFACE_DETAILS[surface];
   return (
-    <View style={[styles.header, { borderBottomColor: theme.border }]}>
-      <View style={[styles.headerIcon, { backgroundColor: theme.overlay }]}>
+    <Item
+      className="gap-2.5 rounded-none"
+      size="sm"
+      style={[styles.header, { borderBottomColor: theme.border }]}
+    >
+      <Item.Media variant="icon">
         <AppSymbol
           name={details.icon}
           size={15}
           tintColor={theme.textSecondary}
         />
-      </View>
-      <View style={styles.headerCopy}>
-        <Text
-          numberOfLines={1}
-          style={[styles.headerTitle, { color: theme.text }]}
-        >
+      </Item.Media>
+      <Item.Content>
+        <Item.Title numberOfLines={1} style={styles.headerTitle}>
           {details.title}
-        </Text>
-        <Text
-          numberOfLines={1}
-          style={[styles.headerSubtitle, { color: theme.textTertiary }]}
-        >
+        </Item.Title>
+        <Item.Description numberOfLines={1} style={styles.headerSubtitle}>
           {subtitle ?? details.subtitle}
-        </Text>
-      </View>
-      {action}
-    </View>
+        </Item.Description>
+      </Item.Content>
+      {action ? <Item.Actions>{action}</Item.Actions> : null}
+    </Item>
   );
 }
 
@@ -324,6 +330,9 @@ function TerminalSession({ root }: { root: string }) {
         }}
       />
       {daemon.phase !== "connected" || error || exited ? (
+        // A caption over the native terminal, not a control: it stays a plate
+        // of the sheet's own surface so a long daemon error wraps to two lines
+        // instead of being clipped to a pill.
         <View
           pointerEvents="none"
           style={[styles.terminalStatus, { backgroundColor: theme.surface }]}
@@ -387,6 +396,7 @@ function FilesSurface({ root }: { root: string | null }) {
   }
 
   if (selectedPath) {
+    const content = (file.data ?? "").slice(0, MAX_FILE_CHARACTERS);
     const truncated = (file.data?.length ?? 0) > MAX_FILE_CHARACTERS;
     return (
       <View style={styles.fill}>
@@ -400,14 +410,18 @@ function FilesSurface({ root }: { root: string | null }) {
           subtitle={selectedPath}
           surface="files"
         />
+        {/*
+          `AppPressable`, not PanelUI `Item`, because this row is inside the
+          native sheet: `Item` presses through `AnimatedPressable`, and
+          Reanimated cannot update props on a view inside `@expo/ui`'s native
+          host — the press never lands. Same reason the picker rows in
+          `session-option-sheets` are `AppPressable`.
+        */}
         <AppPressable
           accessibilityHint="Returns to the workspace file list"
           accessibilityRole="button"
           onPress={() => setSelectedPath(null)}
-          style={({ pressed }) => [
-            styles.backRow,
-            { opacity: pressed ? 0.55 : 1 },
-          ]}
+          style={({ pressed }) => [styles.backRow, { opacity: pressed ? 0.6 : 1 }]}
         >
           <AppSymbol
             name={{
@@ -418,7 +432,7 @@ function FilesSurface({ root }: { root: string | null }) {
             size={13}
             tintColor={NativeTint}
           />
-          <Text style={[styles.backLabel, { color: NativeTint }]}>Files</Text>
+          <Text style={styles.backLabel}>Files</Text>
         </AppPressable>
         {file.isPending ? (
           <LoadingMessage />
@@ -437,12 +451,17 @@ function FilesSurface({ root }: { root: string | null }) {
             showsVerticalScrollIndicator
           >
             <Text selectable style={[styles.fileText, { color: theme.text }]}>
-              {(file.data ?? "").slice(0, MAX_FILE_CHARACTERS)}
+              {content}
             </Text>
             {truncated ? (
-              <Text style={[styles.truncated, { color: theme.textTertiary }]}>
-                File truncated in this viewer.
-              </Text>
+              <Alert className="mt-3" variant="warning">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Description>
+                    File truncated in this viewer.
+                  </Alert.Description>
+                </Alert.Content>
+              </Alert>
             ) : null}
           </BottomSheetScrollView>
         )}
@@ -483,7 +502,7 @@ function FilesSurface({ root }: { root: string | null }) {
             />
           }
           renderItem={({ item }) => (
-            <AppPressable
+            <Item
               accessibilityHint={
                 item.isDir
                   ? item.expanded
@@ -491,10 +510,8 @@ function FilesSurface({ root }: { root: string | null }) {
                     : "Expands folder"
                   : "Opens file"
               }
-              accessibilityRole="button"
-              accessibilityState={{
-                expanded: item.isDir ? item.expanded : undefined,
-              }}
+              aria-expanded={item.isDir ? item.expanded : undefined}
+              className="gap-2 rounded-none"
               onPress={() => {
                 if (!item.isDir) {
                   setSelectedPath(item.relativePath);
@@ -506,38 +523,37 @@ function FilesSurface({ root }: { root: string | null }) {
                     : [...current, item.absolutePath].sort(),
                 );
               }}
-              style={({ pressed }) => [
+              pressOpacity={0.6}
+              pressScale={1}
+              size="xs"
+              style={[
                 styles.fileRow,
-                {
-                  backgroundColor: pressed
-                    ? theme.overlayStrong
-                    : "transparent",
-                  paddingLeft: 14 + Math.min(item.depth, 12) * 16,
-                },
+                { paddingLeft: 14 + Math.min(item.depth, 12) * 16 },
               ]}
             >
-              <AppSymbol
-                name={
-                  item.isDir
-                    ? {
-                        ios: item.expanded ? "chevron.down" : "chevron.right",
-                        android: item.expanded
-                          ? "expand_more"
-                          : "chevron_right",
-                        web: item.expanded ? "expand_more" : "chevron_right",
-                      }
-                    : { ios: "doc", android: "draft", web: "draft" }
-                }
-                size={item.isDir ? 12 : 14}
-                tintColor={theme.textTertiary}
-              />
-              <Text
-                numberOfLines={1}
-                style={[styles.fileRowLabel, { color: theme.text }]}
-              >
-                {item.name}
-              </Text>
-            </AppPressable>
+              <Item.Media>
+                <AppSymbol
+                  name={
+                    item.isDir
+                      ? {
+                          ios: item.expanded ? "chevron.down" : "chevron.right",
+                          android: item.expanded
+                            ? "expand_more"
+                            : "chevron_right",
+                          web: item.expanded ? "expand_more" : "chevron_right",
+                        }
+                      : { ios: "doc", android: "draft", web: "draft" }
+                  }
+                  size={item.isDir ? 12 : 14}
+                  tintColor={theme.textTertiary}
+                />
+              </Item.Media>
+              <Item.Content>
+                <Item.Title numberOfLines={1} style={styles.fileRowLabel}>
+                  {item.name}
+                </Item.Title>
+              </Item.Content>
+            </Item>
           )}
         />
       )}
@@ -654,6 +670,9 @@ function ReviewSurface({
             if (item) setSource(item.source);
           }}
         >
+          {/* Non-pressable trigger content: `MenuView` wraps its children in a
+           *  `Pressable`, and a nested pressable swallows the gesture on
+           *  Android (see `task-row-menu.tsx`). */}
           <View
             accessible
             accessibilityLabel="Choose review source"
@@ -701,14 +720,12 @@ function ReviewSurface({
           stickySectionHeadersEnabled
           ListHeaderComponent={
             !diff.data?.completeContext ? (
-              <Text
-                style={[
-                  styles.contextNote,
-                  { color: theme.warning, backgroundColor: theme.warningSoft },
-                ]}
-              >
-                This comparison has partial context.
-              </Text>
+              <Alert className="m-3" variant="warning">
+                <Alert.Indicator />
+                <Alert.Content>
+                  <Alert.Title>This comparison has partial context.</Alert.Title>
+                </Alert.Content>
+              </Alert>
             ) : null
           }
           ListEmptyComponent={
@@ -718,27 +735,24 @@ function ReviewSurface({
             />
           }
           renderSectionHeader={({ section }) => (
-            <View
-              style={[
-                styles.diffFileHeader,
-                {
-                  backgroundColor: theme.surface,
-                  borderBottomColor: theme.border,
-                },
-              ]}
+            <Item
+              className="gap-2 rounded-none border-b border-border bg-card"
+              size="xs"
+              style={styles.diffFileHeader}
             >
-              <AppSymbol
-                name={{ ios: "doc", android: "draft", web: "draft" }}
-                size={13}
-                tintColor={theme.textTertiary}
-              />
-              <Text
-                numberOfLines={1}
-                style={[styles.diffPath, { color: theme.textSecondary }]}
-              >
-                {section.path}
-              </Text>
-            </View>
+              <Item.Media>
+                <AppSymbol
+                  name={{ ios: "doc", android: "draft", web: "draft" }}
+                  size={13}
+                  tintColor={theme.textTertiary}
+                />
+              </Item.Media>
+              <Item.Content>
+                <Item.Title numberOfLines={1} style={styles.diffPath}>
+                  {section.path}
+                </Item.Title>
+              </Item.Content>
+            </Item>
           )}
           renderItem={({ item }) => (
             <View
@@ -764,27 +778,20 @@ function HeaderTextButton({
   onPress: () => void;
 }) {
   return (
-    <AppPressable
-      accessibilityRole="button"
-      hitSlop={8}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.textButton,
-        { opacity: pressed ? 0.5 : 1 },
-      ]}
-    >
-      <Text style={[styles.textButtonLabel, { color: NativeTint }]}>
-        {label}
-      </Text>
-    </AppPressable>
+    <Button hitSlop={8} onPress={onPress} size="sm" variant="ghost">
+      {label}
+    </Button>
   );
 }
 
+/** The slot-filling wait: PanelUI's spinner over the surface's own words. The
+ *  spinner carries no label of its own — the caption beside it already says
+ *  what the wait is, so a labelled spinner would announce it twice. */
 function LoadingMessage() {
   const theme = useTheme();
   return (
-    <View accessibilityLabel="Loading" style={styles.loading}>
-      <Blocks color={theme.accent} size={24} />
+    <View style={styles.loading}>
+      <Spinner size="lg" />
       <Text style={[styles.loadingText, { color: theme.textTertiary }]}>
         Loading…
       </Text>
@@ -792,15 +799,16 @@ function LoadingMessage() {
   );
 }
 
+/** A PanelUI empty state: the title and the detail are its heading and its
+ *  supporting line, centred in whatever slot the surface hands it. */
 function PanelMessage({ title, detail }: { title: string; detail: string }) {
-  const theme = useTheme();
   return (
-    <View style={styles.message}>
-      <Text style={[styles.messageTitle, { color: theme.text }]}>{title}</Text>
-      <Text style={[styles.messageDetail, { color: theme.textTertiary }]}>
-        {detail}
-      </Text>
-    </View>
+    <EmptyState size="sm">
+      <EmptyState.Header>
+        <EmptyState.Title>{title}</EmptyState.Title>
+        <EmptyState.Description>{detail}</EmptyState.Description>
+      </EmptyState.Header>
+    </EmptyState>
   );
 }
 
@@ -816,26 +824,13 @@ const styles = StyleSheet.create({
   sheet: { flex: 1, minHeight: 0 },
   fill: { flex: 1, minHeight: 0 },
   header: {
-    alignItems: "center",
     borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: 10,
     minHeight: 54,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
-  headerIcon: {
-    alignItems: "center",
-    borderRadius: Radius.small,
-    height: 30,
-    justifyContent: "center",
-    width: 30,
-  },
-  headerCopy: { flex: 1, minWidth: 0 },
   headerTitle: { fontSize: 15, fontWeight: "600" },
   headerSubtitle: { fontSize: 11.5, marginTop: 1 },
-  textButton: { justifyContent: "center", minHeight: 36, paddingHorizontal: 4 },
-  textButtonLabel: { fontSize: 14, fontWeight: "500" },
   terminalBody: { flex: 1, minHeight: 0, position: "relative" },
   terminalStatus: {
     borderRadius: Radius.small,
@@ -848,22 +843,17 @@ const styles = StyleSheet.create({
   },
   terminalStatusText: { fontSize: 11 },
   backRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 5,
     minHeight: 38,
     paddingHorizontal: 15,
+    paddingVertical: 0,
   },
-  backLabel: { fontSize: 14.5, fontWeight: "500" },
+  backLabel: { color: NativeTint, fontSize: 14.5, fontWeight: "500" },
   fileContent: { paddingHorizontal: 14, paddingTop: 4 },
   fileText: { fontFamily: MonoFont, fontSize: 11.5, lineHeight: 17 },
-  truncated: { fontSize: 11, marginTop: 14 },
   fileRow: {
-    alignItems: "center",
-    flexDirection: "row",
-    gap: 8,
     minHeight: 39,
     paddingRight: 14,
+    paddingVertical: 0,
   },
   fileRowLabel: { flex: 1, fontSize: 13.5 },
   reviewControls: {
@@ -885,25 +875,16 @@ const styles = StyleSheet.create({
   sourceLabel: { fontSize: 13, fontWeight: "500" },
   reviewStats: { fontSize: 11.5 },
   reviewList: { paddingTop: 0 },
-  contextNote: {
-    borderRadius: Radius.small,
-    fontSize: 11.5,
-    margin: 12,
-    padding: 9,
-  },
   diffSection: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     overflow: "hidden",
   },
   diffFileHeader: {
-    alignItems: "center",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: "row",
-    gap: 8,
     minHeight: 36,
     paddingHorizontal: 12,
+    paddingVertical: 0,
   },
-  diffPath: { flex: 1, fontSize: 12.5, fontWeight: "500" },
+  diffPath: { fontSize: 12.5, fontWeight: "500" },
   loading: {
     alignItems: "center",
     flex: 1,
@@ -912,17 +893,4 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   loadingText: { fontSize: 12.5 },
-  message: {
-    alignItems: "center",
-    flex: 1,
-    justifyContent: "center",
-    padding: 28,
-  },
-  messageTitle: { fontSize: 15, fontWeight: "600", textAlign: "center" },
-  messageDetail: {
-    fontSize: 12.5,
-    lineHeight: 18,
-    marginTop: 5,
-    textAlign: "center",
-  },
 });

@@ -1,3 +1,5 @@
+import "../global.css";
+
 import {
   DarkTheme,
   DefaultTheme,
@@ -11,6 +13,7 @@ import { StatusBar } from "expo-status-bar";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { Platform, StyleSheet } from "react-native";
+import { PanelUIProvider } from "panelui-native/provider";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import { Colors } from "@/constants/theme";
@@ -71,9 +74,11 @@ export default function RootLayout() {
   useNotificationDeepLink();
   return (
     <GestureHandlerRootView style={styles.root}>
-      <ThemePreferenceProvider>
-        <ThemedApp />
-      </ThemePreferenceProvider>
+      <PanelUIProvider>
+        <ThemePreferenceProvider>
+          <ThemedApp />
+        </ThemePreferenceProvider>
+      </PanelUIProvider>
     </GestureHandlerRootView>
   );
 }

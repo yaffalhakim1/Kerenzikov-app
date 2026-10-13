@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useColorScheme } from 'react-native';
+import { Uniwind } from 'uniwind';
 
 import { loadThemePreference, saveThemePreference } from './theme-preference-store';
 import { resolveScheme, type ThemePreference } from './theme-preference';
@@ -49,11 +50,31 @@ export function ThemePreferenceProvider({ children }: { children: ReactNode }) {
     saveThemePreference(value);
   }, []);
 
+  const scheme = resolveScheme(preference, systemScheme);
+
+  /*
+   * PanelUI's classes resolve through Uniwind, which reads the *OS* scheme
+   * (`Appearance.getColorScheme()`) and knows nothing about this app's saved
+   * preference. Left alone, the two disagree the moment Dark is chosen while
+   * the phone is Light: every PanelUI surface — the todo panel, `Frame`, the
+   * composers, the new-task page — paints its own theme tokens against a
+   * light-scheme Uniwind while the house surfaces repaint from `useTheme()`.
+   * That is the split that left some text dark and some light.
+   *
+   * This provider is the one place the app decides its scheme, so it is also
+   * where Uniwind is told. `setTheme` takes a concrete name here rather than
+   * `system`: the preference has already been resolved against the OS, and
+   * passing `system` would hand the decision straight back.
+   */
+  useEffect(() => {
+    Uniwind.setTheme(scheme);
+  }, [scheme]);
+
   const value = useMemo<ThemePreferenceValue>(() => ({
     preference,
-    scheme: resolveScheme(preference, systemScheme),
+    scheme,
     setPreference,
-  }), [preference, setPreference, systemScheme]);
+  }), [preference, scheme, setPreference]);
 
   return (
     <ThemePreferenceContext.Provider value={value}>

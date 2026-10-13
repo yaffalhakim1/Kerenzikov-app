@@ -6,14 +6,12 @@ import type {
   ProviderSessionSummary,
   RuntimeMode,
 } from '@waku/client';
-import { useEffect, useMemo, useState } from 'react';
-import {
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-} from 'react-native';
+import { Alert } from 'panelui-native/components/alert';
+import { Button } from 'panelui-native/components/button';
+import { SearchBar } from 'panelui-native/components/search-bar';
+import { Typography } from 'panelui-native/components/typography';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -22,13 +20,14 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { AppPressable } from '@/components/app-pressable';
+
 import { AppSymbol } from './app-symbol';
 import { Blocks } from './blocks';
 import { ProviderIcon } from './provider-icon';
-import { Sheet, SheetRow } from './sheet';
-import { AppPressable } from '@/components/app-pressable';
+import { Sheet } from './sheet';
 
-import { NativeTint, Radius } from '@/constants/theme';
+import { Radius, Spacing } from '@/constants/theme';
 import { useAllProviderModels, useProviderModels } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -54,6 +53,123 @@ export interface AgentPresetSelection {
   agentPreset: string | null;
 }
 
+/**
+ * One option in a sheet.
+ *
+ * `AppPressable`, not PanelUI `Item`, and that is deliberate. `Item` renders
+ * through `AnimatedPressable` — an `Animated.createAnimatedComponent(Pressable)`
+ * driven by a Reanimated style — and these rows live inside `@expo/ui`'s
+ * native sheet, whose content is hosted by a native `HostView`. Reanimated
+ * cannot update props on a view inside that host; it fails with
+ * `synchronouslyUpdateUIProps failed`, and the row never takes the press. Every
+ * picker in the app (model, reasoning effort, access, service tier, context
+ * window) stopped responding when these rows were moved onto `Item`.
+ *
+ * `Item` is fine everywhere else — it drives the transcript's rows and the
+ * activity list, neither of which is inside a native sheet.
+ *
+ * Selection is carried by the trailing check alone, not by a fill: a tinted
+ * background reads as a hover remnant on a static picker, and the checkmark is
+ * the stronger signal anyway.
+ */
+function OptionRow({
+  label,
+  description,
+  selected = false,
+  disabled = false,
+  leading,
+  onPress,
+}: {
+  label: string;
+  description?: string | null;
+  selected?: boolean;
+  disabled?: boolean;
+  leading?: ReactNode;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <AppPressable
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.optionRow,
+        {
+          backgroundColor: pressed ? theme.overlayStrong : 'transparent',
+          opacity: disabled ? 0.4 : 1,
+        },
+      ]}
+    >
+      {leading ? <View style={styles.optionMedia}>{leading}</View> : null}
+      <View style={styles.optionCopy}>
+        <Text numberOfLines={1} style={[styles.optionLabel, { color: theme.text }]}>
+          {label}
+        </Text>
+        {description ? (
+          <Text numberOfLines={2} style={[styles.optionDescription, { color: theme.textTertiary }]}>
+            {description}
+          </Text>
+        ) : null}
+      </View>
+      {selected ? (
+        <AppSymbol
+          name={{ ios: 'checkmark', android: 'check', web: 'check' }}
+          size={15}
+          tintColor={theme.accent}
+        />
+      ) : null}
+    </AppPressable>
+  );
+}
+
+/** The eyebrow over a run of options. */
+function SectionHeading({ children }: { children: string }) {
+  return (
+    <Typography
+      className="mx-3 mb-1.5 mt-3.5"
+      type="body-xs"
+      weight="semibold"
+      muted>
+      {children}
+    </Typography>
+  );
+}
+
+/** The one line a sheet shows instead of rows: nothing installed, nothing to
+ *  pick, or a search that matched nothing. */
+function SheetNote({ children }: { children: ReactNode }) {
+  return (
+    <Typography className="px-3 py-2.5" type="body-sm" muted>
+      {children}
+    </Typography>
+  );
+}
+
+/** A failed probe or import, as a PanelUI `Alert` so it carries the library's
+ *  status icon and its soft destructive surface rather than plain red text. */
+function SheetError({ message }: { message: string }) {
+  return (
+    <View className="px-3 pt-2">
+      <Alert accessibilityLiveRegion="polite" variant="destructive">
+        <Alert.Indicator />
+        <Alert.Content>
+          {/* This app redefines `--color-destructive-foreground` as the
+              contrast pair for a *solid* destructive fill, so the variant's
+              default title colour lands white-on-pink here. The text part
+              takes the colour instead. */}
+          <Alert.Title className="text-destructive">{message}</Alert.Title>
+        </Alert.Content>
+      </Alert>
+    </View>
+  );
+}
+
+function errorMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /** Picks how many turns a rewind or a fork keeps.
  *
  * Rewind and fork are destructive and irreversible, so the sheet only selects
@@ -74,8 +190,6 @@ export function TurnSheet({
   turns: TurnOption[];
   onPick: (turnCount: number) => void;
 }) {
-  const theme = useTheme();
-
   function pick(turnCount: number) {
     tapHaptic();
     onPick(turnCount);
@@ -84,20 +198,16 @@ export function TurnSheet({
 
   return (
     <Sheet onDismiss={onDismiss} title={title} visible={visible}>
-      {note ? (
-        <Text style={[styles.note, { color: theme.textTertiary }]}>{note}</Text>
-      ) : null}
+      {note ? <SheetNote>{note}</SheetNote> : null}
       {turns.map((turn) => (
-        <SheetRow
+        <OptionRow
           key={turn.turnCount}
           label={turn.label}
           onPress={() => pick(turn.turnCount)}
         />
       ))}
       {!turns.length && (
-        <Text style={[styles.note, { color: theme.textTertiary }]}>
-          This task has no completed turn to rewind to yet.
-        </Text>
+        <SheetNote>This task has no completed turn to rewind to yet.</SheetNote>
       )}
     </Sheet>
   );
@@ -145,17 +255,15 @@ export function ModelSheet({
   return (
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} model`} visible={visible}>
       {probe.isPending ? (
-        <View style={styles.loading}>
+        <View className="items-center justify-center py-10">
           <Blocks color={theme.accent} size={20} />
         </View>
       ) : probe.error ? (
-        <Text style={[styles.note, { color: theme.danger }]}>
-          {probe.error instanceof Error ? probe.error.message : String(probe.error)}
-        </Text>
+        <SheetError message={errorMessage(probe.error)} />
       ) : (
         <>
           {models.map((item) => (
-            <SheetRow
+            <OptionRow
               description={item.sub_provider ?? undefined}
               key={item.id}
               label={item.name}
@@ -164,17 +272,15 @@ export function ModelSheet({
             />
           ))}
           {!models.length && (
-            <Text style={[styles.note, { color: theme.textTertiary }]}>
+            <SheetNote>
               This agent doesn’t expose a model list; it will use its own default.
-            </Text>
+            </SheetNote>
           )}
           {efforts.length ? (
             <>
-              <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-                REASONING EFFORT
-              </Text>
+              <SectionHeading>REASONING EFFORT</SectionHeading>
               {efforts.map((effort) => (
-                <SheetRow
+                <OptionRow
                   description={effort.description ?? undefined}
                   key={effort.id}
                   label={effort.label}
@@ -210,7 +316,6 @@ export function ModelTraitsSheet({
   selection: ModelTraitSelection;
   onApply: (changes: Partial<ModelTraitSelection>) => void;
 }) {
-  const theme = useTheme();
   const resolved = resolveModelTraitSelection(model, selection);
 
   function pick(changes: Partial<ModelTraitSelection>) {
@@ -222,11 +327,9 @@ export function ModelTraitsSheet({
     <Sheet onDismiss={onDismiss} visible={visible}>
       {model.reasoning_efforts.length ? (
         <>
-          <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            REASONING EFFORT
-          </Text>
+          <SectionHeading>REASONING EFFORT</SectionHeading>
           {model.reasoning_efforts.map((option) => (
-            <SheetRow
+            <OptionRow
               description={optionDescription(
                 option.description,
                 model.default_reasoning_effort === option.id,
@@ -241,10 +344,8 @@ export function ModelTraitsSheet({
       ) : null}
       {model.service_tiers.length ? (
         <>
-          <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            SERVICE TIER
-          </Text>
-          <SheetRow
+          <SectionHeading>SERVICE TIER</SectionHeading>
+          <OptionRow
             description={(model.default_service_tier ?? 'default') === 'default'
               ? 'Default'
               : undefined}
@@ -253,7 +354,7 @@ export function ModelTraitsSheet({
             selected={resolved.serviceTier === 'default'}
           />
           {model.service_tiers.map((option) => (
-            <SheetRow
+            <OptionRow
               description={optionDescription(
                 option.description,
                 model.default_service_tier === option.id,
@@ -268,11 +369,9 @@ export function ModelTraitsSheet({
       ) : null}
       {model.context_windows.length ? (
         <>
-          <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            CONTEXT WINDOW
-          </Text>
+          <SectionHeading>CONTEXT WINDOW</SectionHeading>
           {model.context_windows.map((option) => (
-            <SheetRow
+            <OptionRow
               description={optionDescription(
                 option.description,
                 model.default_context_window === option.id,
@@ -389,7 +488,7 @@ export function ModelPickerSheet({
               keyExtractor={(id) => id}
               keyboardShouldPersistTaps="handled"
               renderItem={({ item: id }) => (
-                <SheetRow
+                <OptionRow
                   label={providerLabel(id)}
                   leading={<ProviderIcon provider={id} size={20} />}
                   onPress={() => {
@@ -404,62 +503,40 @@ export function ModelPickerSheet({
               showsVerticalScrollIndicator={false}
               style={{ height: listHeight }}
               ListEmptyComponent={(
-                <Text style={[styles.note, { color: theme.textTertiary }]}>
-                  No agents are installed on this daemon host.
-                </Text>
+                <SheetNote>No agents are installed on this daemon host.</SheetNote>
               )}
             />
           </View>
           <View style={styles.page}>
-            <AppPressable
+            <Button
               accessibilityHint="Shows all providers"
               accessibilityLabel={browsing ? providerLabel(browsing) : 'Provider'}
-              accessibilityRole="button"
+              className="mx-1 self-start"
+              labelClassName="text-primary"
               onPress={() => slideTo(0)}
-              style={({ pressed }) => [styles.backRow, { opacity: pressed ? 0.55 : 1 }]}>
-              <AppSymbol
-                name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-                size={14}
-                tintColor={NativeTint}
-              />
-              <Text style={[styles.backLabel, { color: NativeTint }]}>
-                {browsing ? providerLabel(browsing) : 'Provider'}
-              </Text>
-            </AppPressable>
-            <View style={[styles.searchField, { backgroundColor: theme.overlayStrong }]}>
-              <AppSymbol
-                name={{ ios: 'magnifyingglass', android: 'search', web: 'search' }}
-                size={14}
-                tintColor={theme.textTertiary}
-              />
-              <TextInput
-                accessibilityLabel="Search models"
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="Search models"
-                placeholderTextColor={theme.textTertiary}
-                selectionColor={NativeTint}
-                style={[styles.searchInput, { color: theme.text }]}
-                value={search}
-                onChangeText={setSearch}
-              />
-              {search.length > 0 && (
-                <AppPressable
-                  accessibilityLabel="Clear search"
-                  accessibilityRole="button"
-                  hitSlop={8}
-                  onPress={() => setSearch('')}
-                  style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
-                  <AppSymbol
-                    name={{ ios: 'xmark.circle.fill', android: 'cancel', web: 'cancel' }}
-                    size={15}
-                    tintColor={theme.textTertiary}
-                  />
-                </AppPressable>
+              size="sm"
+              startContent={(
+                <AppSymbol
+                  name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
+                  size={14}
+                  tintColor={theme.accent}
+                />
               )}
-            </View>
+              variant="ghost">
+              {browsing ? providerLabel(browsing) : 'Provider'}
+            </Button>
+            <SearchBar
+              accessibilityLabel="Search models"
+              clearLabel="Clear search"
+              containerClassName="mx-1 mb-2"
+              onChangeText={setSearch}
+              panel="never"
+              placeholder="Search models"
+              size="sm"
+              value={search}
+            />
             {entry?.isPending ? (
-              <View style={[styles.loading, { height: listHeight }]}>
+              <View className="items-center justify-center" style={{ height: listHeight }}>
                 <Blocks color={theme.accent} size={20} />
               </View>
             ) : (
@@ -469,7 +546,7 @@ export function ModelPickerSheet({
                 keyExtractor={(item) => item.id}
                 keyboardShouldPersistTaps="handled"
                 renderItem={({ item }) => (
-                  <SheetRow
+                  <OptionRow
                     description={item.sub_provider ?? undefined}
                     label={item.name}
                     onPress={() => pickModel(item)}
@@ -480,11 +557,11 @@ export function ModelPickerSheet({
                 showsVerticalScrollIndicator={false}
                 style={{ height: listHeight }}
                 ListEmptyComponent={(
-                  <Text style={[styles.note, { color: theme.textTertiary }]}>
+                  <SheetNote>
                     {search.trim()
                       ? 'No models match your search.'
                       : 'This agent doesn’t expose a model list; it will use its own default.'}
-                  </Text>
+                  </SheetNote>
                 )}
               />
             )}
@@ -526,17 +603,15 @@ export function AgentPresetSheet({
   return (
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} agent`} visible={visible}>
       {probe.isPending ? (
-        <View style={styles.loading}>
+        <View className="items-center justify-center py-10">
           <Blocks color={theme.accent} size={20} />
         </View>
       ) : probe.error ? (
-        <Text style={[styles.note, { color: theme.danger }]}>
-          {probe.error instanceof Error ? probe.error.message : String(probe.error)}
-        </Text>
+        <SheetError message={errorMessage(probe.error)} />
       ) : (
         <>
           {presets.map((preset) => (
-            <SheetRow
+            <OptionRow
               description={preset.description ?? undefined}
               key={preset.id}
               label={preset.name}
@@ -549,9 +624,7 @@ export function AgentPresetSheet({
             />
           ))}
           {!presets.length && (
-            <Text style={[styles.note, { color: theme.textTertiary }]}>
-              This agent doesn’t expose any startable presets.
-            </Text>
+            <SheetNote>This agent doesn’t expose any startable presets.</SheetNote>
           )}
         </>
       )}
@@ -574,7 +647,7 @@ export function AccessSheet({
   return (
     <Sheet onDismiss={onDismiss} title="Agent access" visible={visible}>
       {ACCESS_MODES.map((item) => (
-        <SheetRow
+        <OptionRow
           description={item.description}
           key={item.id}
           label={runtimeModeLabel(item.id)}
@@ -643,7 +716,7 @@ export function ResumeSessionSheet({
     void listProviderSessions(daemon.client, provider)
       .then((sessions) => { if (current) setSummaries(sessions); })
       .catch((cause) => {
-        if (current) setError(cause instanceof Error ? cause.message : String(cause));
+        if (current) setError(errorMessage(cause));
       })
       .finally(() => { if (current) setPending(false); });
     return () => { current = false; };
@@ -656,7 +729,7 @@ export function ResumeSessionSheet({
       const session = await runtime.resumeProviderSession(summary);
       onResume(session);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(errorMessage(cause));
       setImporting(null);
     }
   }
@@ -665,7 +738,7 @@ export function ResumeSessionSheet({
     <Sheet visible={visible} onDismiss={onDismiss} title="Resume external session">
       {provider === null ? (
         installedProviders.map((candidate) => (
-          <SheetRow
+          <OptionRow
             key={candidate}
             label={providerLabel(candidate)}
             leading={<ProviderIcon provider={candidate} size={18} />}
@@ -674,7 +747,7 @@ export function ResumeSessionSheet({
         ))
       ) : (
         <>
-          <SheetRow
+          <OptionRow
             label="Change provider"
             leading={(
               <AppSymbol
@@ -689,19 +762,19 @@ export function ResumeSessionSheet({
             }}
           />
           {pending ? (
-            <View style={styles.loading}>
+            <View className="items-center justify-center py-10">
               <Blocks color={theme.accent} size={20} />
             </View>
           ) : error ? (
-            <Text style={[styles.note, { color: theme.danger }]}>{error}</Text>
+            <SheetError message={error} />
           ) : summaries.length === 0 ? (
-            <Text style={[styles.note, { color: theme.textTertiary }]}>
+            <SheetNote>
               No sessions from {providerLabel(provider)} to resume.
-            </Text>
+            </SheetNote>
           ) : summaries.map((summary) => {
             const id = providerSessionNativeId(summary.cursor);
             return (
-              <SheetRow
+              <OptionRow
                 key={`${summary.cursor.provider}:${id}`}
                 label={summary.title || 'Untitled session'}
                 description={`${providerLabel(summary.cursor.provider)} · ${summary.cwd}`}
@@ -717,36 +790,23 @@ export function ResumeSessionSheet({
 }
 
 const styles = StyleSheet.create({
-  loading: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 12, paddingVertical: 10 },
+  // The picker row: a wide, quiet line. `Item`'s padding/radius are for
+  // card-shaped rows; these are full-width lines inside a sheet that already
+  // carries the horizontal padding.
+  optionRow: {
+    alignItems: 'center',
+    borderRadius: Radius.small,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 44,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: 6,
+  },
+  optionMedia: { alignItems: 'center', justifyContent: 'center' },
+  optionCopy: { flex: 1, gap: 2, minWidth: 0 },
+  optionLabel: { fontSize: 15, fontWeight: '500' },
+  optionDescription: { fontSize: 12.5, lineHeight: 17 },
   pagerClip: { overflow: 'hidden' },
   pagerTrack: { flexDirection: 'row', width: '200%' },
   page: { paddingTop: 4, width: '50%' },
-  backRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 5,
-    minHeight: 40,
-    paddingHorizontal: 10,
-  },
-  backLabel: { fontSize: 15, fontWeight: '600' },
-  searchField: {
-    alignItems: 'center',
-    borderRadius: Radius.medium,
-    flexDirection: 'row',
-    gap: 7,
-    marginBottom: 8,
-    marginHorizontal: 4,
-    minHeight: 38,
-    paddingHorizontal: 10,
-  },
-  searchInput: { flex: 1, fontSize: 15, paddingVertical: 7 },
-  sectionTitle: {
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.4,
-    marginBottom: 6,
-    marginHorizontal: 12,
-    marginTop: 14,
-  },
 });

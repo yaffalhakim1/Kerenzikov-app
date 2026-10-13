@@ -1,17 +1,13 @@
 import { router } from 'expo-router';
+import { Alert } from 'panelui-native/components/alert';
+import { Button } from 'panelui-native/components/button';
 import { useEffect, useRef, useState } from 'react';
-import {
-  Animated,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-
-import { AppPressable } from '@/components/app-pressable';
-import { Blocks } from '@/components/blocks';
+import { StyleSheet } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 
 import { AppSymbol } from '@/components/app-symbol';
-import { NativeTint, Radius, Spacing } from '@/constants/theme';
+import { Blocks } from '@/components/blocks';
+import { Spacing } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
@@ -132,78 +128,97 @@ export function ConnectionBanner({ floating = false }: { floating?: boolean }) {
   return <NoticeCard floating={floating} notice={notice} />;
 }
 
+/**
+ * The PanelUI variant each state wears. An interrupted link is a warning, a
+ * daemon that cannot be reached at all is a failure, and a restored one is a
+ * success. A floating banner takes `default` instead of its state's variant:
+ * it hovers over the transcript, and only `default`'s opaque surface keeps the
+ * text underneath from reading through a 10% status tint. The state is still
+ * carried by the icon's colour, which is how the floating banner read before.
+ */
+function alertVariant(
+  notice: ConnectionNotice,
+): 'default' | 'success' | 'warning' | 'destructive' {
+  switch (notice.kind) {
+    case 'error':
+      return 'destructive';
+    case 'restored':
+      return 'success';
+    default:
+      return 'warning';
+  }
+}
+
 function NoticeCard({ floating, notice }: { floating: boolean; notice: ConnectionNotice }) {
   const theme = useTheme();
   const daemon = useDaemon();
   const reducedMotion = useReducedMotion();
-  const opacity = useRef(new Animated.Value(reducedMotion ? 1 : 0)).current;
-  useEffect(() => {
-    Animated.timing(opacity, {
-      duration: reducedMotion ? 0 : 160,
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
-  }, [opacity, reducedMotion]);
 
   const tint = notice.kind === 'error'
     ? theme.danger
     : notice.kind === 'restored' ? theme.success : theme.warning;
-  const soft = notice.kind === 'error'
-    ? theme.dangerSoft
-    : notice.kind === 'restored' ? theme.successSoft : theme.warningSoft;
   const detail = notice.kind === 'restored' ? null : notice.detail;
 
   return (
+    // The entrance is Reanimated's, not the core `Animated` this used to fade
+    // through: the two do not compose, and core `Animated` puts the work back
+    // on the JS thread, which is the one thing a banner appearing mid-scroll
+    // cannot afford. Inline margins live here rather than on the Alert, whose
+    // own `w-full` would push a horizontal margin past its parent's edge.
     <Animated.View
-      accessibilityLiveRegion="polite"
-      accessibilityRole="alert"
-      style={[
-        styles.card,
-        floating
-          ? [styles.floating, { backgroundColor: theme.surface, borderColor: theme.borderStrong }]
-          : [styles.inline, { backgroundColor: soft }],
-        { opacity },
-      ]}>
-      <View style={styles.icon}>
-        {notice.kind === 'reconnecting' && notice.attempting ? (
-          <Blocks color={tint} size={18} />
-        ) : (
-          <AppSymbol name={noticeIcon(notice)} size={18} tintColor={tint} />
-        )}
-      </View>
-      <View style={styles.copy}>
-        <Text style={[styles.title, { color: theme.text }]}>{notice.title}</Text>
-        {detail ? (
-          <Text style={[styles.body, { color: theme.textSecondary }]}>{detail}</Text>
-        ) : null}
-      </View>
-      {notice.kind === 'reconnecting' && (
-        <BannerAction
-          disabled={notice.attempting}
-          label="Retry now"
-          accessibilityLabel="Retry daemon connection now"
-          onPress={() => void daemon.reconnect()}
-        />
-      )}
-      {notice.kind === 'error' && (
-        <View style={styles.actions}>
-          <BannerAction
-            label="Retry"
-            accessibilityLabel="Retry daemon connection"
-            onPress={() => void daemon.reconnect()}
-          />
-          {daemon.activeProfile && (
-            <BannerAction
-              label="Edit"
-              accessibilityLabel="Edit daemon connection"
-              onPress={() => router.push({
-                pathname: '/daemon-editor',
-                params: { id: daemon.activeProfile!.id },
-              })}
-            />
+      entering={reducedMotion ? undefined : FadeIn.duration(160)}
+      style={floating ? undefined : styles.inline}>
+      <Alert
+        accessibilityLiveRegion="polite"
+        variant={floating ? 'default' : alertVariant(notice)}>
+        <Alert.Indicator>
+          {notice.kind === 'reconnecting' && notice.attempting ? (
+            <Blocks color={tint} size={18} />
+          ) : (
+            <AppSymbol name={noticeIcon(notice)} size={18} tintColor={tint} />
           )}
-        </View>
-      )}
+        </Alert.Indicator>
+        <Alert.Content>
+          <Alert.Title>{notice.title}</Alert.Title>
+          {detail ? <Alert.Description>{detail}</Alert.Description> : null}
+        </Alert.Content>
+        {notice.kind === 'reconnecting' && (
+          <Button
+            accessibilityLabel="Retry daemon connection now"
+            className="self-center"
+            disabled={notice.attempting}
+            onPress={() => void daemon.reconnect()}
+            size="sm"
+            variant="ghost">
+            Retry now
+          </Button>
+        )}
+        {notice.kind === 'error' && (
+          <>
+            <Button
+              accessibilityLabel="Retry daemon connection"
+              className="self-center"
+              onPress={() => void daemon.reconnect()}
+              size="sm"
+              variant="ghost">
+              Retry
+            </Button>
+            {daemon.activeProfile && (
+              <Button
+                accessibilityLabel="Edit daemon connection"
+                className="self-center"
+                onPress={() => router.push({
+                  pathname: '/daemon-editor',
+                  params: { id: daemon.activeProfile!.id },
+                })}
+                size="sm"
+                variant="ghost">
+                Edit
+              </Button>
+            )}
+          </>
+        )}
+      </Alert>
     </Animated.View>
   );
 }
@@ -219,52 +234,9 @@ function noticeIcon(notice: ConnectionNotice): Parameters<typeof AppSymbol>[0]['
   }
 }
 
-function BannerAction({
-  label,
-  accessibilityLabel,
-  disabled = false,
-  onPress,
-}: {
-  label: string;
-  accessibilityLabel: string;
-  disabled?: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <AppPressable
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="button"
-      accessibilityState={{ disabled }}
-      disabled={disabled}
-      hitSlop={8}
-      onPress={onPress}
-      style={({ pressed }) => [styles.action, { opacity: pressed || disabled ? 0.45 : 1 }]}>
-      <Text style={[styles.actionText, { color: NativeTint }]}>{label}</Text>
-    </AppPressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  card: {
-    alignItems: 'center',
-    borderRadius: Radius.large,
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
   inline: {
     marginBottom: 10,
     marginHorizontal: Spacing.three,
   },
-  floating: {
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  icon: { alignItems: 'center', justifyContent: 'center', width: 18 },
-  copy: { flex: 1 },
-  title: { fontSize: 14, fontWeight: '700' },
-  body: { fontSize: 12, lineHeight: 17, marginTop: 2 },
-  actions: { alignItems: 'center', flexDirection: 'row', gap: 12 },
-  action: { justifyContent: 'center', minHeight: 32, paddingHorizontal: 4 },
-  actionText: { fontSize: 13, fontWeight: '700' },
 });

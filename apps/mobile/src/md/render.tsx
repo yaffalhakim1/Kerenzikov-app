@@ -18,9 +18,8 @@ import type {
 } from 'mdast';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
-  Animated,
   Dimensions,
   Easing,
   Image,
@@ -32,7 +31,14 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
+import { CodeBlock } from 'panelui-native/components/code-block';
+import { Button } from 'panelui-native/components/button';
 import { AppPressable } from '@/components/app-pressable';
 import { AppSymbol } from '@/components/app-symbol';
 
@@ -62,21 +68,25 @@ export function VeilFade({
   remainingMs: number;
   children: ReactNode;
 }) {
-  const value = useRef(new Animated.Value(opacity)).current;
+  const value = useSharedValue(opacity);
   useEffect(() => {
-    Animated.timing(value, {
-      toValue: 1,
+    // Reanimated rather than core `Animated`: PanelUI's performance rules
+    // forbid the core API alongside the library, because its listeners and
+    // JS-side `setValue` put animation back on the JavaScript thread. This is
+    // the hottest fade in the app — one per veil span, on every streamed
+    // token — so it is the last place to keep a JS-thread path.
+    value.value = withTiming(1, {
       duration: Math.max(1, remainingMs),
       // The same curve `veilOpacity` applies: 1 - (1 - t) ^ VEIL_CURVE_POW.
       easing: Easing.out(Easing.poly(VEIL_CURVE_POW)),
-      useNativeDriver: true,
-    }).start();
+    });
     // Mount-only by design; see above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const style = useAnimatedStyle(() => ({ opacity: value.value }));
   // RN's text attributes multiply foreground *and* background alpha by this,
   // which is exactly what the previous inline `applyAlpha` pair did.
-  return <Animated.Text style={{ opacity: value }}>{children}</Animated.Text>;
+  return <Animated.Text style={style}>{children}</Animated.Text>;
 }
 
 export interface MarkdownStyles {
@@ -153,13 +163,6 @@ const chrome = StyleSheet.create({
     justifyContent: 'space-between',
   },
   codeHeaderLabel: { flexShrink: 1 },
-  copyButton: {
-    alignItems: 'center',
-    borderRadius: 6,
-    height: 20,
-    justifyContent: 'center',
-    width: 24,
-  },
 });
 
 /** Visible text of an inline tree. Must mirror `renderInline`'s traversal
@@ -389,6 +392,9 @@ function MarkdownImage({
   );
   if (!href || href === PENDING_LINK_URL) return image;
   return (
+    // Not a PanelUI control: this wraps an image and carries no chrome of its
+    // own — it exists to make the image a link. PanelUI's pressables all draw a
+    // surface (a row, a button), and one would put a card around a picture.
     <AppPressable accessibilityRole="link" onPress={() => onOpenLink(href)}>
       {image}
     </AppPressable>
@@ -447,10 +453,8 @@ const CodeCopyButton = memo(function CodeCopyButton({
   }, [copied]);
 
   return (
-    <AppPressable
+    <Button
       accessibilityLabel={copied ? 'Copied' : 'Copy code'}
-      accessibilityRole="button"
-      hitSlop={10}
       onPress={() => {
         void Clipboard.setStringAsync(value)
           .then(async () => {
@@ -459,7 +463,9 @@ const CodeCopyButton = memo(function CodeCopyButton({
           })
           .catch(() => {});
       }}
-      style={({ pressed }) => [chrome.copyButton, { opacity: pressed ? 0.5 : 1 }]}>
+      size="icon"
+      variant="ghost"
+    >
       <AppSymbol
         name={copied
           ? { ios: 'checkmark', android: 'check', web: 'check' }
@@ -467,11 +473,35 @@ const CodeCopyButton = memo(function CodeCopyButton({
         size={12}
         tintColor={tint}
       />
-    </AppPressable>
+    </Button>
   );
 });
 
 function renderCode(
+  value: string,
+  language: string | null,
+  ctx: RenderContext,
+  key: string | number,
+): ReactNode {
+  // The live tail veils code lines through the shared positional ordinal, and a
+  // PanelUI CodeBlock renders its own tokens and cannot participate in that
+  // contract — consuming the ordinal without veiling would shift every later
+  // element's spans. Settled blocks carry no veil and a discardable ordinal, so
+  // they take the PanelUI component.
+  if (ctx.veil) return renderVeiledCode(value, language, ctx, key);
+  return (
+    <CodeBlock key={key} code={value} language={language ?? undefined}>
+      <CodeBlock.Header>
+        <CodeBlock.Language>{language ?? ''}</CodeBlock.Language>
+        <CodeBlock.Actions>
+          <CodeBlock.CopyButton />
+        </CodeBlock.Actions>
+      </CodeBlock.Header>
+    </CodeBlock>
+  );
+}
+
+function renderVeiledCode(
   value: string,
   language: string | null,
   ctx: RenderContext,
