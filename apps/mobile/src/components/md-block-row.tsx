@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, type ReactNode } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -18,7 +18,6 @@ import {
 } from '@/md/render';
 import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
 import { RowVeil } from '@/md/veil';
-import { Response } from 'panelui-native/components/response';
 
 /**
  * Markdown metrics — the desktop's render.rs values scaled up for a phone:
@@ -194,9 +193,9 @@ export function MdRevealOnMount({
   const reducedMotion = useReducedMotion();
   const fade = enabled && !reducedMotion;
   // Reanimated rather than core `Animated`: PanelUI's own rule, and the one
-  // this file is now subject to since it renders `Response`. Core `Animated`
-  // does not compose with Reanimated and its API encourages patterns that put
-  // the frames back on the JS thread.
+  // this file is now subject to. Core `Animated` does not compose with
+  // Reanimated and its API encourages patterns that put the frames back on the
+  // JS thread.
   const opacity = useSharedValue(fade ? 0 : 1);
   useEffect(() => {
     if (!fade) return;
@@ -221,18 +220,24 @@ export const MdBlockSettled = memo(
     styles: MarkdownStyles;
   }) {
     /*
-     * Prose and code go to PanelUI's own renderer, which colours fenced blocks
-     * and draws the rest from one tokeniser. Structural blocks (tables, lists,
-     * quotes) stay on the house renderer: it lays tables out to a measured
-     * column budget and the veil contract is written against it, and neither is
-     * something the panel renderer reproduces.
+     * One renderer for every block. This used to hand paragraphs, headings and
+     * fences to PanelUI's `Response` and keep only the structural blocks
+     * (tables, lists, quotes) here, and that split was the defect: the two
+     * renderers style inline code differently. `Response` draws it with its own
+     * tokens (`bg-muted` plus an inherited colour, and `font-mono`, which
+     * resolves to Android's generic `monospace` because no `--font-mono` is
+     * declared), while this renderer draws it with the house tokens
+     * (`codeWash`, the brand `codeText`, and the bundled JetBrains Mono). A
+     * paragraph therefore showed a grey pill with a non-code face and a list
+     * item showed a brand-tinted one with the right face — in the same
+     * transcript, and disagreeing further in dark mode, where only `Response`'s
+     * own theme tokens move.
      *
-     * `source` is this block's own slice, which is exactly what the panel
-     * renderer wants — it takes markdown text, not a parsed tree.
+     * Nothing is lost by coming back: fenced code already goes to PanelUI's
+     * `CodeBlock` from this renderer (`md/render.tsx`), so the only difference
+     * is that inline code now matches it. The live tail was always here — this
+     * is what removes the seam between the two halves of one message.
      */
-    if (node.type === 'paragraph' || node.type === 'code' || node.type === 'heading') {
-      return <Response>{source}</Response>;
-    }
     return <>{renderBlock(node, staticContext(styles), 'b')}</>;
   },
   (previous, next) => previous.source === next.source && previous.styles === next.styles,

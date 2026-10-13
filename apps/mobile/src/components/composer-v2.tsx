@@ -5,17 +5,14 @@ import * as ImagePicker from 'expo-image-picker';
 import { AIInput } from 'panelui-native/components/ai-input';
 import { Alert } from 'panelui-native/components/alert';
 import { Button } from 'panelui-native/components/button';
-import { Item } from 'panelui-native/components/item';
 import { Text as PanelText } from 'panelui-native/primitives/text';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Text, View } from 'react-native';
 
 import { AppSymbol } from './app-symbol';
-import { AttachmentChip, UploadRing } from './attachment-chip';
 import { ComposerAccessMenu } from './composer-access-menu';
+import { ComposerModelPill, ComposerSurface } from './composer-surface';
 import { ComposerAttachmentMenu, type ComposerAttachmentSource } from './composer-attachment-menu';
-import { ComposerTextInput } from './composer-text-input';
 import { SendStopSlot } from './mobile-composer';
 import { QueuedMessageRow } from './queued-message-row';
 import { ProviderIcon } from './provider-icon';
@@ -32,13 +29,14 @@ import {
 import {
   detectComposerTrigger,
   filterComposerCommands,
+  filterComposerFiles,
   mergeComposerCommands,
+  replaceComposerFileTrigger,
   resolvedComposerSubmission,
 } from '@/lib/composer-commands';
 import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { imagePickerFiles, importLocalAttachment, type LocalAttachmentFile } from '@/lib/attachments';
 import { confirmHaptic, tapHaptic } from '@/lib/haptics';
-import { useKeyboardHeight } from '@/lib/keyboard-offset';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
 import { isDaemonDisconnectError } from '@/lib/runtime-errors';
 import { useRuntime } from '@/lib/runtime-context';
@@ -75,13 +73,11 @@ export function ComposerV2({
   const theme = useTheme();
   const runtime = useRuntime();
   const daemon = useDaemon();
-  const insets = useSafeAreaInsets();
   // The app tracks the software keyboard itself rather than letting `AIInput`
   // do it: edge-to-edge Android delivers the keyboard as a WindowInset, and
   // `AIInput`'s own path switches the app out of `adjustResize` to measure it.
   // This is the same offset `MobileComposer` uses, so both composers sit the
   // same distance off the keys.
-  const keyboardHeight = useKeyboardHeight();
   const [draft, setDraft] = useState('');
   const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -144,6 +140,13 @@ export function ComposerV2({
     ? filterComposerCommands(commands, trigger.query)
     : [];
   const projectFiles = useProjectFiles(projectPath, trigger?.kind === 'file');
+  // Ranked and capped in the lib, the way the desktop's picker ranks: prefix
+  // hits first, then substring hits. Slicing the raw list instead meant the
+  // query was ignored entirely and `@releas` matched nothing.
+  const fileSuggestions = useMemo(
+    () => (trigger?.kind === 'file' ? filterComposerFiles(projectFiles.data ?? [], trigger.query) : []),
+    [projectFiles.data, trigger],
+  );
 
   const draftSync = useSyncedComposerDraft({
     target: { type: 'session', sessionId: session.id },
@@ -279,293 +282,170 @@ export function ComposerV2({
   }
 
   return (
-    <View
-      style={[
-        styles.shell,
-        // The composer's own floor, plus the keyboard while it is up, plus a
-        // gap — resting directly on the keys reads as part of them.
-        { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 },
-      ]}
-    >
-    {visibleError ? (
-      <Alert className="mb-1.5 items-center gap-1.5 px-2.5 py-1.5" variant="destructive">
-        <Alert.Content>
-          <Alert.Title className="text-destructive">{visibleError}</Alert.Title>
-        </Alert.Content>
-        <Button
-          accessibilityLabel="Dismiss error"
-          className="min-h-0 min-w-0 self-center px-0.5 py-0"
-          onPress={() => {
-            setLocalError(null);
-            runtime.dismissError(session.id);
-          }}
-          size="xs"
-          variant="ghost"
-        >
-          <AppSymbol
-            name={{ ios: 'xmark', android: 'close', web: 'close' }}
-            size={12}
-            tintColor={theme.danger}
-          />
-        </Button>
-      </Alert>
-    ) : null}
+    <ComposerSurface
+      aboveCard={
+        <>
+          {queued.map((message) => (
+            <QueuedMessageRow
+              canSteer={canSteer}
+              key={message.id}
+              message={message}
+              onEdit={() => {
+                // Pop the message back into the composer to be reworked, dropping
+                // it from the queue in the same step — matching the desktop's Edit.
+                runtime.removeQueuedMessage(session.id, message.id).catch(() => {});
+                draftSync.markEdited();
+                setDraft(message.display_content ?? message.content);
+                setAttachments(message.attachments ?? []);
+                setEditingQueued(true);
+              }}
+              onRemove={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
+              onSendNow={() => void runtime.steerQueuedMessage(session.id, message.id).catch(() => {})}
+            />
+          ))}
 
-    {queued.map((message) => (
-      <QueuedMessageRow
-        canSteer={canSteer}
-        key={message.id}
-        message={message}
-        onEdit={() => {
-          // Pop the message back into the composer to be reworked, dropping it
-          // from the queue in the same step — matching the desktop's Edit.
-          runtime.removeQueuedMessage(session.id, message.id).catch(() => {});
-          draftSync.markEdited();
-          setDraft(message.display_content ?? message.content);
-          setAttachments(message.attachments ?? []);
-          setEditingQueued(true);
-        }}
-        onRemove={() => void runtime.removeQueuedMessage(session.id, message.id).catch(() => {})}
-        onSendNow={() => void runtime.steerQueuedMessage(session.id, message.id).catch(() => {})}
-      />
-    ))}
-
-    {editingQueued ? (
-      <View
-        className="mb-1.5 flex-row items-center justify-between rounded-md border px-2.5 py-1.5"
-        style={{ backgroundColor: theme.overlay, borderColor: theme.border }}
-      >
-        <Text className="text-xs" style={{ color: theme.textSecondary }}>
-          Editing queued message
-        </Text>
-        <Button
-          accessibilityLabel="Cancel editing queued message"
-          className="min-h-0 px-1 py-0"
-          onPress={() => {
-            setEditingQueued(false);
-            draftSync.markEdited();
-            setDraft('');
-            setAttachments([]);
-          }}
-          size="xs"
-          variant="ghost"
-        >
-          <PanelText className="text-[12.5px] font-semibold text-primary">Cancel</PanelText>
-        </Button>
-      </View>
-    ) : null}
-
-    <AIInput
-      avoidKeyboard={false}
-      // `AIInput`'s root carries `shadow-md` so the card reads as lifted off a
-      // page. This app's surfaces are flat with hairline borders, so the
-      // shadow is the one thing that would look foreign.
-      className="shadow-none"
-      onSubmit={submit}
-      onValueChange={setDraft}
-      status={busy ? 'streaming' : 'ready'}
-      value={draft}
-    >
-      {attachments.length > 0 || pendingFiles.length > 0 ? (
-        <View className="flex-row flex-wrap gap-2 px-1 pb-1">
-          {attachments.map((attachment, index) => (
-            <View className="relative" key={`${attachment.path}:${index}`}>
-              <AttachmentChip attachment={attachment} />
+          {editingQueued ? (
+            <View
+              className="mb-1.5 flex-row items-center justify-between rounded-md border px-2.5 py-1.5"
+              style={{ backgroundColor: theme.overlay, borderColor: theme.border }}
+            >
+              <Text className="text-xs" style={{ color: theme.textSecondary }}>
+                Editing queued message
+              </Text>
               <Button
-                accessibilityLabel={`Remove ${attachment.name}`}
-                className="absolute -right-1 -top-1 h-5 w-5 min-h-0 min-w-0 rounded-full bg-muted px-0 py-0"
-                disabled={submitting}
+                accessibilityLabel="Cancel editing queued message"
+                className="min-h-0 px-1 py-0"
                 onPress={() => {
+                  setEditingQueued(false);
                   draftSync.markEdited();
-                  setAttachments((current) => current.filter((_, item) => item !== index));
+                  setDraft('');
+                  setAttachments([]);
                 }}
                 size="xs"
                 variant="ghost"
               >
-                <AppSymbol
-                  name={{ ios: 'xmark', android: 'close', web: 'close' }}
-                  size={11}
-                  tintColor={theme.textSecondary}
-                />
+                <PanelText className="text-[12.5px] font-semibold text-primary">Cancel</PanelText>
               </Button>
             </View>
-          ))}
-          {/* One tile per file still in flight, so a multi-file pick shows what
-              is left rather than a single opaque "Attaching…". */}
-          {pendingFiles.map((file) => (
-            <View
-              className="flex-row items-center gap-2 rounded-md px-2.5 py-1.5"
-              key={file.id}
-              style={{ backgroundColor: theme.overlayStrong }}
-            >
-              <UploadRing size={14} />
-              <Text className="text-xs" numberOfLines={1} style={{ color: theme.textSecondary }}>
-                {file.name}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-
-      {suggestions.length > 0 ? (
-        <View className="pb-1">
-          {suggestions.map((command) => (
-            <Item
-              className="gap-2 rounded-md px-2.5 py-1.5"
-              key={`${command.scope}:${command.name}`}
-              onPress={() => {
-                tapHaptic();
-                setDraft(`/${command.name} `);
-              }}
-              pressOpacity={0.6}
-              pressScale={1}
-              size="sm"
-              variant="muted"
-            >
-              <Item.Content className="flex-row items-center gap-2">
-                <Item.Title className="shrink">{`/${command.name}`}</Item.Title>
-              </Item.Content>
-            </Item>
-          ))}
-        </View>
-      ) : null}
-
-      {projectFiles.data?.length && trigger?.kind === 'file' ? (
-        <View className="pb-1">
-          {projectFiles.data.slice(0, 6).map((file) => (
-            <Item
-              className="gap-2 rounded-md px-2.5 py-1.5"
-              key={file.path}
-              onPress={() => {
-                tapHaptic();
-                setDraft(file.path);
-              }}
-              pressOpacity={0.6}
-              pressScale={1}
-              size="sm"
-              variant="muted"
-            >
-              <Item.Media>
-                <AppSymbol
-                  name={{ ios: 'doc', android: 'description', web: 'description' }}
-                  size={15}
-                  tintColor={theme.textSecondary}
-                />
-              </Item.Media>
-              <Item.Content>
-                <Item.Title className="shrink" numberOfLines={1}>
-                  {file.path}
-                </Item.Title>
-              </Item.Content>
-            </Item>
-          ))}
-        </View>
-      ) : null}
-
-      <ComposerTextInput
-        editable={!disconnected && !submitting}
-        // The app's own composer opens at a 64pt floor; `AIInput.Field`'s
-        // one-row default is shorter than the surface it replaces.
-        style={styles.field}
-        multiline
-        onChangeText={setDraft}
-        placeholder={placeholder}
-        placeholderTextColor={theme.textTertiary}
-        value={draft}
-      />
-
-      <AIInput.Toolbar>
-        <ComposerAttachmentMenu onChoose={chooseAttachment} />
-        <ComposerAccessMenu
-          mode={session.runtime_mode}
-          onApply={(mode) => applyOptions({ runtimeMode: mode })}
-        />
-        {/*
-          The model is a `Pill` — a value that opens a list — and the reasoning
-          effort is an `Action`, which is what the library's own composer
-          example does. `indicator` is the chevron; `indicatorSymbol` is the
-          platform's name for it, needed only when the pill is handed over.
-        */}
-        {/*
-          `shrink` + a one-line cap is what keeps a long model name from
-          pushing the send button off the row. The pill's label is rendered by
-          the library with no width bound and no truncation, so without these
-          a name like "claude-sonnet-4-5-20250929" takes the whole toolbar and
-          Send becomes unreachable.
-        */}
-        <AIInput.Pill
-          accessibilityLabel={`Model, ${selectedModelName}`}
-          className="shrink"
-          indicator={
+          ) : null}
+        </>
+      }
+      attachments={attachments}
+      commands={suggestions.map((command) => command.name)}
+      editable={!disconnected && !submitting}
+      error={visibleError ? (
+        <Alert className="mb-1.5 items-center gap-1.5 px-2.5 py-1.5" variant="destructive">
+          <Alert.Content>
+            <Alert.Title className="text-destructive">{visibleError}</Alert.Title>
+          </Alert.Content>
+          <Button
+            accessibilityLabel="Dismiss error"
+            className="min-h-0 min-w-0 self-center px-0.5 py-0"
+            onPress={() => {
+              setLocalError(null);
+              runtime.dismissError(session.id);
+            }}
+            size="xs"
+            variant="ghost"
+          >
             <AppSymbol
-              name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
-              size={11}
-              tintColor={theme.textTertiary}
+              name={{ ios: 'xmark', android: 'close', web: 'close' }}
+              size={12}
+              tintColor={theme.danger}
             />
-          }
-          indicatorSymbol="chevron.up.chevron.down"
-          label={
-            <PanelText className="shrink" numberOfLines={1} size="sm" weight="medium">
-              {selectedModelName}
-            </PanelText>
-          }
-          onPress={() => setModelSheetOpen(true)}
-        />
-        {activeModel && modelHasConfigurableTraits(activeModel) ? (
-          <AIInput.Action
-            icon={<ProviderIcon provider={session.provider} size={15} />}
-            label="Reasoning and model options"
-            onPress={() => setTraitsSheetOpen(true)}
+          </Button>
+        </Alert>
+      ) : null}
+      files={fileSuggestions}
+      onPickCommand={(name) => {
+        tapHaptic();
+        setDraft(`/${name} `);
+      }}
+      onPickFile={(file) => {
+        // Replace the `@query` rather than overwriting the draft — the path is
+        // one token inside the prompt, not the whole of it.
+        if (trigger?.kind !== 'file') return;
+        draftSync.markEdited();
+        setDraft(replaceComposerFileTrigger(draft, trigger, file).text);
+        tapHaptic();
+      }}
+      onRemoveAttachment={(index) => {
+        draftSync.markEdited();
+        setAttachments((current) => current.filter((_, item) => item !== index));
+      }}
+      onSubmit={submit}
+      onValueChange={setDraft}
+      pendingFiles={pendingFiles}
+      placeholder={placeholder}
+      status={busy ? 'streaming' : 'ready'}
+      toolbar={
+        <AIInput.Toolbar>
+          <ComposerAttachmentMenu onChoose={chooseAttachment} />
+          <ComposerAccessMenu
+            mode={session.runtime_mode}
+            onApply={(mode) => applyOptions({ runtimeMode: mode })}
           />
-        ) : null}
-        <AIInput.Spacer />
-        {/*
-          Not `AIInput.Submit`: it offers voice when the field is empty, and
-          this app has no voice — the mic was a button that did nothing. It
-          also has no queue state, and this app queues a message while the
-          agent works. The app's own slot is send/stop/queue with no voice.
-        */}
-        <SendStopSlot
-          busy={busy}
-          canSubmit={draft.trim().length > 0 || attachments.length > 0}
-          disconnected={disconnected}
-          importingAttachments={importingAttachments}
-          onSend={submit}
-          onStop={() => void runtime.cancel(session.id)}
-          queueing={busy}
-          submitting={submitting}
-        />
-      </AIInput.Toolbar>
-    </AIInput>
-
-    <ModelSheet
-      model={session.model ?? null}
-      onApply={(selection) => applyOptions(selection)}
-      onDismiss={() => setModelSheetOpen(false)}
-      provider={session.provider}
-      reasoningEffort={session.reasoning_effort ?? null}
-      visible={modelSheetOpen}
-    />
-
-    {activeModel ? (
-      <ModelTraitsSheet
-        model={activeModel}
-        onApply={(changes) => applyOptions(changes)}
-        onDismiss={() => setTraitsSheetOpen(false)}
-        selection={{
-          reasoningEffort: session.reasoning_effort ?? null,
-          serviceTier: session.service_tier ?? null,
-          contextWindow: session.context_window ?? null,
-        }}
-        visible={traitsSheetOpen}
+          {/*
+            The model is a `Pill` — a value that opens a list — and the reasoning
+            effort is an `Action`, which is what the library's own composer
+            example does.
+          */}
+          <ComposerModelPill
+            accessibilityLabel={`Model, ${selectedModelName}`}
+            label={selectedModelName}
+            onPress={() => setModelSheetOpen(true)}
+          />
+          {activeModel && modelHasConfigurableTraits(activeModel) ? (
+            <AIInput.Action
+              icon={<ProviderIcon provider={session.provider} size={15} />}
+              label="Reasoning and model options"
+              onPress={() => setTraitsSheetOpen(true)}
+            />
+          ) : null}
+          <AIInput.Spacer />
+          {/*
+            Not `AIInput.Submit`: it offers voice when the field is empty, and
+            this app has no voice — the mic was a button that did nothing. It
+            also has no queue state, and this app queues a message while the
+            agent works. The app's own slot is send/stop/queue with no voice.
+          */}
+          <SendStopSlot
+            busy={busy}
+            canSubmit={draft.trim().length > 0 || attachments.length > 0}
+            disconnected={disconnected}
+            importingAttachments={importingAttachments}
+            onSend={submit}
+            onStop={() => void runtime.cancel(session.id)}
+            queueing={busy}
+            submitting={submitting}
+          />
+        </AIInput.Toolbar>
+      }
+      value={draft}
+    >
+      <ModelSheet
+        model={session.model ?? null}
+        onApply={(selection) => applyOptions(selection)}
+        onDismiss={() => setModelSheetOpen(false)}
+        provider={session.provider}
+        reasoningEffort={session.reasoning_effort ?? null}
+        visible={modelSheetOpen}
       />
-    ) : null}
-    </View>
+
+      {activeModel ? (
+        <ModelTraitsSheet
+          model={activeModel}
+          onApply={(changes) => applyOptions(changes)}
+          onDismiss={() => setTraitsSheetOpen(false)}
+          selection={{
+            reasoningEffort: session.reasoning_effort ?? null,
+            serviceTier: session.service_tier ?? null,
+            contextWindow: session.context_window ?? null,
+          }}
+          visible={traitsSheetOpen}
+        />
+      ) : null}
+    </ComposerSurface>
   );
 }
 
-const styles = StyleSheet.create({
-  // The same shell the app's own composer uses, so the two sit identically.
-  shell: { paddingHorizontal: 12, paddingTop: 4 },
-  field: { fontSize: 16, lineHeight: 22, minHeight: 64, paddingHorizontal: 6, paddingVertical: 12 },
-});

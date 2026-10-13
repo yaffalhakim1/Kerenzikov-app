@@ -5,10 +5,11 @@ import type {
 } from '@waku/client';
 import { Plan } from 'panelui-native/components/plan';
 import type { PlanStepStatus } from 'panelui-native/components/plan';
+import { Badge } from 'panelui-native/components/badge';
 import { Button } from 'panelui-native/components/button';
+import { Collapsible } from 'panelui-native/components/collapsible';
+import { Frame } from 'panelui-native/components/frame';
 import { Item } from 'panelui-native/components/item';
-import { Task } from 'panelui-native/components/task';
-import type { TaskStatus } from 'panelui-native/components/task';
 import { memo, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
@@ -34,10 +35,11 @@ import {
  */
 export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] }) {
   const theme = useTheme();
-  // Fold state is per mounted strip, and the caller keys the strip by session,
-  // so switching tasks starts each plan expanded. Mirrors the desktop tray's
-  // `todo_tray_collapsed`, which is likewise session-scoped and kept in memory.
-  const [collapsed, setCollapsed] = useState(false);
+  // Fold state is per mounted strip, and the caller keys the strip by session.
+  // Starts collapsed: the strip sits above the composer, and a plan of any
+  // length expanded is a plan the reader cannot see the conversation past. The
+  // header carries the progress count, so the state is still legible closed.
+  const [collapsed, setCollapsed] = useState(true);
   if (!todos.length) return null;
   const [done, total] = todoProgress(todos);
   const { start, end, hiddenBefore, hiddenAfter } = visibleTodoWindow(todos);
@@ -56,7 +58,7 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
       defaultOpen={!collapsed}
       onOpenChange={(open) => setCollapsed(!open)}
     >
-      <Plan.Header className="p-3">
+      <Plan.Header className="items-center p-3">
         <Plan.Icon>
           <AppSymbol
             name={{ ios: 'list.bullet', android: 'format_list_bulleted', web: 'format_list_bulleted' }}
@@ -96,23 +98,31 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
     </Plan>
   );
 });
-/** Harness status → PanelUI `Task`'s four states. `monitoring` is a live
- *  watch rather than a finished step, so it reads as running. */
-function taskStatus(status: BackgroundWorkItem['status']): TaskStatus {
-  switch (status) {
-    case 'running':
-    case 'monitoring':
-      return 'running';
-    case 'starting':
-    case 'stopping':
-      return 'pending';
-    case 'failed':
-    case 'lost':
-      return 'error';
-    default:
-      return 'complete';
-  }
-}
+/** Harness status → the `Badge` tone that carries it. Colour is never the only
+ *  signal: the label below says the same thing in a word. */
+const STATUS_BADGE = {
+  completed: 'success',
+  failed: 'destructive',
+  lost: 'destructive',
+  monitoring: 'info',
+  running: 'info',
+  starting: 'secondary',
+  stopped: 'secondary',
+  stopping: 'secondary',
+} as const satisfies Record<BackgroundWorkItem['status'], string>;
+
+/** One word per status, for the badge. `monitoring` is a live watch rather than
+ *  a finished step, and "watching" says that where "running" would not. */
+const STATUS_LABEL = {
+  completed: 'done',
+  failed: 'failed',
+  lost: 'lost',
+  monitoring: 'watching',
+  running: 'running',
+  starting: 'starting',
+  stopped: 'stopped',
+  stopping: 'stopping',
+} as const satisfies Record<BackgroundWorkItem['status'], string>;
 
 /** A glyph per kind of work, so a process, a monitor and a subagent are
  *  distinguishable before the title is read. */
@@ -144,15 +154,24 @@ function isLiveWork(status: BackgroundWorkItem['status']): boolean {
 /**
  * Harness background work: subagents, detached processes, monitors.
  *
- * A PanelUI `Task` whose trigger is the summary line — status glyph, title and
- * the count that follows it — and whose content is one `Task.Item` per item
- * with its live Stop where the provider allows one. The Task is its own
- * disclosure, so the list opens in place instead of in a sheet over the
- * transcript: the work is part of what the turn is doing, and a sheet made the
- * reader lose the transcript to look at it.
+ * A `Collapsible` shell holding `Frame` rows.
  *
- * `Task`'s status drives the leading glyph and shimmers the title while work is
- * live, which is the same signal the row used to draw by hand.
+ * `Frame` is the row anatomy — its own docs build it for an "Agent monitor",
+ * and a `Frame.Row` is one job: kind glyph, title, a status line, and the status
+ * as a tinted `Badge` in the trailing slot. It also gets the row dividers and
+ * the shrink contract (a long title truncates instead of pushing the badge off
+ * the edge) without any of that being re-derived here.
+ *
+ * `Frame` has no disclosure of its own, and this surface sits above the
+ * composer, so an expanded list is a list the reader cannot see past. The
+ * `Collapsible` is the fold: one header row — the summary, the live/done badge
+ * and a rotating chevron — over a body that keeps its rows mounted while
+ * closed. Starts closed, like the task strip above it: the surface sits over
+ * the composer, and the header already carries the count and the status.
+ *
+ * The previous version nested a `Task` per item inside a `Task`, which gave
+ * every job its own chevron — two levels of disclosure for one flat list, the
+ * inner ones opening onto unlabelled `Task.Item` strings.
  */
 export const BackgroundWorkBar = memo(function BackgroundWorkBar({
   sessionId,
@@ -180,44 +199,43 @@ export const BackgroundWorkBar = memo(function BackgroundWorkBar({
   };
 
   return (
-    <Task
+    <Collapsible
       className="mb-2"
-      status={live.length ? 'running' : 'complete'}
+      variant="surface"
     >
-      <Task.Trigger title={summary} />
-      <Task.Content>
-        {/*
-          One nested `Task` per piece of work, not a `Task.Item` line: each has
-          its own status, so it gets its own glyph and shimmer, and its own body
-          for the command and output. A text line per item flattened all of that
-          into a status word, which read as a list of strings rather than a list
-          of jobs.
-        */}
-        {items.map((item) => (
-          <Task
-            defaultOpen={isLiveWork(item.status)}
+      <Collapsible.Trigger>
+        <Collapsible.Title>{summary}</Collapsible.Title>
+        <Badge size="xs" variant={live.length ? 'info' : 'success'}>
+          {live.length ? 'live' : 'done'}
+        </Badge>
+        <Collapsible.Indicator />
+      </Collapsible.Trigger>
+      {/*
+        The rows are full-bleed inside the trigger's padding, so a row's own
+        divider runs the width of the card the way a table's does. `px-0 pb-0`
+        cancels the surface variant's inset, which the rows carry themselves.
+      */}
+      <Collapsible.Content className="px-0 pb-0">
+        {items.map((item, index) => (
+          <Frame.Row
+            align={item.detail || item.command ? 'start' : 'center'}
+            divided={index > 0}
             key={`${item.key.kind}:${item.key.providerId}`}
-            status={taskStatus(item.status)}
           >
-            <Task.Trigger
-              icon={
-                <AppSymbol
-                  name={WORK_ICONS[item.key.kind]}
-                  size={15}
-                  tintColor={workTint(theme, item.status)}
-                />
-              }
-              title={item.title || item.key.providerId}
-            />
-            <Task.Content>
-              {item.detail ? <Task.Item>{item.detail}</Task.Item> : null}
-              {item.command ? <Task.Item>{item.command}</Task.Item> : null}
-              {item.cwd ? <Task.Item>{item.cwd}</Task.Item> : null}
-              {item.output ? <Task.Item>{item.output}</Task.Item> : null}
-              {item.durationMs != null ? (
-                <Task.Item>{`${(item.durationMs / 1000).toFixed(1)}s`}</Task.Item>
-              ) : null}
-              <Task.Item>{item.status}</Task.Item>
+            <Frame.Media>
+              <AppSymbol
+                name={WORK_ICONS[item.key.kind]}
+                size={16}
+                tintColor={workTint(theme, item.status)}
+              />
+            </Frame.Media>
+            <Frame.Content>
+              <Frame.Title>{item.title || item.key.providerId}</Frame.Title>
+              <Frame.Description>
+                {[item.detail, item.command, item.cwd].filter(Boolean).join(' · ')}
+              </Frame.Description>
+            </Frame.Content>
+            <Frame.Actions>
               {item.canStop && item.status !== 'stopping' ? (
                 <Button
                   accessibilityLabel={`Stop ${item.title || item.key.providerId}`}
@@ -229,11 +247,14 @@ export const BackgroundWorkBar = memo(function BackgroundWorkBar({
                   Stop
                 </Button>
               ) : null}
-            </Task.Content>
-          </Task>
+              <Badge size="xs" variant={STATUS_BADGE[item.status]}>
+                {STATUS_LABEL[item.status]}
+              </Badge>
+            </Frame.Actions>
+          </Frame.Row>
         ))}
-      </Task.Content>
-    </Task>
+      </Collapsible.Content>
+    </Collapsible>
   );
 });
 

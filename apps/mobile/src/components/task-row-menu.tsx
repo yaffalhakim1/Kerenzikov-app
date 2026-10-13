@@ -1,9 +1,7 @@
 import { useRef } from 'react';
 import { MenuView, type MenuAction, type MenuComponentRef } from '@expo/ui/community/menu';
 
-import { AnimatedPressable } from 'panelui-native/primitives/animated-pressable';
-
-import { StateLayer } from '@/constants/theme';
+import { AppPressable } from '@/components/app-pressable';
 import { longPressHaptic } from '@/lib/haptics';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -71,23 +69,31 @@ export function TaskRowMenu({
         and the row's list would otherwise be the only one in the app without
         it.
       */}
-      <AnimatedPressable
+      {/*
+        `AppPressable`, not PanelUI's `AnimatedPressable`, and this is
+        load-bearing: `MenuView` is an `@expo/ui` Compose host, and a Reanimated
+        pressable inside it makes Reanimated's mount pass measure through that
+        host, which throws
+
+          IllegalArgumentException: performMeasureAndLayout called during
+          measure layout
+
+        and takes the drawer down as it opens. A plain RN `Pressable` never
+        touches the Compose host on the UI thread, which is what this row used
+        before the PanelUI conversion.
+      */}
+      <AppPressable
         accessibilityHint="Long press for actions"
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        android_ripple={{
-          color: scheme === 'dark' ? StateLayer.dark : StateLayer.light,
-        }}
-        hitSlop={8}
         onLongPress={() => {
           longPressHaptic();
           menu.current?.show();
         }}
-        onPress={onSelect}
-        pressScale={1}>
+        onPress={onSelect}>
         {({ pressed }) => renderTrigger(pressed)}
-      </AnimatedPressable>
+      </AppPressable>
     </MenuView>
   );
 }

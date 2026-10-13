@@ -184,6 +184,11 @@ export function TaskDrawerHost({ children }: { children: ReactNode }) {
           }}
           mode="push"
           width={panelWidth}
+          // Edge, not `anywhere` (the default): an anywhere-gesture arms on any
+          // 14pt horizontal wobble, so a tap on the composer — or a drag in the
+          // transcript — slid the panel out instead. The drawer this replaced
+          // (`react-native-drawer-layout`) only ever swiped from the edge.
+          swipeFrom="edge"
           swipeEnabled={swipeEnabled}
           haptics
         >
