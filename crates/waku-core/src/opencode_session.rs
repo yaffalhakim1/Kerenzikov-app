@@ -579,6 +579,7 @@ mod tests {
         accept_health_body(br#"{"healthy":true}"#, "/opt/opencode")
             .expect("a JSON body is health");
     }
+
     #[test]
     fn selected_fork_message_excludes_the_next_user_turn() {
         let messages = vec!["one".to_owned(), "two".to_owned(), "three".to_owned()];
@@ -678,6 +679,7 @@ mod tests {
         let server = OpenCodeServer {
             child: Mutex::new(child),
             port: 0,
+            binary: PathBuf::from("/usr/bin/true"),
         };
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline && server.is_alive() {
@@ -696,6 +698,7 @@ mod tests {
         let server = OpenCodeServer {
             child: Mutex::new(child),
             port: 0,
+            binary: PathBuf::from("/bin/sleep"),
         };
         let started = Instant::now();
         server.shutdown(Duration::from_secs(3));
