@@ -92,6 +92,7 @@ function session(patch: Partial<AgentSession>): AgentSession {
     model: null,
     runtime_mode: 'ask',
     status: 'idle',
+    live_state: 'idle',
     created_at: 10,
     updated_at: 10,
     provider_cursor: null,

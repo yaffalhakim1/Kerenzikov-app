@@ -661,6 +661,8 @@ export function createSession(
     context_window: null,
     agent_preset: null,
     status: 'idle',
+    // Daemon-owned; a session the client just created has no runtime yet.
+    live_state: 'idle',
     created_at: now,
     updated_at: now,
     last_reply_at: null,

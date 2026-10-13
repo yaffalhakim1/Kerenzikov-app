@@ -714,6 +714,8 @@ export function createResumedSession(
     context_window: null,
     agent_preset: null,
     status: 'idle',
+    // Daemon-owned; a session the client just created has no runtime yet.
+    live_state: 'idle',
     created_at: createdAt,
     updated_at: updatedAt,
     last_reply_at: hasHistory ? updatedAt : null,

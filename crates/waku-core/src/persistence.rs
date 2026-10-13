@@ -1559,6 +1559,9 @@ fn session_skeleton(row: SessionColumns) -> Option<AgentSession> {
         context_window: None,
         agent_preset: None,
         status: serde_json::from_value(serde_json::Value::String(status)).ok()?,
+        // Liveness is runtime-scoped and never stored in a column; a session
+        // read from disk has no runtime, so it is Idle until one starts.
+        live_state: waku_protocol::model::LiveState::Idle,
         created_at: created_at as u64,
         updated_at: updated_at as u64,
         last_reply_at: last_reply_at.map(|at| at as u64),

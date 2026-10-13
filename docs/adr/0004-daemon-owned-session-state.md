@@ -1,6 +1,6 @@
 # ADR 0004: The daemon owns live session state; clients render it
 
-- **Status:** Proposed
+- **Status:** Accepted (steps 1–2 landed; 3–4 open)
 - **Date:** 2026-10-14
 - **Deciders:** yaffalhakim1
 
@@ -216,15 +216,23 @@ event from a superseded runtime cannot move a newer one's state.
 
 ## Rollout
 
-1. Add `LiveState` to the protocol and have the daemon derive it, publishing
-   it alongside `status` (alternative 2) with no client changes.
-2. Point the drain at `LiveState` and delete `DRAIN_BUSY_WAIT`. This is the
-   step that fixes the stranded-follow-up bug on its own.
+1. ~~Add `LiveState` to the protocol and have the daemon derive it, publishing
+   it alongside `status` (alternative 2) with no client changes.~~ **Landed.**
+2. ~~Point the drain at `LiveState` and delete `DRAIN_BUSY_WAIT`. This is the
+   step that fixes the stranded-follow-up bug on its own.~~ **Landed.**
 3. Move the steer gate to `LiveState` on desktop, then web, then mobile.
-4. Make `LiveState` daemon-owned in `adopt_client_projection` and delete
-   `SessionStatus` from the write path.
+4. Delete `SessionStatus` from the client write path.
 
-Steps 1–2 are safe to ship alone and are worth doing even if 3–4 slip.
+Steps 1–2 were safe to ship alone and are worth doing even if 3–4 slip. Both
+are in: the daemon derives and persists `LiveState` from driver events
+(`live_state_for_event`, `set_live_state`), `adopt_client_projection` refuses
+to take it from a client, and `drain_queued_prompt` reads it instead of
+polling. `DRAIN_BUSY_WAIT`/`DRAIN_BUSY_POLL` are gone.
+
+What steps 1–2 deliberately do **not** do: `status` is still written by
+clients and still read by the UI. The two coexist, with `live_state` correct
+and authoritative for the daemon's own decisions. Step 3 moves the steer gate
+onto it; step 4 removes the old field.
 
 ## Follow-up
 
