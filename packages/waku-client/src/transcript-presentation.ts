@@ -52,7 +52,15 @@ export function activityGroupIsLive(
 
 export function activityHeaderTitle(activities: ActivityItem[], liveGroup: boolean, t?: Translator) {
   const latest = liveGroup ? activities.at(-1) : undefined
-  if (latest) return latest.reasoning ? reasoningTitle(latest, t) : activityDisplayTitle(latest, t)
+  if (latest) {
+    const title = latest.reasoning ? reasoningTitle(latest, t) : activityDisplayTitle(latest, t)
+    // A live step can carry an empty `title` and no `display_target` yet — the
+    // daemon fills both in as the step resolves — and a header built from that
+    // renders as a blank row for the whole run, then corrects itself the moment
+    // the step completes. The summary always names the activity, so fall back
+    // to it rather than drawing nothing.
+    if (title.trim()) return title
+  }
   return activitySummary(activities, t)
 }
 
