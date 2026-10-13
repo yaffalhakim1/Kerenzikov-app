@@ -201,8 +201,19 @@ export function MdRevealOnMount({
     if (!fade) return;
     opacity.value = withTiming(1, { duration: 240 });
   }, [fade, opacity]);
-  if (!fade) return <>{children}</>;
+  /*
+   * Every hook runs on every render, including the `!fade` one.
+   *
+   * `useAnimatedStyle` used to sit *after* the early return below, so a row
+   * that mounted without a fade and then gained one — which is exactly what a
+   * streaming turn does as `enabled` flips — ran a different number of hooks
+   * than its previous render and React aborted the whole screen with
+   * "Rendered fewer hooks than expected". The style is computed
+   * unconditionally instead; when there is no fade the value is 1, so the
+   * branch below returns the children unwrapped and the style is discarded.
+   */
   const style = useAnimatedStyle(() => ({ opacity: opacity.value }));
+  if (!fade) return <>{children}</>;
   return <Animated.View style={style}>{children}</Animated.View>;
 }
 
