@@ -481,8 +481,16 @@ export function ComposerV2({
           example does. `indicator` is the chevron; `indicatorSymbol` is the
           platform's name for it, needed only when the pill is handed over.
         */}
+        {/*
+          `shrink` + a one-line cap is what keeps a long model name from
+          pushing the send button off the row. The pill's label is rendered by
+          the library with no width bound and no truncation, so without these
+          a name like "claude-sonnet-4-5-20250929" takes the whole toolbar and
+          Send becomes unreachable.
+        */}
         <AIInput.Pill
           accessibilityLabel={`Model, ${selectedModelName}`}
+          className="shrink"
           indicator={
             <AppSymbol
               name={{ ios: 'chevron.up.chevron.down', android: 'unfold_more', web: 'unfold_more' }}
@@ -491,7 +499,11 @@ export function ComposerV2({
             />
           }
           indicatorSymbol="chevron.up.chevron.down"
-          label={selectedModelName}
+          label={
+            <PanelText className="shrink" numberOfLines={1} size="sm" weight="medium">
+              {selectedModelName}
+            </PanelText>
+          }
           onPress={() => setModelSheetOpen(true)}
         />
         {activeModel && modelHasConfigurableTraits(activeModel) ? (
