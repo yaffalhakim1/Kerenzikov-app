@@ -366,21 +366,22 @@ impl OpenCodeServer {
             binary: binary.to_path_buf(),
         };
         let started_at = Instant::now();
-        let mut mismatch: Option<anyhow::Error> = None;
+        // Kept across attempts: a v2 binary answers the v1 routes with the web
+        // UI's HTML, which is a version mismatch rather than a server that is
+        // still starting. Failing with that reason beats a bare timeout.
+        let mut mismatch = None;
         loop {
             match server.probe_health() {
                 Ok(()) => return Ok(server),
-                // A v2 binary answers the v1 routes with the web UI's HTML.
-                // That is a version mismatch, not a server that is still
-                // starting, so keep the reason and fail with it once the
-                // budget is spent rather than reporting a bare timeout.
-                Err(error) => mismatch = Some(error),
+                Err(error) => {
+                    let _ = mismatch.replace(error);
+                }
             }
             if let Some(status) = server.child.lock().try_wait()? {
                 bail!("OpenCode session server exited during startup ({status})");
             }
             if started_at.elapsed() >= SERVER_START_TIMEOUT {
-                return match mismatch {
+                return match mismatch.take() {
                     Some(error) => Err(error),
                     None => bail!("timed out starting the OpenCode session server"),
                 };
