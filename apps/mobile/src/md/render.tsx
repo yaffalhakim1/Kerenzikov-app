@@ -21,7 +21,6 @@ import * as Haptics from 'expo-haptics';
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
   Dimensions,
-  Easing,
   Image,
   Linking,
   StyleSheet,
@@ -32,6 +31,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -78,6 +78,14 @@ export function VeilFade({
     value.value = withTiming(1, {
       duration: Math.max(1, remainingMs),
       // The same curve `veilOpacity` applies: 1 - (1 - t) ^ VEIL_CURVE_POW.
+      //
+      // `Easing` is Reanimated's, not React Native's, and that is load-bearing:
+      // Reanimated's `timing` evaluates the easing on the UI runtime, and RN's
+      // `Easing` functions are plain JS with no `'worklet'` directive. Passing
+      // one across kills the process with `[Worklets] Tried to synchronously
+      // call a Remote Function` — a native abort, so nothing reaches the JS
+      // error handler and the screen just disappears. Importing it from
+      // `react-native` above is what caused that; do not move it back.
       easing: Easing.out(Easing.poly(VEIL_CURVE_POW)),
     });
     // Mount-only by design; see above.
