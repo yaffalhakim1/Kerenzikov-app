@@ -1478,6 +1478,12 @@ errors.remove_task:
   en: "Could not remove the task: %{error}"
 errors.remove_queued_message:
   en: "Could not update the queued message: %{error}"
+session.provider_failed_hint:
+  en: The provider stopped before it could run this turn.
+session.reload_runtime:
+  en: Reload
+session.retry_last_turn:
+  en: Try again
 errors.save_draft:
   en: "Could not save the draft: %{error}"
 errors.rewind_task:

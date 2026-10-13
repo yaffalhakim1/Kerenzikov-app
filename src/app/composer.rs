@@ -2485,6 +2485,111 @@ impl Waku {
     /// single card tucked against the composer's top edge, one row per queued
     /// message. A row pulls its text back into the composer on click and
     /// carries steer/remove/more controls on the right.
+    /// Recovery affordance for a session whose provider failed.
+    ///
+    /// A failed start used to be a dead end: the transcript carried the error
+    /// and the only way forward was to retype the prompt. This surfaces the
+    /// two things the user actually wants — rebuild the transport, or run the
+    /// last prompt again — next to the error itself.
+    ///
+    /// Rendered only on a settled session, so Reload can never drop a runtime
+    /// that is still driving a turn.
+    pub(super) fn render_recovery_banner(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let session = self.selected_session()?;
+        if session.status != SessionStatus::Failed {
+            return None;
+        }
+        if self.submission_preparations.contains(&session.id) {
+            return None;
+        }
+        // Nothing to retry without a user turn; Reload alone is still useful.
+        let has_user_turn = session
+            .messages
+            .iter()
+            .any(|message| message.role == MessageRole::User);
+        let theme = Theme::current(cx);
+        let session_id = session.id;
+        let button = |id: &str, label: String, primary: bool| {
+            div()
+                .id(SharedString::from(id.to_owned()))
+                .h(px(26.0))
+                .px(px(10.0))
+                .rounded(px(7.0))
+                .flex()
+                .items_center()
+                .gap(px(5.0))
+                .cursor_default()
+                .tab_index(0)
+                .focus_visible(|style| style.border_1().border_color(theme.accent))
+                .hover(|element| element.bg(theme.overlay_strong))
+                .active(|element| element.opacity(0.8))
+                .text_size(sp(12.5))
+                .text_color(if primary {
+                    theme.accent
+                } else {
+                    theme.text_secondary
+                })
+                .child(SharedString::from(label))
+        };
+        let reload = button(
+            &format!("session-reload-{session_id}"),
+            tr!("session.reload_runtime"),
+            false,
+        )
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.reload_session_runtime(cx);
+        }))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.reload_session_runtime(cx);
+                cx.stop_propagation();
+            }
+        }));
+        let retry = has_user_turn.then(|| {
+            button(
+                &format!("session-retry-{session_id}"),
+                tr!("session.retry_last_turn"),
+                true,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.retry_last_turn(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                    this.retry_last_turn(cx);
+                    cx.stop_propagation();
+                }
+            }))
+        });
+        Some(
+            div().flex_none().px(px(20.0)).pb(px(6.0)).child(
+                div()
+                    .w_full()
+                    .max_w(px(CONTENT_MAX_WIDTH))
+                    .mx_auto()
+                    .px(px(14.0))
+                    .py(px(10.0))
+                    .rounded(px(12.0))
+                    .border_1()
+                    .border_color(theme.danger.opacity(0.35))
+                    .bg(theme.danger.opacity(0.08))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(icon("icons/x.svg", 13.0, theme.danger))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(sp(12.5))
+                            .text_color(theme.text_secondary)
+                            .child(tr!("session.provider_failed_hint")),
+                    )
+                    .child(reload)
+                    .children(retry),
+            ),
+        )
+    }
     pub(super) fn render_queued_messages(&self, cx: &mut Context<Self>) -> Option<Div> {
         let session_id = self.state.selected_session?;
         let session = self.selected_session()?;
