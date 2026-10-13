@@ -12,6 +12,17 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.61]
+
+### Android
+
+- **A screen that fails now says so instead of vanishing.** When a turn was
+  running or a response was streaming, the task screen could close itself and
+  take the reason with it. The screen now stays, shows what went wrong, and
+  offers to try again — and the error is written to a file, so it survives a
+  restart and can be sent on.
+- **Settings → Diagnostics** sends that error log, or clears it.
+
 ## [0.1.60]
 
 ### Android
