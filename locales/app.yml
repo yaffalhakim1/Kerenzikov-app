@@ -1476,6 +1476,8 @@ errors.rename_task:
   en: "Could not rename the task: %{error}"
 errors.remove_task:
   en: "Could not remove the task: %{error}"
+errors.remove_queued_message:
+  en: "Could not update the queued message: %{error}"
 errors.save_draft:
   en: "Could not save the draft: %{error}"
 errors.rewind_task:

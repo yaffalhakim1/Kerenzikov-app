@@ -523,6 +523,19 @@ export async function removeDaemonSession(
   expectResponse(await client.request({ type: 'removeSession' }, sessionId), 'ack');
 }
 
+/** Drops one entry from a task's follow-up queue. The queue is merged on save,
+ * so an omitted entry cannot express a removal — this is the command that can. */
+export async function removeQueuedMessage(
+  client: WakuClient,
+  sessionId: string,
+  messageId: string,
+): Promise<void> {
+  expectResponse(
+    await client.request({ type: 'removeQueuedMessage', sessionId, messageId }, sessionId),
+    'ack',
+  );
+}
+
 /** Hide a task from the lists without destroying it, or bring it back. The
  * recoverable counterpart to [removeDaemonSession]: the row, transcript and
  * checkpoints all survive. */

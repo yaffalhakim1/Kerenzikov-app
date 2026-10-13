@@ -195,6 +195,16 @@ pub enum Command {
     /// merge-only so a stale client snapshot cannot delete tasks another
     /// client just created.
     RemoveSession,
+    /// Explicitly drop one entry from a task's follow-up queue.
+    ///
+    /// The queue is merged on save rather than replaced (a save omitting an
+    /// entry must not erase it for every other client), so a removal has to be
+    /// its own command, the way task removal is. Editing a queued message uses
+    /// this before restoring the text to the composer.
+    RemoveQueuedMessage {
+        session_id: Uuid,
+        message_id: Uuid,
+    },
     /// Hide a task from the task lists without destroying anything, or bring
     /// it back. This is the recoverable counterpart to [`Self::RemoveSession`]:
     /// the row, transcript, messages and Git checkpoint refs all survive, so an

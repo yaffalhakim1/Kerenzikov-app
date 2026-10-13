@@ -3254,6 +3254,12 @@ impl Waku {
                 .queued_messages
                 .retain(|message| message.id != message_id);
         }
+        // The queue is merged on save, so dropping the entry locally is not
+        // enough: the daemon would put it back from its own copy. Removal is
+        // its own command, the way task removal is.
+        if let Err(error) = self.store.remove_queued_message(session_id, message_id) {
+            self.show_toast(tr!("errors.remove_queued_message", error = error));
+        }
         self.save();
         cx.notify();
     }
@@ -3276,6 +3282,11 @@ impl Waku {
         }) else {
             return;
         };
+        // Editing takes the entry out of the queue for good, so the daemon has
+        // to be told: a save alone would merge it back.
+        if let Err(error) = self.store.remove_queued_message(session_id, message_id) {
+            self.show_toast(tr!("errors.remove_queued_message", error = error));
+        }
         self.restore_composer_submission(ComposerSubmission::from_queued_message(message), cx);
         let focus_handle = self.composer_focus(cx);
         window.focus(&focus_handle, cx);
@@ -3302,6 +3313,11 @@ impl Waku {
         }) else {
             return;
         };
+        // Steered means it left the queue; tell the daemon so the merge does
+        // not put it back. A rejected steer re-queues it as a new entry.
+        if let Err(error) = self.store.remove_queued_message(session_id, message_id) {
+            self.show_toast(tr!("errors.remove_queued_message", error = error));
+        }
         self.save();
         self.steer_composer_submission(ComposerSubmission::from_queued_message(message), cx);
     }

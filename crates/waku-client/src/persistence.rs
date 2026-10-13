@@ -1060,6 +1060,25 @@ impl StateStore {
             .map_err(to_io_error)
     }
 
+    /// Drops one entry from a task's follow-up queue.
+    ///
+    /// The queue is merged on save, so an omitted entry cannot express a
+    /// removal — this is the command that does, the way `remove_session` is the
+    /// command that removes a task.
+    pub fn remove_queued_message(&self, session_id: Uuid, message_id: Uuid) -> io::Result<()> {
+        self.daemon
+            .client()
+            .notify(
+                session_id,
+                Uuid::nil(),
+                Command::RemoveQueuedMessage {
+                    session_id,
+                    message_id,
+                },
+            )
+            .map_err(to_io_error)
+    }
+
     pub fn blob_sweep(&self) -> impl FnOnce() + Send + 'static {
         let daemon = self.daemon.clone();
         move || {

@@ -71,8 +71,10 @@ pub struct WakuBackend {
     /// the worker keeps pace with any realistic settle rate.
     drain_requests: crossbeam_channel::Sender<DrainRequest>,
     /// Sessions whose next settle must NOT start a queued prompt: the user
-    /// pressed Stop. Cleared by any new prompt on the session.
-    drain_suppressed: Mutex<HashSet<Uuid>>,
+    /// pressed Stop. Cleared by any new prompt on the session. Shared with each
+    /// session's event thread so a Stop pressed mid-turn is seen at the settle
+    /// it is meant to suppress.
+    drain_suppressed: Arc<Mutex<HashSet<Uuid>>>,
     /// Mobile devices that asked to be notified while backgrounded. Shared
     /// with each session's event thread, which sends the pushes.
     push_registry: crate::push::PushRegistry,
@@ -140,7 +142,7 @@ impl WakuBackend {
             usage_rates_dir,
             default_cwd: std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             drain_requests,
-            drain_suppressed: Mutex::new(HashSet::new()),
+            drain_suppressed: Arc::new(Mutex::new(HashSet::new())),
             push_registry: crate::push::PushRegistry::new(),
         })
     }
@@ -579,6 +581,30 @@ impl Backend for WakuBackend {
                 }
                 Ok(ResponsePayload::Ack)
             }
+            Command::RemoveQueuedMessage {
+                session_id,
+                message_id,
+            } => {
+                // Its own command because a save merges the queue rather than
+                // replacing it: omitting an entry there cannot express removal
+                // without erasing it for every other client too.
+                let mut state = self.task_state.lock();
+                if let Some(session) = state
+                    .sessions
+                    .iter_mut()
+                    .find(|session| session.id == session_id)
+                {
+                    let before = session.queued_messages.len();
+                    session
+                        .queued_messages
+                        .retain(|queued| queued.id != message_id);
+                    if session.queued_messages.len() != before {
+                        state.mark_session_dirty(session_id);
+                        self.task_store.save(&mut state)?;
+                    }
+                }
+                Ok(ResponsePayload::Ack)
+            }
             Command::HydrateSession { session_id } => {
                 // Live runtimes stay resident; everything else is trimmed to
                 // the recency window once the response is built.
@@ -963,10 +989,10 @@ impl Backend for WakuBackend {
                 let drain_events = events.clone();
                 let push_registry = self.push_registry.clone();
                 let push_state = self.task_state.clone();
-                // Read once at start; a Cancel during the turn flips the
-                // backend's set, but the suppression the drain checks is the
-                // one the worker sees — populated by the request path above.
-                let suppressed = self.drain_suppressed.lock().contains(&session_id);
+                // Shared rather than snapshotted: a Stop pressed *during* the
+                // turn must suppress the settle's drain, and a start-time read
+                // cannot see a Cancel that has not happened yet.
+                let drain_suppressed = self.drain_suppressed.clone();
                 // Model-fallback retry state: the prompt now in flight and
                 // how many fallbacks have been tried this turn. The chain
                 // itself is read from settings at retry time, so editing it
@@ -1009,6 +1035,8 @@ impl Backend for WakuBackend {
                                         // the retry's own settle.
                                         continue;
                                     }
+                                    let suppressed =
+                                        drain_suppressed.lock().contains(&session_id);
                                     let _ = drain_requests.send(DrainRequest {
                                         session_id,
                                         events: drain_events.clone(),
@@ -1160,7 +1188,35 @@ fn adopt_client_projection(existing: &mut AgentSession, mut incoming: AgentSessi
     // Written only by `SetSessionArchived`; a save assembled before that landed
     // carries `None` and would silently un-archive the task.
     incoming.archived_at = existing.archived_at;
+    // The queue is merged rather than replaced: see `merge_queued_messages`.
+    incoming.queued_messages = merge_queued_messages(existing, incoming.queued_messages);
     *existing = incoming;
+}
+
+/// Reconciles a client's queue snapshot with the daemon's copy.
+///
+/// The queue is control state that two clients mutate independently, but it
+/// travels inside the whole-session projection, so a plain replace made the
+/// second save win outright — a follow-up queued on the phone disappeared when
+/// the desktop next saved. Staleness cannot arbitrate here either: `updated_at`
+/// is whole seconds, so two saves inside one second are indistinguishable.
+///
+/// The rule is therefore additive and order-preserving: the daemon's own
+/// entries survive, and the client's are appended in its order when the daemon
+/// does not already hold that id. Removal is not expressible through a save —
+/// it goes through `RemoveQueuedMessage`, exactly as task removal goes through
+/// `RemoveSession` rather than a save that omits the task.
+fn merge_queued_messages(
+    existing: &AgentSession,
+    incoming: Vec<QueuedMessage>,
+) -> Vec<QueuedMessage> {
+    let mut merged = existing.queued_messages.clone();
+    for queued in incoming {
+        if !merged.iter().any(|candidate| candidate.id == queued.id) {
+            merged.push(queued);
+        }
+    }
+    merged
 }
 
 /// Ending checkpoints are produced and stored by the daemon. A second client
@@ -2078,6 +2134,7 @@ fn handle_driver_command(
         | Command::SaveTaskState { .. }
         | Command::RemoveSession
         | Command::SetSessionArchived { .. }
+        | Command::RemoveQueuedMessage { .. }
         | Command::HydrateSession { .. }
         | Command::SearchSessionMessages { .. }
         | Command::ListProviderSessions { .. }
@@ -2690,6 +2747,46 @@ mod tests {
         assert_eq!(existing.runtime_event_cursor.unwrap().sequence, 10);
     }
 
+    /// Two clients queueing at once must both keep their entry. The queue
+    /// rides inside the whole-session projection, so a plain replace made the
+    /// second save win and the first client's follow-up vanish.
+    #[test]
+    fn concurrent_queues_from_two_clients_both_survive() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        existing.queued_messages.push(QueuedMessage::new("from the phone"));
+
+        let mut from_desktop = existing.clone();
+        from_desktop.queued_messages.push(QueuedMessage::new("from the desktop"));
+
+        adopt_client_projection(&mut existing, from_desktop);
+
+        let contents = existing
+            .queued_messages
+            .iter()
+            .map(|queued| queued.content.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(contents, vec!["from the phone", "from the desktop"]);
+    }
+
+    /// A save that omits an entry must not erase it: removal is its own
+    /// command, so a snapshot taken before the removal cannot resurrect it
+    /// either — it is simply already gone from the daemon's copy.
+    #[test]
+    fn a_save_omitting_a_queued_entry_does_not_remove_it() {
+        let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);
+        let kept = QueuedMessage::new("keep me");
+        let kept_id = kept.id;
+        existing.queued_messages.push(kept);
+
+        let mut stale = existing.clone();
+        stale.queued_messages.clear();
+        stale.updated_at = existing.updated_at + 1;
+
+        adopt_client_projection(&mut existing, stale);
+
+        assert_eq!(existing.queued_messages.len(), 1);
+        assert_eq!(existing.queued_messages[0].id, kept_id);
+    }
     #[test]
     fn client_projection_cannot_replace_a_daemon_checkpoint() {
         let mut existing = AgentSession::new(Uuid::new_v4(), ProviderKind::Codex);

@@ -33,6 +33,7 @@ import {
   materializeWorktree,
   persistSession,
   probeProvider,
+  removeQueuedMessage as requestRemoveQueuedMessage,
   sessionCwd,
   type TaskState,
 } from './daemon-api'
@@ -1048,9 +1049,12 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         queued_messages: (session.queued_messages ?? []).filter((message) => message.id !== messageId),
       }
       cacheSession(next)
+      // The queue is merged on save, so dropping the entry locally is not
+      // enough — the daemon would put it back from its own copy.
+      await requestRemoveQueuedMessage(client!, sessionId, messageId)
       await persistOrdered(next)
     },
-    [config, queryClient, cacheSession, persistOrdered],
+    [config, client, queryClient, cacheSession, persistOrdered],
   )
 
   const cancel = useCallback(
