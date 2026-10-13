@@ -12,6 +12,41 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.60]
+
+### Android
+
+- **Dark mode reaches every surface.** Choosing Dark while the phone was set to
+  Light repainted the transcript and left the task panel, background work, and
+  both composers on their light colours — so some text was dark and some light.
+  The app's theme choice now reaches the whole interface.
+- **Code in a response reads the same everywhere.** A code span in a paragraph
+  was drawn in a different face and colour from one in a list, and the two
+  drifted further apart in dark mode. Every span is now the same brand-tinted
+  code.
+- **The task list and background work fold away.** Both sat open above the
+  composer, and a long plan or a busy task pushed the conversation off screen.
+  Each now starts collapsed behind its own header, which still carries the
+  progress and status.
+- **Background work reads as a list of jobs.** A running command, an agent and
+  a monitor were nested inside one another with a fold control each. They are
+  now one row per job — kind, name, what it is doing, and the command — with
+  `Stop` where the provider allows it.
+- **The agent picker is a button.** On New Task it was a labelled chip; it is
+  now the same round control as the rest of the composer, with the agent's name
+  on the menu behind it.
+- **Stop and Send are one size.** Stop was drawn larger than Send in the same
+  slot, and heavier than it.
+- **Mentioning a file by name works.** Typing `@` with a fragment ignored what
+  you typed and listed the first few entries whatever you asked for. It now
+  matches what you type, and the list scrolls.
+- **The message field is legible in dark mode.** Text typed into the composer
+  was drawn in the light theme's colour on a dark card.
+- **Loaders** are a single rotating ring rather than a pulsing square.
+- **The task drawer opens on a swipe from the edge**, not from anywhere on the
+  screen — a stray sideways drag on the composer no longer slid it out, and
+  opening it no longer crashed the screen.
+
 ## [0.1.59]
 
 ### Desktop
