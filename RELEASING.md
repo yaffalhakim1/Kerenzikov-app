@@ -147,6 +147,66 @@ git add -A && git commit -m "chore: bump version to 0.1.51"
 the build number the same way the app does. It also runs in CI as part of
 `test.yml`, so a PR that half-bumps the tree fails before it can merge.
 
+### The CHANGELOG entry format
+
+The release body is read by someone deciding whether to install this build, so
+every entry describes what changed **for them**. The shape, from v0.1.66:
+
+```markdown
+## [0.1.66]
+
+### Desktop and Android
+
+- **A failed task now offers a way forward instead of a dead end.** When a
+  provider stopped before it could run a turn, the error was all you got: the
+  only recovery was to retype the prompt. The composer now shows **Reload**,
+  which rebuilds the connection to the agent while leaving the conversation
+  where it is, and **Try again**, which runs your last message once more.
+
+- **Fixed: a follow-up queued on one device could be lost by another.** Queue a
+  message from your phone and then save from the desktop, and the phone's
+  message disappeared — the two devices each kept their own view of the queue
+  and the later one won. Queued messages now merge, so a follow-up survives
+  whichever device wrote last.
+```
+
+The rules that make it readable:
+
+- **`## [<version>]`** matching `Cargo.toml` exactly. The workflow extracts the
+  release body by this heading; a mismatch ships a raw commit list instead.
+- **One `###` platform heading**, naming only the surfaces the release actually
+  changed. In practice that is `Desktop`, `Android`, or `Desktop and Android`;
+  a release that genuinely splits gets a second heading (v0.1.54 is
+  `Desktop and Android` plus a separate `Android` group, v0.1.51 pairs
+  `Android` with `Under the hood`). Older entries say `Mobile` for the phone,
+  and `Android` is the current spelling because it is what this fork ships.
+- **One bullet per user-visible change**, bolded through the first sentence.
+- **Lead with the symptom, not the change.** Say what was wrong or missing and
+  what it cost the reader, *then* what it does now. The symptom is how someone
+  recognises their own bug; the fix is how they know it is gone.
+- **A fix reads `**Fixed: <the symptom someone would have hit>.**`** — literally
+  the words they saw or the thing they could not do. A new capability reads
+  `**<what it does now>.**` with no prefix.
+- **Second person, past tense for the bug and present for the behaviour.** "the
+  error was all you got" → "the composer now shows".
+- **No internals.** No file paths, function names, commit hashes, PR numbers, or
+  provider-daemon vocabulary. The reader has never seen `adopt_client_projection`
+  and does not need to:
+
+  ```markdown
+  - Refactored `adopt_client_projection` to merge queued messages by id (#65).
+  ```
+
+  is the same change as:
+
+  ```markdown
+  - **Fixed: a follow-up queued on one device could be lost by another.** …
+  ```
+
+- **Write it once, for the release.** Fold refinements of an unreleased feature
+  into its own bullet rather than adding a second entry — a reader does not need
+  the intermediate states a change went through before shipping.
+
 ### `versionCode` is derived, and cannot be written by hand
 
 `apps/mobile/android/app/build.gradle` no longer contains a number. It reads
