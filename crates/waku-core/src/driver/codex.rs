@@ -6,6 +6,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -44,9 +45,6 @@ enum CommandMessage {
     Prompt(String),
     Steer(String),
     Cancel,
-    /// Reissue `thread/resume`/`thread/start` (request id 1) after a rejected
-    /// open — a thread whose previous writer had not flushed yet.
-    ReopenThread,
     Respond {
         request_id: String,
         option_id: String,
@@ -301,6 +299,10 @@ impl CodexDriver {
             launched: false,
             pending: None,
         }));
+        // Shared so the writer observes a rejection *inside* its wait for the
+        // thread id, rather than behind the very prompt that is blocked on the
+        // open a replay would fix.
+        let thread_open_state = Arc::new(ThreadOpenState::default());
 
         let writer_thread_id = thread_id.clone();
         let writer_turn_id = turn_id.clone();
@@ -310,6 +312,7 @@ impl CodexDriver {
         let writer_background_rpcs = background_rpcs.clone();
         let writer_goal_rpcs = goal_rpcs.clone();
         let writer_title_generation = title_generation.clone();
+        let writer_thread_open_state = thread_open_state.clone();
         let writer_events = events.clone();
         let cwd_string = cwd.display().to_string();
         thread::Builder::new()
@@ -419,17 +422,19 @@ impl CodexDriver {
                 let _ = write_json_line(&mut stdin, &open_thread);
 
                 let mut next_request_id = 10_u64;
+                // Replays of a rejected open, spent inside `wait_for_thread_id`.
+                let mut thread_open_replays = 0_u32;
                 while let Ok(command) = command_rx.recv() {
                     let message = match command {
-                        CommandMessage::ReopenThread => {
-                            // The first open was refused because the previous
-                            // writer had not flushed. Give it a moment, then
-                            // replay the same open request.
-                            std::thread::sleep(Duration::from_millis(250));
-                            open_thread.clone()
-                        }
+
                         CommandMessage::Prompt(text) => {
-                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                            let Some(thread_id) = wait_for_thread_id(
+                                &writer_thread_id,
+                                Some(&open_thread),
+                                &writer_thread_open_state,
+                                &mut stdin,
+                                &mut thread_open_replays,
+                            ) else {
                                 let _ = writer_events.send(DriverEvent::Error(tr!(
                                     "errors.codex_thread_open_incomplete"
                                 )));
@@ -548,7 +553,13 @@ impl CodexDriver {
                             })
                         }
                         CommandMessage::Rollback { turns, response } => {
-                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                            let Some(thread_id) = wait_for_thread_id(
+                                &writer_thread_id,
+                                None,
+                                &writer_thread_open_state,
+                                &mut stdin,
+                                &mut thread_open_replays,
+                            ) else {
                                 let _ = response
                                     .send(Err("Codex did not finish opening its thread.".into()));
                                 continue;
@@ -579,7 +590,13 @@ impl CodexDriver {
                             turns_to_remove,
                             response,
                         } => {
-                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                            let Some(thread_id) = wait_for_thread_id(
+                                &writer_thread_id,
+                                None,
+                                &writer_thread_open_state,
+                                &mut stdin,
+                                &mut thread_open_replays,
+                            ) else {
                                 let _ = response
                                     .send(Err("Codex did not finish opening its thread.".into()));
                                 continue;
@@ -613,7 +630,13 @@ impl CodexDriver {
                                 }
                                 continue;
                             }
-                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                            let Some(thread_id) = wait_for_thread_id(
+                                &writer_thread_id,
+                                None,
+                                &writer_thread_open_state,
+                                &mut stdin,
+                                &mut thread_open_replays,
+                            ) else {
                                 if !quiet {
                                     let _ = writer_events.send(DriverEvent::Error(tr!(
                                         "errors.codex_thread_open_incomplete"
@@ -672,7 +695,13 @@ impl CodexDriver {
                             if writer_background_rpcs.lock().unsupported {
                                 continue;
                             }
-                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                            let Some(thread_id) = wait_for_thread_id(
+                                &writer_thread_id,
+                                None,
+                                &writer_thread_open_state,
+                                &mut stdin,
+                                &mut thread_open_replays,
+                            ) else {
                                 continue;
                             };
                             next_request_id += 1;
@@ -688,7 +717,13 @@ impl CodexDriver {
                             })
                         }
                         CommandMessage::StopBackgroundWork { key, control_id } => {
-                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                            let Some(thread_id) = wait_for_thread_id(
+                                &writer_thread_id,
+                                None,
+                                &writer_thread_open_state,
+                                &mut stdin,
+                                &mut thread_open_replays,
+                            ) else {
                                 let _ = writer_events.send(DriverEvent::BackgroundWork(
                                     BackgroundWorkEvent::StopFailed {
                                         key,
@@ -712,7 +747,13 @@ impl CodexDriver {
                             })
                         }
                         CommandMessage::GeneratedTitle(title) => {
-                            let Some(thread_id) = wait_for_thread_id(&writer_thread_id) else {
+                            let Some(thread_id) = wait_for_thread_id(
+                                &writer_thread_id,
+                                None,
+                                &writer_thread_open_state,
+                                &mut stdin,
+                                &mut thread_open_replays,
+                            ) else {
                                 continue;
                             };
                             // Update Waku even if persisting the name back to
@@ -751,8 +792,7 @@ impl CodexDriver {
         let reader_title_generation = title_generation;
         let reader_commands = commands.clone();
         let reader_events = events.clone();
-        let reader_thread_open_retries = Arc::new(Mutex::new(0_u32));
-        let reader_open_retries = reader_thread_open_retries.clone();
+        let reader_thread_open_state = thread_open_state.clone();
         let reader_thread = thread::Builder::new()
             .name("waku-codex-reader".into())
             .spawn(move || {
@@ -777,7 +817,7 @@ impl CodexDriver {
                                         &reader_goal_rpcs,
                                         &reader_commands,
                                         &reader_events,
-                                        &reader_open_retries,
+                                        &reader_thread_open_state,
                                         &reader_turn_usage_total,
                                         &mut stream_state,
                                     );
@@ -1213,9 +1253,20 @@ const CODEX_TITLE_MODEL: &str = "gpt-5.6-luna";
 const CODEX_TITLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How many times a rejected thread open is replayed while the previous
-/// writer flushes. Four attempts at 250ms spacing covers Codex's own EOF
-/// shutdown, which the fork fixture times at 100ms.
-const THREAD_OPEN_RETRIES: u32 = 4;
+/// writer flushes. The delay is Codex's own EOF shutdown, which the fork
+/// fixture times at 100ms but which nothing in the protocol bounds; eight
+/// attempts leaves real headroom for a busy app-server without letting a
+/// genuinely stuck thread spin forever.
+const THREAD_OPEN_RETRIES: u32 = 8;
+/// How long the writer waits for the handshake to yield a thread id before
+/// reporting the open as incomplete. This is the whole handshake budget, not
+/// the retry budget: replays happen inside it.
+const THREAD_OPEN_WAIT: Duration = Duration::from_secs(20);
+/// How often the wait re-checks for the id and gives a pending replay a turn.
+const THREAD_OPEN_POLL: Duration = Duration::from_millis(20);
+/// Pause before replaying a rejected open, so the previous writer has a chance
+/// to flush rather than being rejected a second time.
+const THREAD_REOPEN_DELAY: Duration = Duration::from_millis(250);
 
 fn is_codex_turn_started(value: &Value, thread_id: Option<&str>) -> bool {
     let Some(thread_id) = thread_id else {
@@ -1427,14 +1478,68 @@ fn normalize_codex_title(raw: &str) -> Option<String> {
     (!title.is_empty()).then_some(title)
 }
 
-fn wait_for_thread_id(thread_id: &Mutex<Option<String>>) -> Option<String> {
-    for _ in 0..500 {
+/// Waits for the handshake to yield a thread id, replaying a rejected open
+/// while it waits.
+///
+/// The replay has to happen *here* rather than as a command the writer picks
+/// up later: the writer is the thread that would process it, so a command
+/// queued behind this wait can only be seen after the wait gives up. Observed
+/// as `Codex did not finish opening its thread` followed by the reopen landing
+/// too late to matter.
+///
+/// `reopen` is the request that opens (or reopens) the thread, replayed
+/// verbatim on rejection. A `None` reopen means this caller cannot recover —
+/// it just waits.
+fn wait_for_thread_id(
+    thread_id: &Mutex<Option<String>>,
+    open_thread: Option<&Value>,
+    state: &ThreadOpenState,
+    stdin: &mut impl Write,
+    retries: &mut u32,
+) -> Option<String> {
+    let deadline = Instant::now() + THREAD_OPEN_WAIT;
+    // A rejection schedules a replay one flush-delay out, so the previous
+    // writer has a chance to finish before the open is reissued.
+    let mut replay_at: Option<Instant> = None;
+    loop {
         if let Some(thread_id) = thread_id.lock().clone() {
             return Some(thread_id);
         }
-        thread::sleep(Duration::from_millis(20));
+        if state.rejected.swap(false, Ordering::AcqRel) && replay_at.is_none() {
+            replay_at = Some(Instant::now() + THREAD_REOPEN_DELAY);
+        }
+        if let Some(at) = replay_at
+            && Instant::now() >= at
+            && open_thread.is_some()
+            && *retries < THREAD_OPEN_RETRIES
+        {
+            *retries += 1;
+            replay_at = None;
+            // Reissuing the open is what makes the thread reachable again once
+            // the previous writer's flush completes.
+            let _ = write_json_line(stdin, open_thread.expect("checked above"));
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        thread::sleep(THREAD_OPEN_POLL);
     }
-    None
+}
+
+/// Whether `error` is Codex's "the previous writer is still flushing" signal.
+fn is_thread_open_rejection(error: &str) -> bool {
+    error.contains("active writer")
+}
+
+/// Handshake state shared between the reader and the writer.
+///
+/// `retries` bounds the replays and `rejected` carries the signal, so the
+/// writer learns about a rejection from state it already holds rather than
+/// from a queued command it cannot reach while waiting.
+#[derive(Default)]
+struct ThreadOpenState {
+    retries: Mutex<u32>,
+    rejected: AtomicBool,
 }
 
 fn fork_last_turn_id(turn_ids: &[String], turns_to_remove: usize) -> Result<String, String> {
@@ -1740,7 +1845,7 @@ fn handle_codex_message(
     goal_rpcs: &Mutex<GoalRpcState>,
     commands: &Sender<CommandMessage>,
     events: &impl DriverEventSink,
-    thread_open_retries: &Mutex<u32>,
+    thread_open: &ThreadOpenState,
     turn_usage_total: &Mutex<Option<u64>>,
     stream_state: &mut CodexStreamState,
 ) {
@@ -1854,7 +1959,7 @@ fn handle_codex_message(
 
     if is_response && value.get("id").and_then(Value::as_u64) == Some(1) {
         if let Some(id) = value.pointer("/result/thread/id").and_then(Value::as_str) {
-            *thread_open_retries.lock() = 0;
+            *thread_open.retries.lock() = 0;
             *turn_ids.lock() = value
                 .pointer("/result/thread/turns")
                 .and_then(Value::as_array)
@@ -1883,10 +1988,13 @@ fn handle_codex_message(
             // finished flushing its writer as "already has an active writer".
             // That previous process exits moments later, so ask the writer to
             // reopen the thread instead of leaving the session stranded.
-            let retries = *thread_open_retries.lock();
-            if error.contains("active writer") && retries < THREAD_OPEN_RETRIES {
-                *thread_open_retries.lock() = retries + 1;
-                let _ = commands.send(CommandMessage::ReopenThread);
+            let retries = *thread_open.retries.lock();
+            if is_thread_open_rejection(error) && retries < THREAD_OPEN_RETRIES {
+                // Signal the writer, which is already waiting for this thread
+                // id and will replay the open itself. Sending a command here
+                // would queue behind that very wait.
+                *thread_open.retries.lock() = retries + 1;
+                thread_open.rejected.store(true, Ordering::Release);
                 return;
             }
             let _ = events.send(DriverEvent::Error(error.to_owned()));
@@ -2912,7 +3020,7 @@ Stay in exploration mode.
         command_rx: crossbeam_channel::Receiver<CommandMessage>,
         events: crate::driver::DriverEventSender,
         received: crossbeam_channel::Receiver<DriverEvent>,
-        open_retries: Mutex<u32>,
+        open: ThreadOpenState,
     }
 
     impl GoalHarness {
@@ -2931,7 +3039,7 @@ Stay in exploration mode.
                 command_rx,
                 events,
                 received,
-                open_retries: Mutex::new(0),
+                open: ThreadOpenState::default(),
             }
         }
 
@@ -2948,7 +3056,7 @@ Stay in exploration mode.
                 &self.goals,
                 &self.commands,
                 &self.events,
-                &self.open_retries,
+                &self.open,
                 &Mutex::new(None),
                 &mut stream_state,
             );
@@ -3461,7 +3569,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &Mutex::new(0_u32),
+                &ThreadOpenState::default(),
                 &Mutex::new(None),
                 &mut stream_state,
             );
@@ -3532,8 +3640,8 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
-        &Mutex::new(0_u32),
-            &Mutex::new(None),
+        &ThreadOpenState::default(),
+                &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -3569,8 +3677,8 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
-        &Mutex::new(0_u32),
-            &Mutex::new(None),
+        &ThreadOpenState::default(),
+                &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -3623,8 +3731,8 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &Mutex::new(0_u32),
-            &Mutex::new(None),
+                &ThreadOpenState::default(),
+                &Mutex::new(None),
             &mut stream_state,
             );
         }
@@ -3671,7 +3779,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &Mutex::new(0_u32),
+                &ThreadOpenState::default(),
                 &Mutex::new(None),
                 stream_state,
             );
@@ -3744,7 +3852,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &Mutex::new(0_u32),
+                &ThreadOpenState::default(),
                 &Mutex::new(None),
                 stream_state,
             );
@@ -3814,7 +3922,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &Mutex::new(0_u32),
+                &ThreadOpenState::default(),
                 &Mutex::new(None),
                 stream_state,
             );
@@ -3905,7 +4013,7 @@ Stay in exploration mode.
                 &goal_rpcs,
                 &goal_commands,
                 &event_tx,
-                &Mutex::new(0_u32),
+                &ThreadOpenState::default(),
                 &Mutex::new(None),
                 stream_state,
             );
@@ -3947,6 +4055,46 @@ Stay in exploration mode.
         assert_eq!(text, "ready. Ship it.The fix is ");
     }
 
+    /// A rejected open must be replayed by the waiting writer, not queued as a
+    /// command it cannot reach. Regression: the reopen used to sit behind the
+    /// very prompt that was blocked on the open, so the recovery always landed
+    /// too late and the session reported "did not finish opening its thread".
+    #[test]
+    fn a_rejected_open_is_replayed_while_the_writer_waits() {
+        let thread_id = Arc::new(Mutex::new(None::<String>));
+        let state = Arc::new(ThreadOpenState::default());
+        let open_thread = json!({"method": "thread/resume", "id": 1, "params": {}});
+        let mut stdin = Vec::new();
+        let mut retries = 0_u32;
+
+        // The reader signals the rejection, then the thread opens as Codex
+        // flushes. The wait must reissue the open in between.
+        state.rejected.store(true, Ordering::Release);
+        let id = thread_id.clone();
+        let opener = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            *id.lock() = Some("thread-1".to_owned());
+        });
+
+        let opened = wait_for_thread_id(
+            &thread_id,
+            Some(&open_thread),
+            &state,
+            &mut stdin,
+            &mut retries,
+        );
+        opener.join().unwrap();
+
+        assert_eq!(opened.as_deref(), Some("thread-1"));
+        assert_eq!(retries, 1, "the rejected open should be replayed exactly once");
+        let replayed = String::from_utf8(stdin).unwrap();
+        assert!(
+            replayed.contains("thread/resume"),
+            "the open request should be reissued, got {replayed:?}"
+        );
+        assert!(!state.rejected.load(Ordering::Acquire));
+    }
+
     #[test]
     fn steer_rpc_success_is_reported_as_an_accepted_steer() {
         let thread_id = Mutex::new(Some("thread-1".to_owned()));
@@ -3974,8 +4122,8 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
-        &Mutex::new(0_u32),
-            &Mutex::new(None),
+        &ThreadOpenState::default(),
+                &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -4014,8 +4162,8 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
-        &Mutex::new(0_u32),
-            &Mutex::new(None),
+        &ThreadOpenState::default(),
+                &Mutex::new(None),
             &mut stream_state,
         );
 
@@ -4090,8 +4238,8 @@ Stay in exploration mode.
             &goal_rpcs,
             &goal_commands,
             &event_tx,
-            &Mutex::new(0_u32),
-            &Mutex::new(None),
+            &ThreadOpenState::default(),
+                &Mutex::new(None),
             &mut stream_state,
         );
 
