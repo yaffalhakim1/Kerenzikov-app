@@ -12,6 +12,49 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.66]
+
+### Desktop, web and Android
+
+- **A failed task now offers a way forward instead of a dead end.** When a
+  provider stopped before it could run a turn, the error was all you got: the
+  only recovery was to retype the prompt. The composer now shows **Reload**,
+  which rebuilds the connection to the agent while leaving the conversation
+  where it is, and **Try again**, which runs your last message once more.
+
+- **Fixed: a follow-up queued on one device could be lost by another.** Queue a
+  message from your phone and then save from the desktop, and the phone's
+  message disappeared — the two devices each kept their own view of the queue
+  and the later one won. Queued messages now merge, so a follow-up survives
+  whichever device wrote last.
+
+- **Fixed: Stop did not stop the next queued message.** Pressing Stop during a
+  turn halted the turn but still ran the message waiting behind it, which is
+  the opposite of what Stop means. Stopping now holds the queue until you send
+  something yourself.
+
+- **Fixed: a follow-up could be stranded when the device that queued it went
+  away.** The agent decided whether it was busy by asking the app, so a device
+  that disconnected mid-turn left the queue waiting on a reply that never came.
+  The agent now tracks its own state and starts the queued message the moment
+  the turn ends, whether or not any device is still watching.
+
+- **Fixed: Oh My Pi rejected a message sent while it was working.** Sending
+  mid-turn surfaced "Agent is already processing" instead of delivering the
+  message. It is now handed to the running turn as a follow-up, the way Oh My
+  Pi expects.
+
+- **Fixed: Codex could report "did not finish opening its thread".** Starting a
+  task while Codex was still shutting down its previous session failed with
+  that message and left the task stuck. The retry now happens where it can
+  actually take effect.
+
+- **Fixed: OpenCode stopped starting after upgrading to OpenCode 2.** The
+  failure read "failed to start `opencode serve`: The system cannot find the
+  file specified", which named neither the cause nor the fix. OpenCode 2 serves
+  a different API, so the error now says so and tells you which provider to use
+  or which build to install.
+
 ## [0.1.65]
 
 ### Android
