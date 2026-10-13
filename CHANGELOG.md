@@ -12,6 +12,19 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.63]
+
+### Android
+
+- **Fixed: the app closed itself while a response was streaming.** Since the
+  PanelUI reskin, a turn that streamed text could kill the app outright — no
+  error, no log, just a return to the home screen and a fresh launch. The
+  streaming fade was handing React Native's easing function to the animation
+  runtime, which runs on the UI thread, where a plain JavaScript function
+  cannot be called; the runtime aborted the process instead of throwing. It is
+  the same failure 0.1.61 and 0.1.62 were trying to catch. The fade now uses
+  Reanimated's own easing, and a streamed response runs to the end.
+
 ## [0.1.62]
 
 ### Android
