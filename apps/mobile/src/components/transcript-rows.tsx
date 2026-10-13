@@ -398,13 +398,26 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
   );
 }
 
-/** Sits above the oldest mounted row while more history exists; the window
- * extends ahead of the reader so this is rarely on screen for long. */
+/**
+ * Sits above the oldest mounted row while more history exists; the window
+ * extends ahead of the reader so this is rarely on screen for long.
+ *
+ * Static, not spinning. This is a *positional* hint — "there is more above" —
+ * and the rows it stands for arrive on their own when the reader scrolls near
+ * it, so nothing is being waited on. A loop here is not free: this mounts for
+ * every transcript longer than the initial window (more than 40 rows), which is
+ * every real session, and an infinite animation keeps the whole screen
+ * compositing forever. Measured on an emulator: a 541-message session sat at a
+ * continuous 61 fps with nothing streaming, and the same session's first
+ * extension left it at 0. `speed={0}` is `Loader`'s own switch for exactly
+ * this — `animate` goes false and the variant draws its representative still
+ * frame.
+ */
 export function EarlierIndicator() {
   const theme = useTheme();
   return (
-    <View accessibilityLabel="Loading earlier messages" style={styles.earlier}>
-      <Blocks color={theme.accent} size={14} />
+    <View accessibilityLabel="Earlier messages above" style={styles.earlier}>
+      <Blocks color={theme.textTertiary} size={14} speed={0} />
     </View>
   );
 }
