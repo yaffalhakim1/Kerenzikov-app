@@ -15,6 +15,7 @@ import {
 import { AppState, Platform, type AppStateStatus } from "react-native";
 
 import { daemonKeys, registerPushToken } from "./daemon-api";
+import { flushNow, recordBreadcrumb } from "./error-log";
 import { hydratePersistentStorage } from "./composer-preferences-store";
 import { DaemonLink, type DaemonOutage } from "./daemon-link";
 import { androidChannelId, cachedPushToken } from "./push-notifications";
@@ -342,6 +343,15 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       linkRef.current?.setActive(inForeground(state));
       const client = clientRef.current;
       if (client) void syncPushRegistration(client, inForeground(state));
+      /*
+       * Recorded because this is the one signal that separates the two causes
+       * of a screen that vanishes with no error: a JS throw (caught and logged)
+       * and the OS killing the process (not). If the trail ends on `background`
+       * and never resumes, the app was suspended or reclaimed; if it ends on
+       * `active` mid-turn, something in the app closed it.
+       */
+      recordBreadcrumb("appState", state);
+      flushNow();
     });
     return () => subscription.remove();
   }, []);

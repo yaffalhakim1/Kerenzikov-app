@@ -53,6 +53,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSession, useTaskState } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
 import { useDaemon } from '@/lib/daemon-context';
+import { recordBreadcrumb } from '@/lib/error-log';
 import { sessionBusy } from '@/lib/mobile-runtime';
 import { useRuntime } from '@/lib/runtime-context';
 import { displaySessionTitle, turnOptionsForSession } from '@/lib/session-presentation';
@@ -166,6 +167,28 @@ export function SessionView({
     // Re-runs when the session starts working (another client may have
     // started the runtime after this screen mounted).
   }, [daemon.phase, runtime.attachSession, session?.id, running]);
+
+  /*
+   * The trail for a death that reports nothing.
+   *
+   * A screen that closes with no error and no crash report did not throw —
+   * a throw is caught and written down. So the evidence has to be the steps
+   * before it, and the two transitions that bracket this failure are a turn
+   * starting and a turn finishing. `status` is included because `background`
+   * and `failed` are the daemon's own words for states this screen cannot see
+   * otherwise.
+   */
+  useEffect(() => {
+    if (!session) return;
+    recordBreadcrumb('session', 'status', {
+      running,
+      sessionId: session.id,
+      status: session.status,
+    });
+    // Only the transitions matter; `session` itself changes on every stream
+    // commit, and a breadcrumb per commit would bury the trail it exists for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, session?.id, session?.status]);
 
   // Transient task chrome belongs to one session. A route reuse must not show
   // the previous task's file, review, or terminal surface.

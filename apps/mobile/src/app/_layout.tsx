@@ -8,6 +8,7 @@ import {
   ThemeProvider,
   type NativeStackNavigationOptions,
 } from "expo-router";
+import Constants from "expo-constants";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -33,6 +34,7 @@ import {
   showNotificationsInForeground,
 } from "@/lib/push-notifications";
 import { useNotificationDeepLink } from "@/hooks/use-notification-deep-link";
+import { flushNow, recordBreadcrumb } from "@/lib/error-log";
 import {
   installGlobalErrorLogging,
   installUnhandledRejectionLogging,
@@ -86,6 +88,18 @@ export default function RootLayout() {
   useEffect(() => {
     installGlobalErrorLogging();
     installUnhandledRejectionLogging();
+    /*
+     * A launch marker, written before anything else can fail.
+     *
+     * A report that ends mid-turn and begins with this line is a screen that
+     * died and was reopened; a report that ends mid-turn with no later launch
+     * is a process that never came back. Either way the last entry before the
+     * gap is the state the app was in when it went.
+     */
+    recordBreadcrumb('lifecycle', 'launch', {
+      version: Constants.expoConfig?.version ?? null,
+    });
+    flushNow();
   }, []);
   useNotificationDeepLink();
   return (

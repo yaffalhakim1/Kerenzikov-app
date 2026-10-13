@@ -204,6 +204,34 @@ export function flushNow(): void {
   }
 }
 
+/**
+ * Leave a trail of what the app was doing, so a death with no error still says
+ * something.
+ *
+ * The failure this exists for is a screen that closes with no error and no
+ * crash report. That is not a throw — a throw is caught and logged — so the
+ * evidence has to come from the steps *before* it. Breadcrumbs are written on
+ * the transitions that matter (a turn starting, a turn finishing, the app
+ * going to the background, a route change), and the last one before the log
+ * stops is the answer.
+ *
+ * Kept to `info` level and flushed with everything else, so a report shows them
+ * interleaved with any real errors in the order they happened.
+ */
+export function recordBreadcrumb(scope: string, message: string, extra?: Record<string, unknown>): void {
+  try {
+    queue({
+      at: Date.now(),
+      level: 'info',
+      scope,
+      message,
+      extra,
+    });
+  } catch {
+    // A breadcrumb must never be the reason something breaks.
+  }
+}
+
 /** The whole log, oldest first. Empty when nothing has been recorded. */
 export function readLog(): string {
   flush();
