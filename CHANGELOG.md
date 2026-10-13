@@ -12,6 +12,18 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.65]
+
+### Android
+
+- **Fixed: the app stayed busy the whole time a long task was open.** A session
+  with more than a screenful of history kept redrawing at full rate with
+  nothing happening — the mark above the oldest message was a spinner, and it
+  spun for as long as the screen was open. It is a position rather than
+  progress, so it no longer animates. On a 541-message session this takes the
+  screen from a permanent 61 fps and a pegged render thread to idle, which is
+  what makes a long task feel stuck.
+
 ## [0.1.64]
 
 ### Android
