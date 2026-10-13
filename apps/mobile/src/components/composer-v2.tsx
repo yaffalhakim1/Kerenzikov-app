@@ -63,10 +63,14 @@ import { useRuntime } from '@/lib/runtime-context';
 export function ComposerV2({
   session,
   onSubmitted,
+  devError,
 }: {
   session: AgentSession;
   /** Fires as the submission begins, so the transcript can pin to the tail. */
   onSubmitted?: () => void;
+  /** Dev-only: renders as the composer's error so the state can be inspected
+   * without staging a real failure. Wins over a real error while set. */
+  devError?: string;
 }) {
   const theme = useTheme();
   const runtime = useRuntime();
@@ -122,7 +126,8 @@ export function ComposerV2({
   // A disconnect error is the connection banner's to report, not the
   // composer's — showing both says the same thing twice.
   const visibleError =
-    (disconnected && isDaemonDisconnectError(localError) ? null : localError)
+    devError
+    || (disconnected && isDaemonDisconnectError(localError) ? null : localError)
     || (disconnected && isDaemonDisconnectError(runtimeError) ? null : runtimeError);
 
   const taskState = useTaskState();

@@ -109,11 +109,16 @@ const composerV2 = Constants.expoConfig?.extra?.composerV2 === true;
 export function SessionView({
   sessionId,
   devPrompt,
+  devError,
 }: {
   sessionId: string | undefined;
   /** Dev-only: auto-submit this prompt through the composer path once the
    * session loads — lets headless rigs exercise the exact user flow. */
   devPrompt?: string;
+  /** Dev-only: show this text as the composer's error, so the error state can
+   * be looked at without staging a real failure. Reach it with
+   * `?devError=...` on a session route. */
+  devError?: string;
 }) {
   const theme = useTheme();
   const scheme = useColorScheme();
@@ -554,6 +559,7 @@ export function SessionView({
       {session && (
         composerV2 ? (
           <ComposerV2
+            devError={devError}
             key={`composer-v2:${session.id}`}
             onSubmitted={() => listRef.current?.followNextGrowth()}
             session={session}
