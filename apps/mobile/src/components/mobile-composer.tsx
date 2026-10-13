@@ -303,15 +303,27 @@ export function SendStopSlot({
         <Animated.View
           pointerEvents={stopShown ? 'auto' : 'none'}
           style={[styles.sendSlotChild, stopStyle]}>
+          {/*
+            `h-9 w-9` because the slot is 36pt and `size="icon"` is a 44pt box —
+            it overflowed its own container by 8pt on every side. `shadow-none`
+            because `destructive` is the one variant that carries a shadow, and
+            against the ghost Send it crossfades with that read as the heavier
+            control. The two are one slot, so they are one box.
+          */}
           <Button
             accessibilityLabel="Stop agent"
+            className="h-9 w-9 shadow-none"
             onPress={onStop}
             size="icon"
             variant="destructive"
           >
             <AppSymbol
               name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
-              size={14}
+              // 18, not the 14 it was: the two controls share a slot, and a
+              // 14pt square in a 36pt circle reads as a smaller control than
+              // the 19pt Send arrow beside it. The desktop's stop glyph is 18
+              // in its 26pt circle, which is the same proportion this lands on.
+              size={18}
               tintColor={theme.danger}
             />
           </Button>

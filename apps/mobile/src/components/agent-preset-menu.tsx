@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { AppSymbol } from './app-symbol';
 import type { AgentPresetMenuProps } from './agent-preset-menu.types';
 import { AgentPresetSheet } from './session-option-sheets';
+import { AIInput } from 'panelui-native/components/ai-input';
 import { Button } from 'panelui-native/components/button';
 import { Chip } from 'panelui-native/components/chip';
 import { Text } from 'panelui-native/primitives/text';
@@ -32,7 +33,19 @@ export function AgentPresetMenu({
 
   return (
     <>
-      {inline ? (
+      {variant === 'icon' ? (
+        /*
+          The composer's own round action, so this reads as one of the toolbar
+          controls rather than as a labelled chip. `AIInput.Action` brings the
+          circle, the muted fill and the press feedback, which is what keeps it
+          identical to the reasoning button beside it.
+        */
+        <AIInput.Action
+          icon={<AppSymbol name={PERSON_ICON} size={15} tintColor={theme.textSecondary} />}
+          label={`Agent preset, ${label}`}
+          onPress={() => setOpen(true)}
+        />
+      ) : inline ? (
         // The composer header's inline name: a borderless, brand-tinted action
         // beside the model chip. A ghost `Button` trimmed back to its label, so
         // the header keeps the height it had while the press feedback and the

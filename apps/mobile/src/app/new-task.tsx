@@ -626,9 +626,10 @@ export default function NewTaskScreen() {
         header={provider && supportsAgentPreset && agentPresets.length > 0 && !submitting ? (
           // The agent preset is the one control the session composer has no
           // equivalent for — it is chosen here, and fixed for the session's
-          // life. It stays in the header so the toolbar below stays identical
-          // to the session screen's.
-          <View className="flex-row items-center gap-2 px-1 pb-1">
+          // life. It sits at the card's top-left as a round action, matching
+          // the toolbar's other controls, so the header costs one row of
+          // nothing else.
+          <View className="flex-row items-center px-1 pb-1 pt-1.5" style={styles.agentPicker}>
             <AgentPresetMenu
               agentPreset={agentPreset}
               onApply={(selection) => {
@@ -636,7 +637,7 @@ export default function NewTaskScreen() {
                 setAgentPreset(selection.agentPreset);
               }}
               provider={provider}
-              variant="inline"
+              variant="icon"
             />
           </View>
         ) : undefined}
@@ -871,6 +872,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   rows: { gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three },
+  // A nudge in from the card's corner: the round action sits on the field's
+  // own inset, which is tighter than a circle wants against the edge.
+  agentPicker: { marginLeft: 2, marginTop: 2 },
   error: { borderRadius: Radius.medium, marginBottom: 8, padding: 11 },
   errorText: { fontSize: 12.5, fontWeight: '600', lineHeight: 17 },
   sheetLoading: { alignItems: 'center', paddingVertical: 14 },

@@ -18,9 +18,8 @@ import type {
 } from 'mdast';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useState, type ReactNode } from 'react';
 import {
-  Animated,
   Dimensions,
   Easing,
   Image,
@@ -32,6 +31,11 @@ import {
   type TextStyle,
   type ViewStyle,
 } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { ScrollView as GestureScrollView } from 'react-native-gesture-handler';
 import { CodeBlock } from 'panelui-native/components/code-block';
 import { Button } from 'panelui-native/components/button';
@@ -64,21 +68,25 @@ export function VeilFade({
   remainingMs: number;
   children: ReactNode;
 }) {
-  const value = useRef(new Animated.Value(opacity)).current;
+  const value = useSharedValue(opacity);
   useEffect(() => {
-    Animated.timing(value, {
-      toValue: 1,
+    // Reanimated rather than core `Animated`: PanelUI's performance rules
+    // forbid the core API alongside the library, because its listeners and
+    // JS-side `setValue` put animation back on the JavaScript thread. This is
+    // the hottest fade in the app — one per veil span, on every streamed
+    // token — so it is the last place to keep a JS-thread path.
+    value.value = withTiming(1, {
       duration: Math.max(1, remainingMs),
       // The same curve `veilOpacity` applies: 1 - (1 - t) ^ VEIL_CURVE_POW.
       easing: Easing.out(Easing.poly(VEIL_CURVE_POW)),
-      useNativeDriver: true,
-    }).start();
+    });
     // Mount-only by design; see above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const style = useAnimatedStyle(() => ({ opacity: value.value }));
   // RN's text attributes multiply foreground *and* background alpha by this,
   // which is exactly what the previous inline `applyAlpha` pair did.
-  return <Animated.Text style={{ opacity: value }}>{children}</Animated.Text>;
+  return <Animated.Text style={style}>{children}</Animated.Text>;
 }
 
 export interface MarkdownStyles {
