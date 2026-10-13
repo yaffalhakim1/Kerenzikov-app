@@ -8,7 +8,6 @@ import type {
 } from '@waku/client';
 import { Alert } from 'panelui-native/components/alert';
 import { Button } from 'panelui-native/components/button';
-import { Item } from 'panelui-native/components/item';
 import { SearchBar } from 'panelui-native/components/search-bar';
 import { Typography } from 'panelui-native/components/typography';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';

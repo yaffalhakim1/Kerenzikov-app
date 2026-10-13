@@ -10,7 +10,7 @@ import { Item } from 'panelui-native/components/item';
 import { Task } from 'panelui-native/components/task';
 import type { TaskStatus } from 'panelui-native/components/task';
 import { memo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { useTheme } from '@/hooks/use-theme';
