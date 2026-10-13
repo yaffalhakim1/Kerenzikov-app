@@ -12,6 +12,16 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.62]
+
+### Android
+
+- **The task screen records what it was doing before it disappears.** When the
+  screen closes itself with nothing to report, the app now leaves a trail of
+  the moments that led up to it — the turn starting or finishing, and the app
+  being backgrounded — so the cause can be found and fixed. Send the log from
+  Settings → Diagnostics as before.
+
 ## [0.1.61]
 
 ### Android
