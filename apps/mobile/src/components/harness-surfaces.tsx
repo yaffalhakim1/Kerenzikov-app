@@ -56,30 +56,24 @@ export const TodoStrip = memo(function TodoStrip({ todos }: { todos: TodoItem[] 
       defaultOpen={!collapsed}
       onOpenChange={(open) => setCollapsed(!open)}
     >
-      {/* The whole header row is the fold target. `Plan.Header` is a plain
-          View, so the pressable has to be `Plan.Trigger`; wrapping the row
-          keeps the icon, title and progress inside it and makes the entire
-          strip tappable rather than just the chevron. */}
-      <Plan.Trigger className="p-0">
-        <Plan.Header className="p-3">
-          <Plan.Icon>
-            <AppSymbol
-              name={{ ios: 'list.bullet', android: 'format_list_bulleted', web: 'format_list_bulleted' }}
-              size={15}
-              tintColor={theme.textTertiary}
-            />
-          </Plan.Icon>
-          <Plan.Title>Tasks</Plan.Title>
-          <Plan.Action>
-            <Plan.Progress value={done} total={total} />
-            <AppSymbol
-              name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
-              size={14}
-              tintColor={theme.textTertiary}
-            />
-          </Plan.Action>
-        </Plan.Header>
-      </Plan.Trigger>
+      <Plan.Header className="p-3">
+        <Plan.Icon>
+          <AppSymbol
+            name={{ ios: 'list.bullet', android: 'format_list_bulleted', web: 'format_list_bulleted' }}
+            size={15}
+            tintColor={theme.textTertiary}
+          />
+        </Plan.Icon>
+        <Plan.Title>Tasks</Plan.Title>
+        <Plan.Action>
+          <Plan.Progress value={done} total={total} />
+          {/* `Plan.Trigger` is the fold control, and its slot is a 32pt circle
+              built to hold a chevron — wrapping the header in it would crush
+              the row into that circle. So it sits in the action slot, where it
+              belongs, and the header keeps its own layout. */}
+          <Plan.Trigger />
+        </Plan.Action>
+      </Plan.Header>
       <Plan.Content>
         <Plan.Steps>
           {hiddenBefore > 0 ? (
