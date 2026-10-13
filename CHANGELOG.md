@@ -12,6 +12,24 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.64]
+
+### Android
+
+- **The model's thinking now has its own panel, above the steps it produced.**
+  Reasoning used to render inside the same row as the tool group, so the row
+  ran two animations at once — the group's title shimmering while the trace
+  grew underneath it. That is why the header could read as blank for the whole
+  run and only correct itself once the turn finished. The trace is now a
+  `Reasoning` panel of its own, which opens while the thinking arrives and
+  folds away a beat after it stops, and the steps stay in the task group below
+  it. The header also names what is happening instead of drawing nothing when a
+  step has not reported its title yet.
+- **Fixed: a screen that could fail while a response was streaming.** A
+  transcript row that gained its fade-in mid-stream could abort the screen with
+  "Rendered fewer hooks than expected". Every row now animates the same way on
+  every render.
+
 ## [0.1.63]
 
 ### Android
