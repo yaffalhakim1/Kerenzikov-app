@@ -12,6 +12,28 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.70]
+
+### Desktop
+
+- **You can now pick an agent's program with a file dialog instead of typing
+  its path.** The path box asked for an exact location, including the extension
+  — which is easy to get wrong, because the same agent ships as `.exe` for one
+  install and `.cmd` for another. A **Browse…** button now opens the usual file
+  picker and fills the box for you. This is also the way back when the app
+  cannot find an agent you know is installed.
+
+- **Fixed: a slow or stuck agent program could freeze the Providers page.** The
+  app asked each agent for its version without a time limit, so one that never
+  answered left the page waiting indefinitely and the list half-filled. Asking
+  is now capped, so an unresponsive program costs that one row instead of the
+  whole page.
+
+- **The "timed out" message now says what it was waiting for.** It read only
+  "timed out waiting for Kerenzikov daemon", which named neither the operation
+  nor how long it waited — so there was no way to tell what had gone wrong. It
+  now names the operation and the time.
+
 ## [0.1.69]
 
 ### Desktop
