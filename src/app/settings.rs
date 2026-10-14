@@ -2203,6 +2203,30 @@ impl Waku {
                 this.apply_provider_path_override(cx);
             }));
 
+        let browse = div()
+            .id(SharedString::from(format!(
+                "provider-path-browse-{}",
+                kind.id()
+            )))
+            .tab_index(0)
+            .focus_visible(|style| style.border_color(theme.accent))
+            .h(px(29.0))
+            .px(px(10.0))
+            .rounded(px(7.0))
+            .border_1()
+            .border_color(theme.border_strong)
+            .flex()
+            .flex_none()
+            .items_center()
+            .cursor_default()
+            .text_size(sp(12.5))
+            .text_color(theme.text_secondary)
+            .hover(|element| element.bg(theme.overlay))
+            .child(tr!("common.browse"))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.browse_provider_binary(cx);
+            }));
+
         let helper_row = div()
             .mt(px(8.0))
             .flex()
@@ -2383,7 +2407,8 @@ impl Waku {
                         .flex_1()
                         .max_w(px(430.0)),
                     )
-                    .when(override_value.is_some(), |element| element.child(reset)),
+                    .when(override_value.is_some(), |element| element.child(reset))
+                    .child(browse),
             )
             .child(
                 div()
@@ -2472,6 +2497,48 @@ impl Waku {
         self.refresh_provider_detection(Some(provider));
         self.refresh_composer_sources(cx);
         cx.notify();
+    }
+
+    /// Pick a provider's executable with the system file dialog.
+    ///
+    /// The text field can already take a path, but a path has to be known and
+    /// typed exactly — including the launcher's extension, which is easy to get
+    /// wrong on Windows (`.exe` vs `.cmd` vs the extensionless npm shim). The
+    /// picker removes that guesswork, and it is the way back when detection
+    /// cannot find a CLI the user knows is installed.
+    pub(super) fn browse_provider_binary(&mut self, cx: &mut Context<Self>) {
+        let Some(provider) = self.expanded_provider_settings else {
+            return;
+        };
+        // A path chosen here is a host path, and the daemon runs on this host.
+        // For a remote daemon the picker would name a file it cannot see, so
+        // say so rather than storing a path that can never resolve.
+        if self.daemon.is_remote() {
+            self.show_toast(tr!("errors.remote_binary_picker"));
+            cx.notify();
+            return;
+        }
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(
+                tr!("providers.choose_binary", provider = provider.short_name()).into(),
+            ),
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = receiver.await
+                && let Some(path) = paths.into_iter().next()
+                && let Some(path) = path.to_str()
+            {
+                let _ = this.update(cx, |this, cx| {
+                    this.provider_path_input
+                        .update(cx, |input, cx| input.set_content(path.to_owned(), cx));
+                    this.apply_provider_path_override(cx);
+                });
+            }
+        })
+        .detach();
     }
 
     /// Commit the helper-model edit for the expanded provider: empty means the
