@@ -1,6 +1,7 @@
 //! Daemon-only provider discovery layered over shared protocol models.
 
 use std::path::Path;
+use std::time::Duration;
 
 pub use waku_protocol::model::*;
 
@@ -61,10 +62,16 @@ pub fn discover_provider_models(mut probe: ProviderProbe) -> ProviderProbe {
 /// Run `<cli> --version` on the daemon host and extract its first version-like
 /// token. Provider CLIs decorate this output differently, so clients receive a
 /// normalized value rather than subprocess output.
+///
+/// Bounded, because this is a third-party binary: a CLI that waits on a lock, a
+/// prompt, or a network call would otherwise hang the daemon request that asked
+/// for it, and the client's request timeout would surface as a bare "timed out"
+/// with no way to tell which provider stalled.
 pub fn probe_provider_version(binary: &Path) -> Option<String> {
+    const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
     let mut command = crate::command_env::command(binary);
     let command = command.arg("--version").stdin(std::process::Stdio::null());
-    let output = crate::command_env::output(command).ok()?;
+    let output = crate::command_env::output_with_timeout(command, VERSION_PROBE_TIMEOUT).ok()?;
     let combined = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),

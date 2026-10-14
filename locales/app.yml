@@ -418,6 +418,8 @@ common.recheck:
   en: Recheck
 common.reset:
   en: Reset
+common.browse:
+  en: Browse…
 common.revoke:
   en: Revoke
 common.retry:
@@ -478,6 +480,8 @@ providers.binary_path:
   en: Binary path
 providers.binary_path_description:
   en: The executable Kerenzikov launches for %{provider}. Press Return to apply; leave empty to detect from PATH
+providers.choose_binary:
+  en: Choose the %{provider} executable
 providers.checked_just_now:
   en: Checked just now
 providers.checked_minutes_ago:
@@ -1368,6 +1372,8 @@ project.add_project:
   en: Add project
 errors.remote_project_picker:
   en: Adding a daemon-host project needs a remote path picker, which is not available yet
+errors.remote_binary_picker:
+  en: Choosing a provider executable needs a path picker on the daemon host, which is not available yet
 
 session.stopped:
   en: Stopped

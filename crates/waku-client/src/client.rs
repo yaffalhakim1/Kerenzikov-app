@@ -189,6 +189,13 @@ impl DaemonClient {
             runtime_id,
             command,
         });
+        // Captured before the command moves into the message: a timeout is the
+        // one failure the user sees with no other context, so the message names
+        // the operation that stalled instead of leaving them to guess.
+        let operation = match &message {
+            ClientMessage::Request(request) => request.command.name(),
+            _ => "request".to_owned(),
+        };
         if self
             .inner
             .outgoing
@@ -203,7 +210,10 @@ impl DaemonClient {
             Ok(Err(error)) => Err(anyhow!(error.message)),
             Err(error) => {
                 self.inner.pending.lock().remove(&request_id);
-                Err(anyhow!("timed out waiting for Kerenzikov daemon: {error}"))
+                Err(anyhow!(
+                    "timed out after {:?} waiting for Kerenzikov daemon to answer `{operation}`: {error}",
+                    REQUEST_TIMEOUT
+                ))
             }
         }
     }
