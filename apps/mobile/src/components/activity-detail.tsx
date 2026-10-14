@@ -6,7 +6,7 @@ import {
   reasoningTitle,
 } from '@waku/client/transcript-presentation';
 import { Task } from 'panelui-native/components/task';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { ACTIVITY_ICONS } from './activity-icons';
@@ -31,17 +31,36 @@ import { RowVeil, splitRunAtSpans } from '@/md/veil';
  */
 export function ActivityDetail({ activity }: { activity: ActivityItem }) {
   const theme = useTheme();
-  const reasoning = activity.reasoning ? activity.reasoning.content.trim() : '';
-  const sections = activity.reasoning ? [] : activityDisclosureSections(activity);
-  const changes = activity.file_changes ?? [];
-  const images = activity.image_urls ?? [];
   const title = activity.reasoning
     ? reasoningTitle(activity)
     : activityDisplayTitle(activity);
   const status = activity.failed ? 'error' : activity.complete ? 'complete' : 'running';
 
+  /*
+   * Closed by default, and the body is not built until it is opened.
+   *
+   * PanelUI's own `Task` note is the rule here: "The header is the step; the
+   * body is the detail nobody reads unless something went wrong." This used to
+   * pass `defaultOpen` unconditionally, so every step drew its whole body - and
+   * a real transcript is not a handful of steps. One measured session held 348
+   * activity groups carrying 1.3M characters of command output, 628K of
+   * reasoning and 425K of arguments, with a single group holding 108 commands.
+   *
+   * Collapsing alone did not help, twice over: `Task.Content` feeds a
+   * `Collapse`, which keeps its children mounted and animates only the clip
+   * height, and the derivation above it (`activityDisclosureSections` trims and
+   * hands back the full output and arguments) ran whether or not anything was
+   * drawn. So the body lives in `ActivityBody`, which is not mounted until the
+   * step is open. A closed step is one row: a title, an icon and a chevron.
+   *
+   * `Collapse`'s "do not unmount the body" advice is about a body that is still
+   * streaming or that the reader has scrolled to; a command's settled output is
+   * neither, so rebuilding it on open is the cheaper trade.
+   */
+  const [open, setOpen] = useState(activity.failed || status === 'running');
+
   return (
-    <Task defaultOpen status={status}>
+    <Task open={open} onOpenChange={setOpen} status={status}>
       <Task.Trigger
         icon={
           <AppSymbol
@@ -52,36 +71,52 @@ export function ActivityDetail({ activity }: { activity: ActivityItem }) {
         }
         title={title}
       />
-      <Task.Content>
-        {activity.reasoning ? (
-          <ReasoningText content={plainReasoning(reasoning)} live={!activity.complete} />
-        ) : (
-          <>
-            <ActivityStatus activity={activity} />
-            {sections.map((section) => (
-              <DetailSection
-                content={section.content}
-                key={section.kind}
-                label={section.label}
-                mono={section.kind !== 'detail'}
-              />
-            ))}
-            {changes.map((change) => (
-              <FileChange change={change} key={change.path} />
-            ))}
-            {images.map((url, index) => (
-              <Image
-                accessibilityIgnoresInvertColors
-                key={index}
-                resizeMode="contain"
-                source={{ uri: url }}
-                style={[styles.image, { backgroundColor: theme.inset }]}
-              />
-            ))}
-          </>
-        )}
-      </Task.Content>
+      <Task.Content>{open ? <ActivityBody activity={activity} /> : null}</Task.Content>
     </Task>
+  );
+}
+
+/**
+ * Everything a step's body needs, and nothing until it is shown.
+ *
+ * Separate from `ActivityDetail` so the trimming, bounding and reasoning
+ * cleanup run only for the step the reader opened rather than for every step in
+ * the transcript. See the note on `ActivityDetail` for what that cost.
+ */
+function ActivityBody({ activity }: { activity: ActivityItem }) {
+  const theme = useTheme();
+  const changes = activity.file_changes ?? [];
+  const images = activity.image_urls ?? [];
+
+  if (activity.reasoning) {
+    const reasoning = activity.reasoning.content.trim();
+    return <ReasoningText content={plainReasoning(reasoning)} live={!activity.complete} />;
+  }
+
+  return (
+    <>
+      <ActivityStatus activity={activity} />
+      {activityDisclosureSections(activity).map((section) => (
+        <DetailSection
+          content={section.content}
+          key={section.kind}
+          label={section.label}
+          mono={section.kind !== 'detail'}
+        />
+      ))}
+      {changes.map((change) => (
+        <FileChange change={change} key={change.path} />
+      ))}
+      {images.map((url, index) => (
+        <Image
+          accessibilityIgnoresInvertColors
+          key={index}
+          resizeMode="contain"
+          source={{ uri: url }}
+          style={[styles.image, { backgroundColor: theme.inset }]}
+        />
+      ))}
+    </>
   );
 }
 
@@ -123,6 +158,20 @@ function ActivityStatus({ activity }: { activity: ActivityItem }) {
   return null;
 }
 
+/**
+ * One labelled block of a step's detail: the command, its output, its arguments.
+ *
+ * Deliberately not a nested `Task`. It was one, so every section cost another
+ * `Collapse` with its own shared value, an `Animated.View`, a `Pressable` and an
+ * SVG chevron - on top of the step's own `Task` and the group's above it. A
+ * step with a command and an output therefore built three nested `Task`s, and a
+ * window of steps built them by the hundred: measured on a real session, 743
+ * views in the hierarchy and a stall of about a second when the screen opened,
+ * with the JS side accounting for only ~100ms of it.
+ *
+ * A section has no state of its own to fold - the step above it is the thing
+ * that opens and closes - so the label is just a heading.
+ */
 function DetailSection({
   label,
   content,
@@ -133,25 +182,24 @@ function DetailSection({
   mono: boolean;
 }) {
   const theme = useTheme();
+  if (!content) return null;
   return (
-    <Task defaultOpen>
-      <Task.Trigger title={label ?? 'Detail'} />
-      <Task.Content>
-        {content ? (
-          mono ? (
-            <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
-              <Text selectable style={[styles.monoText, { color: theme.textSecondary }]}>
-                {boundedText(content)}
-              </Text>
-            </View>
-          ) : (
-            <Text selectable style={[styles.bodyText, { color: theme.textSecondary }]}>
-              {boundedText(content)}
-            </Text>
-          )
-        ) : null}
-      </Task.Content>
-    </Task>
+    <View style={styles.section}>
+      {label ? (
+        <Text style={[styles.sectionLabel, { color: theme.textTertiary }]}>{label}</Text>
+      ) : null}
+      {mono ? (
+        <View style={[styles.well, { backgroundColor: theme.inset, borderColor: theme.border }]}>
+          <Text selectable style={[styles.monoText, { color: theme.textSecondary }]}>
+            {boundedText(content)}
+          </Text>
+        </View>
+      ) : (
+        <Text selectable style={[styles.bodyText, { color: theme.textSecondary }]}>
+          {boundedText(content)}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -237,6 +285,8 @@ const styles = StyleSheet.create({
   },
   monoText: { fontFamily: MonoFont, fontSize: 12, lineHeight: 17.5 },
   bodyText: { fontSize: 14.5, lineHeight: 21 },
+  section: { gap: 6 },
+  sectionLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.4, textTransform: 'uppercase' },
   fileChange: { gap: 8 },
   fileRow: { alignItems: 'center', flexDirection: 'row', gap: 8, minHeight: 24 },
   statusDot: { borderRadius: 3, height: 6, width: 6 },

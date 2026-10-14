@@ -159,6 +159,67 @@ it, and the closing `**` does not reflow text already on screen. `displayTail()`
 caches against the source, so it only recomputes when the text changed. This is a
 port of the desktop's `md/mend.rs`; keep the two in step.
 
+**A step's body is built when it is opened, not before.** One nested `Task` per
+activity is the budget; a section inside it is not another `Task`. See
+[the activity surface](#the-activity-surface-what-one-long-task-cost) below for
+why, and for the measurement that found it.
+
+---
+
+## The activity surface: what one long task cost
+
+A reader reported that one task took ~11 s to open and then closed the app. The
+cause was not where any of us looked first. It is worth writing down because the
+wrong answers were all plausible, and only measurement separated them.
+
+**The mechanism.** `ActivityDetail` renders one row per tool call inside a
+group's `Task`. It passed `defaultOpen` unconditionally, and `DetailSection`
+wrapped every section — the command, its output, its arguments — in *another*
+full `Task`. So one step with a command and an output built three nested `Task`s,
+each carrying a `Collapse` with its own shared value, an `Animated.View`, a
+`Pressable` and an SVG chevron. A real transcript multiplies that: the measured
+session held 390 activity groups, 977 activities, 1.3M characters of command
+output, 628K of reasoning and 425K of arguments, with a single group holding 108
+commands. The window mounts 40 rows, and those rows expanded into **743 views**.
+
+Creating 743 views in one commit is what stalled the UI thread, and a stall long
+enough on the main thread is an ANR — which is the "force close".
+
+**The measurements.** Release build, x86_64 emulator, opening the same session:
+
+| | before | after |
+| --- | --- | --- |
+| time to interactive | 11 163 ms | 3 774 ms |
+| worst frame (`Davey! duration=`) | 6 444 ms | none logged |
+| views in the hierarchy | 743 | 85 |
+
+**What the wrong answers were, and what disproved each.**
+
+- *The hydrate payload.* A 4.9 MB / 31-message session opened in 3.4 s while a
+  1.5 MB / 541-message one took 11.2 s. It tracks rows, not bytes.
+- *`buildTranscriptPipeline`.* 0.20 ms/call on 541 messages, and the on-device
+  instrumentation put the whole derivation at 2 ms. The pipeline is per message
+  and linear, as the section above says; it was never the problem.
+- *Rendering the bodies.* Passing `defaultOpen={false}` changed nothing, because
+  `Task.Content` feeds a `Collapse` that keeps its children mounted and animates
+  only the clip height. Rendering `null` for a closed body changed nothing
+  either, because the *derivation* above it still ran — `activityDisclosureSections`
+  trims and returns the full output and arguments for every activity.
+- *The JS thread.* It was the busiest thread at first (62% while opening), which
+  is why the JS answers looked right. But instrumentation showed JS owned ~100 ms
+  of an 11 s open; the rest was the native commit.
+
+**How the cause was actually found.** Three hypotheses were falsified, so the
+guessing stopped and the render path was instrumented directly: `recordBreadcrumb`
+at each derivation phase, read back through the app's own log with `adb shell cat
+/data/data/sh.waku.mobile/files/waku-errors.log` on a rooted emulator. That split
+the open into JS (small) and everything else (large), which pointed at the view
+count. `dumpsys activity top | grep -c 'View{'` then gave the number to fix.
+
+The lesson generalises: **a stall is either work or views.** Split it with a
+counter before touching either, because the JS side is the one that is easy to
+measure and the view side is the one that usually costs.
+
 ---
 
 ## The compositor
@@ -351,6 +412,16 @@ These pieces carry weight and have tests:
   that samples it is a paint loop.
 - **The mended display tail.** `md/mend.ts` must stay in step with the desktop's
   `md/mend.rs`.
+- **One `Task` per activity, and no `Task` for a section.** `DetailSection` is a
+  plain `View` on purpose. A section has no state of its own to fold, and a
+  nested `Task` costs a `Collapse`, an `Animated.View`, a `Pressable` and an SVG
+  chevron. Three levels of them per step is what made one real task take 11 s to
+  open and then ANR; see
+  [the activity surface](#the-activity-surface-what-one-long-task-cost).
+- **A closed step builds no body.** `ActivityBody` mounts only when the step is
+  open, and `StepGroup` mounts its window of steps only when the group is open.
+  Rendering the body into a closed `Collapse` is not the same thing: `Collapse`
+  keeps children mounted.
 
 ---
 

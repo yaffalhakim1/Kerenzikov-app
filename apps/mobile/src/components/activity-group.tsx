@@ -4,7 +4,7 @@ import { activityHeaderTitle } from '@waku/client/transcript-presentation';
 import { Reasoning } from 'panelui-native/components/reasoning';
 import { Task } from 'panelui-native/components/task';
 import type { TaskStatus } from 'panelui-native/components/task';
-import { memo } from 'react';
+import { memo, useState } from 'react';
 
 import { ActivityDetail } from './activity-detail';
 
@@ -96,26 +96,46 @@ function StepGroup({ activities, live }: { activities: ActivityItem[]; live: boo
     ? 'running'
     : anyFailed ? 'error' : 'complete';
 
+  /*
+   * The steps mount with the group, not before it.
+   *
+   * `Task.Content` feeds a `Collapse`, which keeps its children mounted and
+   * animates only the clip height - so rendering the steps inside it built up
+   * to `ACTIVITY_WINDOW` nested `Task`s per group even while the group was
+   * closed. Measured on a real session: 743 views in the hierarchy and a ~1s
+   * stall on open, with the JS side accounting for only ~100ms of it. The cost
+   * is the native commit, and it scales with how many of these exist at once.
+   *
+   * So the window of steps is built only while the group is open, which is also
+   * the only time they can be seen. A closed group is one row.
+   */
+  const [open, setOpen] = useState(Boolean(activeIndex !== -1));
+
   return (
     <Task
       className="min-h-7"
-      defaultOpen={Boolean(activeIndex !== -1)}
+      open={open}
+      onOpenChange={setOpen}
       status={status}
     >
       <Task.Trigger title={activityHeaderTitle(activities, live)} />
       <Task.Content>
-        {hiddenBefore > 0 ? (
-          <Task.Item>{`${hiddenBefore} earlier`}</Task.Item>
-        ) : null}
-        {visible.map((activity) => (
-          // One disclosure per command, inside the group's own — the same
-          // gesture at both levels, and the detail stays in the transcript
-          // rather than replacing it.
-          <ActivityDetail activity={activity} key={activity.id} />
-        ))}
-        {hiddenAfter > 0 ? (
-          <Task.Item>{`${hiddenAfter} more`}</Task.Item>
-        ) : null}
+        {!open ? null : (
+          <>
+            {hiddenBefore > 0 ? (
+              <Task.Item>{`${hiddenBefore} earlier`}</Task.Item>
+            ) : null}
+            {visible.map((activity) => (
+              // One disclosure per command, inside the group's own — the same
+              // gesture at both levels, and the detail stays in the transcript
+              // rather than replacing it.
+              <ActivityDetail activity={activity} key={activity.id} />
+            ))}
+            {hiddenAfter > 0 ? (
+              <Task.Item>{`${hiddenAfter} more`}</Task.Item>
+            ) : null}
+          </>
+        )}
       </Task.Content>
     </Task>
   );
