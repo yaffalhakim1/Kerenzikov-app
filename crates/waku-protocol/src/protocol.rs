@@ -317,6 +317,25 @@ pub enum Command {
     },
 }
 
+impl Command {
+    /// The wire name of this command, for diagnostics.
+    ///
+    /// Read back from the serialized form rather than kept in a parallel table,
+    /// so it cannot drift from the tag the daemon actually receives: the value
+    /// returned here is the same string a failed request would be filed under.
+    /// Used to say *what* timed out, which a bare "timed out waiting for the
+    /// daemon" leaves the reader guessing.
+    pub fn name(&self) -> String {
+        serde_json::to_value(self)
+            .ok()
+            .as_ref()
+            .and_then(|value| value.get("type"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned()
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct WireDriverStartOptions {
@@ -661,6 +680,38 @@ mod tests {
             "01900000-0000-7000-8000-000000000001"
         );
         assert_eq!(load["cwd"], "/tmp/project");
+    }
+
+    /// A timeout names the operation that stalled, so the label has to be the
+    /// wire tag the daemon actually receives — not a hand-kept table that can
+    /// drift from it.
+    #[test]
+    fn a_command_labels_itself_with_its_wire_tag() {
+        assert_eq!(Command::AttachSession.name(), "attachSession");
+        assert_eq!(Command::Cancel.name(), "cancel");
+        assert_eq!(
+            Command::ProbeProvider {
+                provider: ProviderKind::OpenCode,
+                binary_override: None,
+                discover_models: false,
+                probe_version: false,
+            }
+            .name(),
+            "probeProvider"
+        );
+        // The label is derived, so it can never disagree with the tag.
+        for command in [
+            Command::AttachSession,
+            Command::RefreshBackgroundWork,
+            Command::GetSettings,
+        ] {
+            assert_eq!(
+                command.name(),
+                serde_json::to_value(&command).unwrap()["type"]
+                    .as_str()
+                    .unwrap()
+            );
+        }
     }
 
     #[test]
