@@ -12,6 +12,26 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.71]
+
+### Desktop
+
+- **Fixed: some agents were reported as "not detected" even though they were
+  installed and on your PATH.** Codex and Copilot showed up, but OpenCode, Oh
+  My Pi and others never did — and picking their program by hand in the
+  Providers page changed nothing, so the row kept saying nothing runnable was
+  found at that path. The app and its background service disagreed on how an
+  agent's name is spelled, so the app could not read the answers it was given.
+  Every agent you have installed now appears, and a path you choose by hand
+  takes effect.
+
+- **Fixed: opening the Skills page could hang for two minutes and then fail.**
+  The library sat on a loading state and eventually reported only "timed out
+  after 120s", naming no cause. It was the same spelling mismatch: the app
+  discarded the reply it could not read and waited out the timeout. The page
+  now loads normally, and a reply the app cannot read reports what was
+  unreadable instead of appearing to hang.
+
 ## [0.1.70]
 
 ### Desktop
