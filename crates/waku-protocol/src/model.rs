@@ -3918,6 +3918,39 @@ mod tests {
         }
     }
 
+    /// Every tool OpenCode v2 exposes must land in a real activity bucket, so
+    /// no step of a v2 turn renders as an unclassified blank. The v2 catalog is
+    /// `read, glob, grep, edit, write, patch, shell, webfetch, websearch,
+    /// question, skill, subagent, execute` — notably without `todowrite`, which
+    /// v2 removed from the runtime (opencode#42421), so the task-list panel is
+    /// legitimately empty for this provider.
+    #[test]
+    fn every_opencode_v2_tool_classifies() {
+        for (name, expected) in [
+            ("read", ActivityKind::FileRead),
+            ("glob", ActivityKind::FileSearch),
+            ("grep", ActivityKind::FileSearch),
+            ("edit", ActivityKind::FileChange),
+            ("write", ActivityKind::FileChange),
+            ("patch", ActivityKind::FileChange),
+            ("shell", ActivityKind::Command),
+            ("webfetch", ActivityKind::Search),
+            ("websearch", ActivityKind::Search),
+            // The interaction and automation tools have no narrower bucket; they
+            // must still be a classified Tool rather than falling through.
+            ("question", ActivityKind::Tool),
+            ("skill", ActivityKind::Tool),
+            ("subagent", ActivityKind::Tool),
+            // v2's `execute` runs JavaScript that orchestrates tool calls. The
+            // shared classifier already groups `execute` with the command
+            // runners (some providers use it for shell), so it renders as a
+            // Command row — shown, and never dropped.
+            ("execute", ActivityKind::Command),
+        ] {
+            assert_eq!(ActivityKind::from_tool_name(name), expected, "{name}");
+        }
+    }
+
     #[test]
     fn fallback_tool_names_are_not_treated_as_generic_titles() {
         assert!(!is_generic_activity_title(
