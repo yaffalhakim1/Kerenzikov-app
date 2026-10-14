@@ -1,34 +1,47 @@
 import type { ActivityItem, TranscriptBlock } from '@waku/client';
 import { activitiesForBlock } from '@waku/client/event-reducer';
-import { activityHeaderTitle } from '@waku/client/transcript-presentation';
+import {
+  activityFileChangeStats,
+  activityHeaderTitle,
+} from '@waku/client/transcript-presentation';
+import { BottomSheet } from 'panelui-native/components/bottom-sheet';
+import { Item } from 'panelui-native/components/item';
 import { Reasoning } from 'panelui-native/components/reasoning';
-import { Task } from 'panelui-native/components/task';
-import type { TaskStatus } from 'panelui-native/components/task';
 import { memo, useState } from 'react';
 
+import { ACTIVITY_ICONS } from './activity-icons';
 import { ActivityDetail } from './activity-detail';
+import { AppSymbol } from './app-symbol';
+
+import { useTheme } from '@/hooks/use-theme';
 
 /**
- * A tool group in the transcript, as a PanelUI `Task` — with the model's
- * reasoning lifted out of it into its own `Reasoning`.
+ * A tool group in the transcript.
  *
- * Reasoning is not a step the agent took; it is the thinking that produced the
- * steps, and PanelUI ships a component for exactly that distinction. It used to
- * render as an `ActivityDetail` nested inside this group's `Task`, which put
- * two independently animating bodies on the same row: the trace grows token by
- * token while the group's `Task.Trigger` shimmers its title for as long as the
- * turn runs. Two animations on one row is what made the header read as empty
- * while a turn was live and correct itself the moment it finished.
+ * The transcript carries the *record* of what happened — "Ran 12 commands, 1
+ * failed" — and the commands themselves, with their output, open in a sheet.
  *
- * Split, each owns a single animation. `Reasoning` opens itself while the trace
- * arrives and folds away a beat after it stops — and, because its own trigger
- * carries the shimmer, the group's title is no longer competing with it. The
- * `Task` keeps the steps, which are the record and stay open.
+ * This is the shape ChatGPT's and Claude's mobile clients use, and it is the
+ * one that survives a real session. A group can hold a hundred commands and
+ * each can carry tens of kilobytes of output; inline, that is either a
+ * thousand collapsed rows to scroll past, or — before this — a step's whole
+ * body built whether or not it was ever read. One measured session had 390
+ * groups and 977 activities, and building their bodies inline cost 743 views
+ * in a single commit, which is what stalled the screen and ANR'd the app.
+ *
+ * The summary stays inline because that is the part you scroll back for. The
+ * detail leaves because it is the part you open *when something went wrong*,
+ * which is PanelUI's own description of a task body: "the header is the step;
+ * the body is the detail nobody reads unless something went wrong."
+ *
+ * This is a different call from `a78c7f1`, which moved the sheet inline. That
+ * one was right about what it fixed — the sheet was the only drill-down in an
+ * otherwise inline transcript, and its host was `@expo/ui`, the last non-PanelUI
+ * surface on the page. Both of those are answered here: `Reasoning`, `Plan` and
+ * background work still expand in place, and the sheet is PanelUI's.
  *
  * Reasoning renders first because it precedes the action it produced.
  */
-const ACTIVITY_WINDOW = 8;
-
 export const ActivityGroup = memo(function ActivityGroup({
   block,
   live,
@@ -70,73 +83,94 @@ function reasoningTrace(reasoning: readonly ActivityItem[]): string {
 }
 
 /**
- * The steps, as a PanelUI `Task`.
+ * The group's row in the transcript, and the sheet its commands live in.
  *
- * Tapping expands it in place, like `Reasoning`, `Plan` and background work —
- * the sheet this used to open made the command group the one drill-down in an
- * otherwise inline transcript. The list is windowed the way `TodoStrip`
- * windows a long plan: a settled group can hold a hundred commands, and an
- * inverted, anchored list must not absorb all of them on a tap. The rows
- * around the live one are the ones worth showing; the rest is a count.
+ * The row is one line however much the group did, and pressing it opens the
+ * sheet. It is an `Item` rather than a `Task.Trigger` because there is no body
+ * to fold: a `Task` trigger carries a chevron that turns as its body opens, and
+ * a chevron that turns while nothing unfolds underneath it is a lie about what
+ * the tap did.
+ *
+ * The sheet is hosted here, one per group, rather than at the session level.
+ * That is deliberate and it is what keeps the code honest: `BottomSheet.Content`
+ * returns `null` until it is first presented, so a closed sheet costs nothing,
+ * and a group's own sheet can hold its own `activities` instead of the session
+ * having to locate the block again on every stream commit. Every commit
+ * deep-clones the session, so a session-level sheet would need exactly the
+ * locator that `a78c7f1` was glad to delete.
  */
 function StepGroup({ activities, live }: { activities: ActivityItem[]; live: boolean }) {
-  const activeIndex = activities.findIndex((activity) => !activity.complete);
-  const anchor = activeIndex === -1 ? activities.length - 1 : activeIndex;
-  const start = Math.max(0, Math.min(
-    anchor - Math.floor(ACTIVITY_WINDOW / 2),
-    activities.length - ACTIVITY_WINDOW,
-  ));
-  const visible = activities.slice(start, start + ACTIVITY_WINDOW);
-  const hiddenBefore = start;
-  const hiddenAfter = activities.length - start - visible.length;
-  const anyFailed = activities.some((activity) => activity.failed);
-  const allComplete = activities.every((activity) => activity.complete);
+  const [open, setOpen] = useState(false);
+  const theme = useTheme();
 
-  const status: TaskStatus = live && !allComplete
-    ? 'running'
-    : anyFailed ? 'error' : 'complete';
+  const title = activityHeaderTitle(activities, live);
+  const failed = activities.filter((activity) => activity.failed).length;
+  const summary = summaryLine(activities);
 
   /*
-   * The steps mount with the group, not before it.
+   * One line in the transcript, however much the group did.
    *
-   * `Task.Content` feeds a `Collapse`, which keeps its children mounted and
-   * animates only the clip height - so rendering the steps inside it built up
-   * to `ACTIVITY_WINDOW` nested `Task`s per group even while the group was
-   * closed. Measured on a real session: 743 views in the hierarchy and a ~1s
-   * stall on open, with the JS side accounting for only ~100ms of it. The cost
-   * is the native commit, and it scales with how many of these exist at once.
-   *
-   * So the window of steps is built only while the group is open, which is also
-   * the only time they can be seen. A closed group is one row.
+   * The failure is appended to the title rather than given a line of its own:
+   * a group that failed is the one case worth seeing without opening anything,
+   * and a second line per group doubles the height of a transcript that is
+   * mostly groups. The sheet's header carries the full breakdown.
    */
-  const [open, setOpen] = useState(Boolean(activeIndex !== -1));
+  const rowTitle = failed > 0 ? `${title} · ${failed} failed` : title;
 
   return (
-    <Task
-      className="min-h-7"
-      open={open}
-      onOpenChange={setOpen}
-      status={status}
-    >
-      <Task.Trigger title={activityHeaderTitle(activities, live)} />
-      <Task.Content>
-        {!open ? null : (
-          <>
-            {hiddenBefore > 0 ? (
-              <Task.Item>{`${hiddenBefore} earlier`}</Task.Item>
-            ) : null}
-            {visible.map((activity) => (
-              // One disclosure per command, inside the group's own — the same
-              // gesture at both levels, and the detail stays in the transcript
-              // rather than replacing it.
-              <ActivityDetail activity={activity} key={activity.id} />
-            ))}
-            {hiddenAfter > 0 ? (
-              <Task.Item>{`${hiddenAfter} more`}</Task.Item>
-            ) : null}
-          </>
-        )}
-      </Task.Content>
-    </Task>
+    <BottomSheet open={open} onOpenChange={setOpen}>
+      <BottomSheet.Trigger>
+        <Item className="min-h-7">
+          <Item.Media>
+            <AppSymbol
+              name={ACTIVITY_ICONS[failed > 0 ? 'tool' : 'command']}
+              size={15}
+              tintColor={failed > 0 ? theme.danger : theme.textSecondary}
+            />
+          </Item.Media>
+          <Item.Content>
+            <Item.Title numberOfLines={1}>{rowTitle}</Item.Title>
+          </Item.Content>
+        </Item>
+      </BottomSheet.Trigger>
+      <BottomSheet.Content
+        accessibilityLabel={`${title} — ${summary}`}
+        size="full"
+      >
+        <BottomSheet.Header title={title} description={summary} />
+        <BottomSheet.Body>
+          {activities.map((activity) => (
+            <ActivityDetail activity={activity} key={activity.id} />
+          ))}
+        </BottomSheet.Body>
+      </BottomSheet.Content>
+    </BottomSheet>
   );
+}
+
+/**
+ * What the group did, in one line: how many steps, how many failed, and the
+ * edit totals when the steps were edits.
+ *
+ * Summed across the group's own `activityFileChangeStats` rather than invented,
+ * so the line cannot disagree with the per-step figures inside the sheet.
+ */
+function summaryLine(activities: readonly ActivityItem[]): string {
+  const parts = [`${activities.length} ${activities.length === 1 ? 'step' : 'steps'}`];
+  const failed = activities.filter((activity) => activity.failed).length;
+  if (failed > 0) parts.push(`${failed} failed`);
+
+  let additions = 0;
+  let deletions = 0;
+  let edited = false;
+  for (const activity of activities) {
+    const stats = activityFileChangeStats(activity);
+    if (!stats) continue;
+    edited = true;
+    additions += stats.additions;
+    deletions += stats.deletions;
+  }
+  if (edited) parts.push(`+${additions} −${deletions}`);
+
+  return parts.join(' · ');
 }
