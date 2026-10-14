@@ -104,11 +104,23 @@ export default function RootLayout() {
   useNotificationDeepLink();
   return (
     <GestureHandlerRootView style={styles.root}>
-      <PanelUIProvider>
-        <ThemePreferenceProvider>
+      {/*
+        Theme first, PanelUI inside it — the reverse of what this was.
+        PanelUI's provider owns the portal host that `ModalPortal` renders
+        into, and portals are a *different subtree*: a sheet's content is
+        mounted under the portal, not under whoever opened it. With PanelUI
+        outermost, that host sat outside `ThemePreferenceProvider`, so anything
+        in a sheet that reads the scheme threw "useThemePreference must be used
+        inside ThemePreferenceProvider" the moment the sheet opened.
+
+        PanelUI reads nothing from the app's theme — it takes its colours from
+        Uniwind — so it can sit inside. The other order cannot work at all.
+      */}
+      <ThemePreferenceProvider>
+        <PanelUIProvider>
           <ThemedApp />
-        </ThemePreferenceProvider>
-      </PanelUIProvider>
+        </PanelUIProvider>
+      </ThemePreferenceProvider>
     </GestureHandlerRootView>
   );
 }
