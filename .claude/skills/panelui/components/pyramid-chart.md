@@ -1,0 +1,191 @@
+# PyramidChart
+
+Two series mirrored about a centre, on one shared scale.
+
+```tsx
+import { PyramidChart } from 'panelui-native';
+// Copied into the project with the CLI instead:
+// import { PyramidChart } from '@/components/ui/pyramid-chart';
+```
+
+### Anatomy
+
+```tsx
+<PyramidChart>
+  <PyramidChart.Grid />                        {/* mirrored lines, and the centre */}
+  <PyramidChart.Bar dataKey="…" side="start" /> {/* the left wing */}
+  <PyramidChart.Bar dataKey="…" side="end" />   {/* the right one */}
+  <PyramidChart.Skeleton />                    {/* while status="loading" */}
+  <PyramidChart.XAxis />                       {/* values, mirrored around zero */}
+  <PyramidChart.YAxis />                       {/* the category names */}
+  <PyramidChart.Legend />
+  <PyramidChart.Tooltip />                     {/* the drag, and the readout */}
+</PyramidChart>
+```
+
+### Parts
+
+- `PyramidChart.Header`
+- `PyramidChart.Grid` — Mirrored reference lines, plus the solid line down the middle both wings are measured from.
+- `PyramidChart.Bar` — One wing. `side` decides which, and the default colour differs per side so two bars declared with nothing but a key and a side are already told apart.
+- `PyramidChart.Skeleton` — Equal stubs either side of the centre, shown while `status="loading"`.
+- `PyramidChart.XAxis` — The value labels along the bottom — the same magnitudes twice, either side of a zero in the middle.
+- `PyramidChart.YAxis` — The category names, one per row. By default each sits on its own line over the pair of bars it belongs to; `labelPlacement` moves them into a gutter between the wings or down the left instead.
+- `PyramidChart.Tooltip` — The drag over the plot, the row it highlights, and the readout that follows it down.
+- `PyramidChart.Legend` — A swatch and a name per series.
+
+### Props
+
+#### `PyramidChartProps`
+
+Extends `ViewProps, ChartAccessibilityProps<PyramidChartDatum>`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `data` | `PyramidChartDatum[]` | **required** | The rows. Each one is a band across the chart, with a wing either side. |
+| `xDataKey` | `string` | `name` | Key holding the category label. Used by the axis and the readout. |
+| `status` | `PyramidChartStatus` | `ready` | `loading` holds the bars at the centre and grows them out into the real ones when it turns `ready`. One component throughout, rather than a spinner swapped for a chart — swapping loses the transition. Add a `PyramidChart.Skeleton` for something to stand in the plot meanwhile. |
+| `aspectRatio` | `number` | `1.2` | Width ÷ height. `1.2` suits three or four rows in a card. |
+| `animationDuration` | `number` | `700` | Milliseconds for the bars to grow out on mount. |
+| `domainDuration` | `number` | `500` | Milliseconds for the scale to settle after the data changes. |
+| `maxValue` | `number` | — | Fix the far end of the shared scale instead of deriving it. The near end is zero either way — a pyramid measures outward from its centre. |
+| `labelPlacement` | `PyramidChartLabelPlacement` | `above` | Where the category names sit. `above`, the default, gives each row a line of its own over its pair of bars, so the two wings meet in the middle with nothing standing between them. `center` puts the names in a gutter between the wings instead, and `start` down the left edge. |
+| `barGap` | `number` | `0.25` | Fraction of each band left empty, `0` to `1`. A fraction rather than a pixel gap so the proportions hold at any height. |
+| `barWidth` | `number` | — | Fixed bar thickness in points. Derived from the band when omitted. |
+| `cornerRadius` | `number` | `4` | Corner radius on the outward end of a bar. |
+| `minBarLength` | `number` | `0` | Smallest length a non-zero bar is drawn at, in points. A value that rounds to nothing still happened, and a bar of zero length says it did not. |
+| `fadedOpacity` | `number` | `0.3` | Opacity of the rows that are not under the finger. |
+| `onActiveIndexChange` | `(index: number, datum: PyramidChartDatum \| null) => void` | — | The row under the finger as it moves, and `-1`/`null` when it lifts. Fires when the index changes, not per frame. |
+| `children` | `ReactNode` | — | — |
+
+#### `PyramidChartGridProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `columns` | `number` | `2` | How many lines to draw per wing, not counting the centre. |
+| `color` | `string` | — | — |
+| `dashArray` | `string` | — | — |
+| `opacity` | `number` | `1` | — |
+| `centreLine` | `boolean` | `true` | Draw the solid line down the middle the wings are measured from. |
+
+#### `PyramidChartBarProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `dataKey` | `string` | **required** | Column in the data holding this series' values. |
+| `side` | `PyramidChartSide` | `end` | Which wing it grows into. |
+| `color` | `string` | — | Explicit colour. Defaults to the `--color-chart-*` token for `colorIndex`. |
+| `colorIndex` | `SeriesColorIndex` | — | Which of the five chart tokens to take. Defaults to a different one per side, so two bars declared with nothing but a `dataKey` and a `side` are already told apart. |
+| `cornerRadius` | `number` | `4` | Corner radius, overriding the chart's. |
+
+#### `PyramidChartSkeletonProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `rows` | `number` | — | How many placeholder rows to draw. Defaults to one per row of data, and to five when the data has not arrived — the count is the one thing a loading chart can be honest about only if it already has the rows. |
+| `duration` | `number` | — | Milliseconds for one pass of the sweep. |
+| `color` | `string` | — | — |
+
+#### `PyramidChartXAxisProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `ticks` | `number` | — | How many labels per wing, not counting the zero in the middle. |
+| `format` | `(value: number) => string` | — | Format a value for its label. Defaults to a compact number. |
+| `className` | `string` | — | — |
+
+#### `PyramidChartYAxisProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `format` | `(datum: PyramidChartDatum, index: number) => string` | — | Turn a row into its label. Defaults to the value at `xDataKey`. |
+| `className` | `string` | — | — |
+
+#### `PyramidChartTooltipProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `formatValue` | `(value: number, key: string) => string` | — | Format one series' value. Defaults to a compact number. |
+| `formatX` | `(datum: PyramidChartDatum) => string` | — | Format the readout's heading from the row. Defaults to the value at xDataKey. |
+| `className` | `string` | — | — |
+
+#### `PyramidChartLegendProps`
+
+Extends `ViewProps`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `labels` | `Record<string, string>` | — | Prettier names for the series keys. |
+
+#### `PyramidChartHeaderProps`
+
+Extends `ViewProps`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `title` | `string` | — | Small line above the value — what the chart is of. |
+| `value` | `string` | — | The readout. The largest thing on the card, and the first thing read. |
+| `caption` | `string` | — | One muted line under the value — a period, a comparison, a total. |
+| `labels` | `Record<string, string>` | — | Prettier names for the series keys, as the legend takes. |
+| `legend` | `boolean` | `false` | Draw a swatch and a name per series along the trailing edge. Prefer this to `PyramidChart.Legend` on a chart that has a header: the legend floats over the plot, where it competes with the bars for the same corner. |
+| `children` | `ReactNode` | — | Trailing slot — a control, a badge, a range picker. Wins over `legend`. |
+
+### Example — Two wings on one scale
+
+`side` puts a series on the left or the right. The scale is shared, so the two halves can be read against each other rather than only each against itself.
+
+```tsx
+<Frame className="w-full">
+  <Frame.Header>
+    <Frame.Title>Penguins observed</Frame.Title>
+    <Frame.Action>Drag to inspect</Frame.Action>
+  </Frame.Header>
+  <Frame.Panel>
+    <PyramidChart data={PENGUINS} xDataKey="species" aspectRatio={1.4}>
+      <PyramidChart.Header
+        value="334"
+        caption="Three species"
+        labels={{ male: 'Male', female: 'Female' }}
+        legend
+      />
+      <PyramidChart.Grid />
+      <PyramidChart.Bar dataKey="male" side="start" />
+      <PyramidChart.Bar dataKey="female" side="end" colorIndex={5} />
+      <PyramidChart.XAxis />
+      <PyramidChart.YAxis />
+      <PyramidChart.Tooltip />
+    </PyramidChart>
+  </Frame.Panel>
+</Frame>
+```
+
+### Notes
+
+### One scale, and where it comes from
+
+The far end of the scale is the largest value in either series, with a little headroom. The near end is zero and cannot be moved — a wing cropped at its base is a length that lies. `maxValue` fixes the far end when several charts have to be comparable with each other.
+
+Which side a series is on comes from `side`, not from the sign of its numbers, so a value is a distance outward from the centre. A negative one has no direction left to grow in and is drawn as nothing; it still appears in the readout, so a data error shows up as a gap rather than as a bar pointing the wrong way.
+
+### Where the names go
+
+`labelPlacement="above"`, the default, gives each row a line of its own over its pair of bars, so the two wings meet in the middle with nothing standing between them and the name is read before the lengths it belongs to. `"center"` puts the names in a gutter between the wings instead — taken off the bars rather than off the edges, so both wings stay equal — and `"start"` puts them down the left.
+
+The value labels along the bottom are held inside the chart: the outermost tick of each wing sits on the plot's own edge, and a label centred there would hang half its width off the side.
+
+### Drawing
+
+Each wing is one animated path split in two — the row under the finger, and everything else — so a chart of thirty rows costs two animated props a frame rather than thirty. The corners are rounded on the outward end only, which is why they are drawn as a path rather than with `rx`.
+
+The axis labels are React Native text over the plot rather than SVG text, so they follow the theme's font and the platform's text scaling.
+
+## Accessible data
+
+The chart exposes one screen-reader summary and one semantic entry per data row; its SVG paths, axes and markers stay decorative. Set `accessibilityLabel` for the summary, `accessibilityLabelForDatum` to phrase a row in your own words, and `onAccessibilityDatumPress` to make each row activatable. Pass `accessible={false}` to drop the semantic layer entirely.
+
+---
+
+Full page, with every example: https://panelui.dev/docs/charts/pyramid-chart

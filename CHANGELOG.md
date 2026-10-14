@@ -12,6 +12,25 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.68]
+
+### Desktop and Android
+
+- **Fixed: OpenCode stopped working after upgrading OpenCode.** The provider
+  list offered two OpenCode entries, and after the upgrade neither one worked:
+  the first failed to start at all, and the second connected but offered a
+  model list frozen at whatever it was before you upgraded. Both entries were
+  always the same program — the upgrade only changed the way it is spoken to —
+  so there is now a single **OpenCode** provider that talks to the version you
+  have installed. Tasks you had on the old entry keep working and keep their
+  history.
+
+- **OpenCode now offers the models, commands and skills you actually have.** The
+  provider was reading a copy it saved before the upgrade, which is why a model
+  you had added or removed never showed up. It now asks your running OpenCode
+  service directly, so the picker tracks your providers and the composer lists
+  the skills and commands OpenCode reports.
+
 ## [0.1.67]
 
 ### Android

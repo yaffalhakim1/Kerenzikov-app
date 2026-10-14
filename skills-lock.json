@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "logo-maker": {
+      "source": "panel-ui/PanelUI",
+      "sourceType": "github",
+      "skillPath": "skills/logo-maker/SKILL.md",
+      "computedHash": "231e7b61f97f3eb9baea33d8903222a1235450dc93ae03cd3876110a8ba7d6e7"
+    },
+    "panelui": {
+      "source": "panel-ui/PanelUI",
+      "sourceType": "github",
+      "skillPath": "skills/panelui/SKILL.md",
+      "computedHash": "c470e1c93944e96ea571ac914be93f4524c5f3e20f955247287c258ac361fee4"
+    }
+  }
+}

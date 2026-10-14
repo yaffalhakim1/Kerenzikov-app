@@ -1,0 +1,231 @@
+# SelectionMode
+
+Pick several things at once, on a screen or in a sheet.
+> **Alpha.** This API is still moving.
+
+
+```tsx
+import { SelectionMode } from 'panelui-native';
+// Copied into the project with the CLI instead:
+// import { SelectionMode } from '@/components/ui/selection-mode';
+```
+
+### Anatomy
+
+```tsx
+<SelectionMode>
+  {/* on a screen */}
+  <SelectionMode.Header />
+  <SelectionMode.Item>
+    <SelectionMode.Indicator />
+    {/* your item */}
+  </SelectionMode.Item>
+  <SelectionMode.Bar>
+    <SelectionMode.Action />
+  </SelectionMode.Bar>
+
+  {/* …or in a sheet */}
+  <SelectionMode.Sheet>
+    <SelectionMode.Group>
+      <SelectionMode.Item />
+    </SelectionMode.Group>
+    <SelectionMode.Bar />
+  </SelectionMode.Sheet>
+</SelectionMode>
+```
+
+### Variants
+
+- **selected** — `true`
+- **compact** — `true`
+- **destructive** — `true`
+- **disabled** — `true`
+- **surface** — `screen` *(default)*, `sheet`
+- **placement** — `bar` *(default)*, `floating`
+
+### Parts
+
+- `SelectionMode.Sheet`
+- `SelectionMode.Group`
+- `SelectionMode.Item`
+- `SelectionMode.Indicator`
+- `SelectionMode.Header`
+- `SelectionMode.Bar`
+- `SelectionMode.Action`
+
+### Props
+
+#### `SelectionModeProps`
+
+Extends `ViewProps`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `values` | `string[]` | — | Every value that can be picked, in list order. Only "select all" and the "n of m" in the header need it — picking rows one at a time works without it. Give it the same ids you give the list. |
+| `active` | `boolean` | — | Controlled selection mode. Leave it out and a long press turns it on. |
+| `defaultActive` | `boolean` | `false` | Whether selection mode starts on. |
+| `onActiveChange` | `(active: boolean) => void` | — | — |
+| `selected` | `string[]` | — | Controlled selection. |
+| `defaultSelected` | `string[]` | — | — |
+| `onSelectedChange` | `(selected: string[]) => void` | — | — |
+| `max` | `number` | — | The most that can be picked at once. A row that would go over it does not toggle on, and "select all" stops at the limit rather than refusing. Leave it out for no limit. |
+| `haptics` | `boolean` | `false` | A tick when a row is picked and when the mode is entered. Off by default — needs the optional `expo-haptics`, and is silent without it. |
+| `children` | `ReactNode` | **required** | — |
+
+#### `SelectionModeIndicatorProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `value` | `string` | — | Which row this stands for. Defaults to the row it is inside. |
+
+#### `SelectionModeItemProps`
+
+Extends `Omit<ViewProps, 'children'>`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `value` | `string` | **required** | This row's id. What ends up in `selected`. |
+| `onPress` | `() => void` | — | What the row does whenever selection does not own its press. |
+| `disabled` | `boolean` | `false` | Stop this row entering selection mode, and being picked once in it. Its ordinary `onPress` still runs, including while selection is active. For a header row, an advert, a "load more" — anything in the list that is not one of the things being chosen between. |
+| `alwaysShowIndicator` | `boolean` | `false` | Draw the circle without waiting for the mode. |
+| `indicator` | `'leading' \| 'ring' \| 'none'` | `leading` | How being picked is drawn. `leading` puts the circle in front of the item, which is what a row wants. `ring` draws a ring around whatever you gave it instead — for a swatch, a thumbnail or a photo, where a circle beside it would be a second thing to look at and the item itself can carry the state. `none` draws nothing and leaves it to you; read `useSelectionMode().isSelected`. |
+| `children` | `ReactNode` | **required** | — |
+
+#### `SelectionModeGroupProps`
+
+Extends `ViewProps`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `columns` | `number` | — | Lay the items out in a grid this many across instead of stacking them. For things recognised by sight rather than read — swatches, thumbnails, slides. A grid of six colours is one glance; the same six as rows is a scroll. Ignored when `horizontal` is set. |
+| `horizontal` | `boolean` | `false` | Lay the items out in one row that scrolls sideways. For a strip of small things next to other controls — swatches above a slider, filters above a list. A grid of the same items claims as many rows as it needs and pushes everything below it off the sheet; a strip costs one row whatever the count. Wins over `columns`, which asks for the opposite arrangement. |
+| `itemWidth` | `number` | `44` | How wide each item is in a horizontal strip, in points. |
+| `gap` | `number` | `12` | Space between items in a grid or a strip, in points. |
+| `label` | `string` | — | A caption above the items, on the leading edge. Worth setting on anything picked by sight. A strip of colours with nothing in front of it is a row of circles the reader has to work out the purpose of, and a screen reader has nothing at all to announce it by — so this is also the group's accessibility label. |
+| `labelClassName` | `string` | — | Extra classes for that caption. |
+| `separators` | `boolean` | `true` | Hairlines between stacked items. On by default; off in a grid or a strip. |
+| `children` | `ReactNode` | **required** | — |
+
+#### `SelectionModeHeaderProps`
+
+Extends `ViewProps`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `title` | `string` | `Select` | The word in front of the count. |
+| `hideSelectAll` | `boolean` | `false` | Hide the select-all control, for a list where picking everything is wrong. |
+| `children` | `ReactNode` | — | Replaces the whole header's contents, keeping only its layout. |
+
+#### `SelectionModeBarProps`
+
+Extends `ViewProps, Pick<SelectionVariantProps, 'placement'>`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `inset` | `number` | `0` | Room under the actions, in points — your safe-area inset. A bar against the bottom edge sits over the home indicator on a phone that has one, and an action under a home indicator is an action that takes two tries. `floating` uses it as the gap on all four sides instead. |
+| `showWhenEmpty` | `boolean` | `false` | Keep the bar up with nothing picked. Off by default: every action on it needs something to act on, and a row of buttons that all refuse is worse than a row that is not there yet. |
+| `children` | `ReactNode` | **required** | — |
+
+#### `SelectionModeActionProps`
+
+Extends `Omit<ViewProps, 'children'>, Pick<SelectionVariantProps, 'destructive'>`.
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `icon` | `ReactNode` | — | The glyph above the label. |
+| `onPress` | `(selected: string[]) => void` | — | What it does. Handed the selection, so the common case needs no other wiring — and leaving the mode afterwards is up to you, because whether the list still makes sense depends on what you did to it. |
+| `exitOnPress` | `boolean` | `false` | Leave selection mode after the action runs. |
+| `disabled` | `boolean` | `false` | — |
+| `labelClassName` | `string` | — | Extra classes for the label. |
+| `children` | `ReactNode` | — | — |
+
+#### `SelectionModeSheetProps`
+
+| Prop | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `className` | `string` | — | — |
+| `open` | `boolean` | — | Controlled open state of the sheet. |
+| `defaultOpen` | `boolean` | — | — |
+| `onOpenChange` | `(open: boolean) => void` | — | — |
+| `title` | `string` | `Select` | The word in front of the count. |
+| `hideSelectAll` | `boolean` | `false` | Hide the select-all control. |
+| `size` | `'auto' \| 'half' \| 'full'` | `full` | How tall the sheet opens. `full` by default. `auto` sizes the sheet to its rows, up to the height of the screen, and suits a short list. Full rather than half because a picker spends a header and a footer before it draws a single row. At half a screen that leaves four or five rows for the thing the sheet was opened to do, and the reader scrolls a list that would have fitted. Pass `half` for a sheet of two or three choices. |
+| `children` | `ReactNode` | **required** | The things to pick between, and optionally a `SelectionMode.Bar` of actions. The bar is lifted into the sheet's footer wherever it is written. |
+
+### Example — Anything, not just rows
+
+An item is a wrapper, so what it holds is yours. Group them in a card for rows, or pass `columns` for a grid of things recognised by sight — a swatch, a thumbnail, a slide. `indicator="ring"` draws the selection around the item instead of beside it, because a circle next to a colour is a second thing to look at.
+
+```tsx
+<SelectionMode.Sheet open={open} onOpenChange={setOpen} title="Palette">
+  <SelectionMode.Group columns={5} gap={14}>
+    {palette.map((color) => (
+      <SelectionMode.Item key={color.id} value={color.id} indicator="ring">
+        <View
+          style={{ backgroundColor: color.hex, aspectRatio: 1 }}
+          className="w-full rounded-full"
+        />
+      </SelectionMode.Item>
+    ))}
+  </SelectionMode.Group>
+
+  <SelectionMode.Bar>
+    <SelectionMode.Action icon={<CheckIcon size={20} />} onPress={apply}>
+      Apply
+    </SelectionMode.Action>
+  </SelectionMode.Bar>
+</SelectionMode.Sheet>
+```
+
+### Notes
+
+### The sheet is full-height by default
+
+A picker spends a header and a footer before it draws a row, so it opens tall. Pass `size="half"` for two or three choices, or `size="auto"` to size the sheet to its rows — it stops short of the status bar and scrolls past that.
+
+### Group the items
+
+`SelectionMode.Group` is the rounded card with rules between its rows. One card of options reads as a set; the same rows loose on the sheet background read as a list that has not finished loading.
+
+### Which presentation
+
+Use the **sheet** when choosing is the whole reason the surface exists — a share sheet, a palette, an attachment picker. Use the **on-screen mode** when the list has a life of its own and picking is something you occasionally do to it.
+
+They are the same component and the same state; only the presentation differs. In a sheet there is no long press and no cancel button — the sheet dismisses itself — and the bar sits in the footer rather than over the list.
+
+### The circle is round for a reason
+
+A square box is a form control somebody is filling in; a round one is a thing they are picking out of a set. [Checkbox](/docs/components/checkbox) is the first of those and stays square.
+
+### On a screen, pad the bottom of your list
+
+`SelectionMode.Bar` is drawn over the list rather than under it, because the list is as long as it is and a bar in the flow would be somewhere off the end of it. Nothing here can work out how tall your list is, so give it bottom padding — `contentContainerClassName="pb-24"` — or the last row sits under the bar forever.
+
+Pass `inset` with your safe-area bottom inset, or the bar sits over the home indicator.
+
+### The bar is hidden until something is picked
+
+Every action on it needs something to act on, and a row of buttons that all refuse is worse than a row that has not appeared yet. Pass `showWhenEmpty` if you would rather it were there the whole time.
+
+### Actions are handed the selection
+
+`onPress` receives the picked values, so the common case needs no other wiring. Leaving afterwards is `exitOnPress`, and it is opt-in because whether the list still makes sense depends on what you just did to it — deleting means leaving, marking read might not.
+
+### Selection is a set of values
+
+Ids, never indices or elements. A list that reorders, pages in more items or drops one underneath the reader would invalidate anything positional, and ids are also the shape the action at the end needs.
+
+### Give it a height
+
+The root fills a height it is offered and takes its content's height when there is none. What it cannot do is fill a parent that has no height itself — put it in a container with `flex-1`, or give it a fixed height, the same as any list. In a sheet the sheet handles this.
+
+---
+
+Full page, with every example: https://panelui.dev/docs/components/selection-mode
