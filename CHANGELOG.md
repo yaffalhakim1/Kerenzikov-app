@@ -12,6 +12,22 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.69]
+
+### Desktop
+
+- **Fixed: the Providers page could get stuck on "Checking…" forever.** Once
+  that happened the refresh button did nothing when you clicked it, and typing
+  an agent's path into a provider row appeared to do nothing as well — the row
+  kept reporting that nothing runnable was found at that path, however many
+  times you tried it. The page now always finishes checking, so the button
+  works and a path you enter is actually applied.
+
+- **Fixed: some installed agents were missing from the Providers page.** Amp,
+  Claude, Codex and Copilot showed up, but other agents you had installed did
+  not appear at all, with no way to add them. Checking could stop partway
+  through, and the agents it had not reached yet stayed hidden.
+
 ## [0.1.68]
 
 ### Desktop and Android
