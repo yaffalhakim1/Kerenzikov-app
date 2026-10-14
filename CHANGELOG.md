@@ -12,6 +12,19 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.72]
+
+### Android
+
+- **A task's tool calls no longer crowd the conversation.** Every command an
+  agent ran used to unfold inside the transcript, so a busy task was a wall of
+  command output between you and the answer — and on a long one it could take
+  about eleven seconds to open and then close the app. Each group of tool calls
+  is now a single line — "Ran 14 commands · 2 file reads · 1 failed" — and
+  tapping it opens the commands and their output in a sheet, where the detail
+  belongs. A step that failed opens itself, so a problem is still the first
+  thing you see.
+
 ## [0.1.71]
 
 ### Desktop
