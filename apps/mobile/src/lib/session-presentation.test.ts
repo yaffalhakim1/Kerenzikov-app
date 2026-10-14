@@ -692,7 +692,7 @@ describe('agent preset availability', () => {
   const unstarted = { messages: [], turns: [], provider_cursor: null, last_reply_at: null };
 
   test('offers presets on a composable provider before the session starts', () => {
-    for (const provider of ['codex', 'deepSeek', 'openCode', 'openCode2'] as const) {
+    for (const provider of ['codex', 'deepSeek', 'openCode'] as const) {
       expect(agentPresetAvailable(session({ provider, ...unstarted }), false)).toBe(true);
     }
   });
@@ -708,7 +708,6 @@ describe('agent preset availability', () => {
     expect(agentPresetAvailable(session({ provider: 'codex' }), false)).toBe(false);
     expect(agentPresetAvailable(session({ provider: 'deepSeek' }), false)).toBe(false);
     expect(agentPresetAvailable(session({ provider: 'openCode' }), false)).toBe(true);
-    expect(agentPresetAvailable(session({ provider: 'openCode2' }), false)).toBe(true);
   });
 
   test('a busy turn never re-roles the agent', () => {

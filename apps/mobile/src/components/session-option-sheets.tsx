@@ -581,7 +581,7 @@ const ACCESS_MODES: Array<{ id: RuntimeMode; description: string }> = [
 ];
 
 /** Agent preset picker for providers that expose startable compositions
- * (DeepSeek Harness, OpenCode v1). Mirrors the desktop agent chip. */
+ * (DeepSeek Harness, OpenCode). Mirrors the desktop agent chip. */
 export function AgentPresetSheet({
   visible,
   onDismiss,

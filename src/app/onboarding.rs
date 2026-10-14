@@ -162,7 +162,7 @@ fn provider_setup_row(provider: ProviderKind, theme: &Theme) -> Div {
         .child(
             div()
                 .flex_none()
-                .child(provider_mark(theme, provider, 14.0, theme.text_secondary)),
+                .child(provider_mark(provider, 14.0, theme.text_secondary)),
         )
         .child(
             div()

@@ -82,7 +82,7 @@ settings.daemon: デーモン
 settings.computer_use: コンピュータ操作
 settings.general_keywords: 一般 ローカル プロジェクト 会話 プライバシー 分析 テレメトリ 匿名 共有 アップデート 自動 バージョン
 settings.appearance_keywords: 外観 テーマ システム ライト ダーク 言語 英語 中国語 簡体字 日本語 フォント サイズ 文字 エディタ
-settings.providers_keywords: プロバイダー エージェント モデル CLI バージョン インストール 検出 claude codex cursor opencode opencode2 amp grok pi
+settings.providers_keywords: プロバイダー エージェント モデル CLI バージョン インストール 検出 claude codex cursor opencode amp grok pi
 settings.skills: スキル
 settings.skills_keywords: スキル ライブラリ エージェント 無効 有効 削除 claude codex cursor opencode pi amp 共有
 settings.usage_keywords: 使用状況 トークン コスト 支出 キャッシュ 日別 グラフ モデル 内訳 履歴 claude codex
@@ -208,9 +208,6 @@ providers.disable: "%{provider} を無効にする"
 providers.disabled_for_new_tasks: 新規タスクでは無効
 providers.model_count_one: "%{count} 個のモデル"
 providers.model_count_many: "%{count} 個のモデル"
-providers.catalog_probe_failed: "モデル一覧が古い可能性があります — %{error}"
-providers.catalog_probe_failed_to_run: "モデル一覧が古い可能性があります — %{command} を実行できませんでした"
-providers.catalog_probe_exited: "モデル一覧が古い可能性があります — CLI がコード %{code} で終了しました"
 providers.not_detected_as: PATH 上に %{command} が見つかりません
 providers.using_override: PATH の自動検出ではなく %{path} を使用しています
 providers.invalid_override: このパスには実行可能なファイルがありません。空欄にすると PATH から自動検出します

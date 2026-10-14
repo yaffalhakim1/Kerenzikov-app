@@ -16,7 +16,6 @@ use agent_client_protocol::schema::v1::{
 use agent_client_protocol::{Agent, Client, ConnectionTo};
 
 use crate::model::{ProviderAgentPreset, ProviderKind, ProviderModel, ProviderModelOption};
-use crate::opencode_session::OpenCodeServer;
 
 const CODEX_RPC_TIMEOUT: Duration = Duration::from_secs(5);
 const PI_RPC_TIMEOUT: Duration = Duration::from_secs(10);
@@ -103,7 +102,7 @@ pub fn fallback_models(provider: ProviderKind) -> Vec<ProviderModel> {
         ProviderKind::Fx => Vec::new(),
         // Discovery through the adopted v2 service is authoritative; a
         // fabricated catalog would offer models the server rejects.
-        ProviderKind::OpenCode | ProviderKind::OpenCode2 => Vec::new(),
+        ProviderKind::OpenCode => Vec::new(),
         // Grok's catalog comes from `grok models`, which includes any custom
         // model the user configured. An invented fallback would offer a model
         // the CLI rejects, so discovery is authoritative.
@@ -198,9 +197,8 @@ pub fn discover_catalog(
             (CatalogProbe::legacy(models), presets)
         }
         ProviderKind::Fx => (CatalogProbe::legacy(discover_fx_models(binary)), None),
-        ProviderKind::OpenCode => discover_opencode_catalog(binary),
-        ProviderKind::OpenCode2 => {
-            let (models, presets) = crate::opencode2_session::discover_catalog(binary);
+        ProviderKind::OpenCode => {
+            let (models, presets) = crate::opencode_session::discover_catalog(binary);
             (CatalogProbe::legacy(models), presets)
         }
         ProviderKind::Grok => (CatalogProbe::legacy(discover_grok_models(binary)), None),
@@ -546,102 +544,6 @@ fn parse_cursor_models(output: &str) -> Vec<ProviderModel> {
         .collect()
 }
 
-fn discover_opencode_models(binary: &Path) -> CatalogProbe {
-    let mut command = crate::command_env::command(binary);
-    // `--verbose` prints each model's full metadata as JSON, which is the only
-    // place the CLI exposes `variants` — the reasoning-effort ladder. The bare
-    // listing is ids alone, so parsing it left every OpenCode model without an
-    // effort control.
-    let command = command.args(["models", "--verbose"]);
-    let Ok(output) = crate::command_env::output(command) else {
-        // The CLI could not run at all; keep the last good cache rather than
-        // shrink the picker on a launch/transport failure.
-        return CatalogProbe::Failed(Some(
-            tr!("providers.catalog_probe_failed_to_run", command = "opencode models"),
-        ));
-    };
-    if !output.status.success() {
-        // A non-zero exit (e.g. opencode rejecting its own config) is a failed
-        // probe, not an authoritative empty catalog. Retain the cache, and keep
-        // the CLI's own explanation: without it a broken provider is
-        // indistinguishable from one that simply has no new models.
-        return CatalogProbe::Failed(Some(cli_failure_reason(&output)));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let verbose = parse_opencode_verbose_models(&stdout);
-    let models = if verbose.is_empty() {
-        // An older CLI without `--verbose` still prints the plain listing.
-        parse_opencode_models(&stdout)
-    } else {
-        verbose
-    };
-    // The CLI ran successfully: trust whatever it enumerated, even when that is
-    // nothing, so removing a provider from opencode shrinks the picker.
-    CatalogProbe::Authoritative(models)
-}
-
-/// A one-line reason from a provider CLI that exited unsuccessfully.
-///
-/// The CLIs report failures on stderr, sometimes after an ANSI-colored
-/// `Error:` banner and sometimes above a dump of the offending file. Keeping
-/// only the explanatory lines keeps the message renderable in the picker's
-/// status line while preserving the actual cause.
-fn cli_failure_reason(output: &std::process::Output) -> String {
-    failure_reason_from_parts(output.status.code(), &output.stderr, &output.stdout)
-}
-
-/// The portable half of [`cli_failure_reason`], split out because a
-/// `std::process::ExitStatus` cannot be constructed in a test.
-fn failure_reason_from_parts(code: Option<i32>, stderr: &[u8], stdout: &[u8]) -> String {
-    /// Enough for the CLI's headline and its first explanatory line, which is
-    /// where the cause lives. A config error then dumps the offending file and
-    /// a caret diagram; none of that belongs in a status line.
-    const MAX_LINES: usize = 2;
-    const MAX_CHARS: usize = 240;
-
-    let stderr = String::from_utf8_lossy(stderr);
-    let stdout = String::from_utf8_lossy(stdout);
-    let text = if stderr.trim().is_empty() {
-        stdout.as_ref()
-    } else {
-        stderr.as_ref()
-    };
-    // Every detail line is considered, not just the first: OpenCode prints a
-    // generic "Unexpected error" banner above the line that actually says what
-    // broke, so keeping only the first would discard the cause. Section rules
-    // like "--- JSONC Input ---" are decoration, not explanation.
-    let detail = text
-        .lines()
-        .map(strip_ansi)
-        .filter_map(|line| {
-            let line = line.trim();
-            let line = line.strip_prefix("Error:").unwrap_or(line).trim();
-            let is_section_rule = line.starts_with("---") && line.ends_with("---");
-            (!line.is_empty() && !is_section_rule).then(|| line.to_owned())
-        })
-        .take(MAX_LINES)
-        .collect::<Vec<_>>()
-        .join(" — ");
-    if detail.is_empty() {
-        return tr!(
-            "providers.catalog_probe_exited",
-            code = code.unwrap_or(-1)
-        );
-    }
-    let detail = if detail.chars().count() > MAX_CHARS {
-        let truncated = detail.chars().take(MAX_CHARS).collect::<String>();
-        format!("{}…", truncated.trim_end())
-    } else {
-        detail
-    };
-    tr!("providers.catalog_probe_failed", error = detail)
-}
-
-/// OpenCode's server is the authority on agents: builtins and every agent the
-/// user configured resolve through its config pipeline, the same pipeline the
-/// prompt body's `agent` id dispatches against. Prefer an already-resident
-/// server; otherwise start a short-lived one in a neutral directory, because
-/// no project session exists yet at probe time and the agents listing is
 /// The roles Codex spawns its own subagents as, read from the user's own
 /// `~/.codex/agents/*.toml` directory plus Codex's built-ins.
 ///
@@ -724,127 +626,6 @@ const CODEX_BUILT_IN_AGENTS: &[(&str, &str)] = &[
     ("worker", "Execution-focused agent for implementation and fixes."),
     ("explorer", "Read-heavy codebase exploration agent."),
 ];
-
-/// global.
-fn discover_opencode_catalog(
-    binary: &Path,
-) -> (CatalogProbe, Option<Vec<ProviderAgentPreset>>) {
-    (
-        discover_opencode_models(binary),
-        discover_opencode_agent_presets(binary),
-    )
-}
-
-fn discover_opencode_agent_presets(binary: &Path) -> Option<Vec<ProviderAgentPreset>> {
-    // The read is cwd-agnostic, so whatever server is already resident answers.
-    if let Some(resident) = crate::opencode_pool::any_live(binary) {
-        return read_opencode_agent_presets(&resident);
-    }
-    let probe_cwd = std::env::temp_dir().join("waku-opencode-agent-probe");
-    std::fs::create_dir_all(&probe_cwd).ok()?;
-    // A one-shot server this probe owns; dropping it shuts the process down.
-    let server = crate::opencode_session::OpenCodeServer::start(binary, &probe_cwd).ok()?;
-    read_opencode_agent_presets(&server)
-}
-
-fn read_opencode_agent_presets(server: &OpenCodeServer) -> Option<Vec<ProviderAgentPreset>> {
-    let payload = server.request("GET", "/agent", None).ok()?;
-    Some(parse_opencode_agent_presets(&payload))
-}
-
-/// Only agents a session can actually be STARTED as, the same policy the
-/// OpenCode 2 catalog applies: `subagent` entries are dispatch targets rather
-/// than session compositions, and hidden primaries are the server's own
-/// internal agents. An absent or unknown `mode` stays startable.
-fn parse_opencode_agent_presets(payload: &Value) -> Vec<ProviderAgentPreset> {
-    payload
-        .as_array()
-        .map(|agents| {
-            agents
-                .iter()
-                .filter_map(|agent| {
-                    let id = agent.get("name").and_then(Value::as_str)?.trim();
-                    if id.is_empty() {
-                        return None;
-                    }
-                    if agent.get("mode").and_then(Value::as_str) == Some("subagent") {
-                        return None;
-                    }
-                    if agent
-                        .get("hidden")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false)
-                    {
-                        return None;
-                    }
-                    let mut preset = ProviderAgentPreset::new(id, id);
-                    preset.is_default = id == "build";
-                    preset.description = agent
-                        .get("description")
-                        .and_then(Value::as_str)
-                        .map(str::trim)
-                        .filter(|description| !description.is_empty())
-                        .map(str::to_owned);
-                    Some(preset)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Reads the JSON blocks `opencode models --verbose` prints, one per model.
-///
-/// Each block is preceded by a `provider/model` heading, but the block itself
-/// carries `providerID` and `id`, so the headings are ignored and only
-/// balanced top-level objects are decoded. A block that fails to parse is
-/// skipped rather than failing the whole catalogue.
-fn parse_opencode_verbose_models(output: &str) -> Vec<ProviderModel> {
-    let cleaned = strip_ansi(output);
-    let mut models = Vec::new();
-    let mut block = String::new();
-    let mut depth = 0_usize;
-    for line in cleaned.lines() {
-        let trimmed = line.trim_end();
-        if depth == 0 && trimmed.trim() != "{" {
-            continue;
-        }
-        depth += trimmed.matches('{').count();
-        depth = depth.saturating_sub(trimmed.matches('}').count());
-        block.push_str(trimmed);
-        block.push('\n');
-        if depth == 0 {
-            if let Some(model) = parse_opencode_verbose_model(&block) {
-                models.push(model);
-            }
-            block.clear();
-        }
-    }
-    models
-}
-
-fn parse_opencode_verbose_model(block: &str) -> Option<ProviderModel> {
-    let value: Value = serde_json::from_str(block).ok()?;
-    let provider = value.get("providerID").and_then(Value::as_str)?.trim();
-    let id = value.get("id").and_then(Value::as_str)?.trim();
-    if provider.is_empty() || id.is_empty() {
-        return None;
-    }
-    let name = value
-        .get("name")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| display_name_from_slug(id));
-    let model = ProviderModel::new(format!("{provider}/{id}"), name)
-        .sub_provider(display_name_from_slug(provider));
-    let variants = value
-        .get("variants")
-        .and_then(Value::as_object)
-        .map(|variants| variants.keys().map(String::as_str).collect::<Vec<_>>())
-        .unwrap_or_default();
-    Some(with_variant_efforts(model, variants))
-}
 
 fn discover_deepseek_catalog(
     binary: &Path,
@@ -1012,26 +793,6 @@ fn parse_fx_models(catalog: &Value, default_model: Option<&str>) -> Vec<Provider
             }
             model.is_default = default_model == Some(id);
             model
-        })
-        .collect()
-}
-
-fn parse_opencode_models(output: &str) -> Vec<ProviderModel> {
-    output
-        .lines()
-        .filter_map(|line| {
-            let id = strip_ansi(line).trim().to_owned();
-            if id.is_empty() || id.split_whitespace().count() != 1 || !id.contains('/') {
-                return None;
-            }
-            let (provider, model) = id.split_once('/')?;
-            if provider.is_empty() || model.is_empty() {
-                return None;
-            }
-            Some(
-                ProviderModel::new(id.clone(), display_name_from_slug(model))
-                    .sub_provider(display_name_from_slug(provider)),
-            )
         })
         .collect()
 }
@@ -2382,73 +2143,6 @@ printf '%s\n' '{"type":"control_response","response":{"request_id":"waku-initial
         assert!(models[0].is_default);
     }
 
-    /// The exact shape `opencode models --verbose` prints, trimmed to the
-    /// fields Waku reads. `variants` is the reasoning-effort ladder and is the
-    /// only reason to parse the verbose form at all.
-    #[test]
-    fn opencode_verbose_models_expose_their_variants_as_reasoning_efforts() {
-        let output = r#"opencode-go/deepseek-v4-flash
-{
-  "id": "deepseek-v4-flash",
-  "providerID": "opencode-go",
-  "name": "DeepSeek V4 Flash",
-  "variants": {
-    "low": { "reasoningEffort": "low" },
-    "high": { "reasoningEffort": "high" },
-    "max": { "reasoningEffort": "max" }
-  }
-}
-opencode/big-pickle
-{
-  "id": "big-pickle",
-  "providerID": "opencode",
-  "name": "Big Pickle",
-  "variants": {}
-}
-"#;
-        let models = parse_opencode_verbose_models(output);
-        assert_eq!(models.len(), 2, "{models:?}");
-
-        let flash = &models[0];
-        assert_eq!(flash.id, "opencode-go/deepseek-v4-flash");
-        assert_eq!(flash.name, "DeepSeek V4 Flash");
-        assert_eq!(
-            flash
-                .reasoning_efforts
-                .iter()
-                .map(|effort| effort.id.as_str())
-                .collect::<Vec<_>>(),
-            ["low", "high", "max"],
-            "provider ordering is preserved"
-        );
-        assert_eq!(flash.default_reasoning_effort.as_deref(), Some("max"));
-
-        // A model with no ladder keeps none, which is what hides the control.
-        assert!(models[1].reasoning_efforts.is_empty());
-        assert!(models[1].default_reasoning_effort.is_none());
-    }
-
-    /// A CLI too old for `--verbose` still prints the plain listing, so the
-    /// parser must not turn that into an empty catalogue.
-    #[test]
-    fn opencode_verbose_parsing_ignores_a_plain_listing() {
-        assert!(
-            parse_opencode_verbose_models(
-                "opencode-go/deepseek-v4-flash
-"
-            )
-            .is_empty()
-        );
-        assert_eq!(
-            parse_opencode_models(
-                "opencode-go/deepseek-v4-flash
-"
-            )
-            .len(),
-            1
-        );
-    }
-
     #[test]
     fn variant_efforts_default_to_the_strongest_offered() {
         let model = with_variant_efforts(ProviderModel::new("a/b", "B"), ["none", "thinking"]);
@@ -2463,17 +2157,6 @@ opencode/big-pickle
         // `thinking` is not on the known strength ladder, so the only ranked
         // id wins; an unranked id never becomes the default while one ranks.
         assert_eq!(model.default_reasoning_effort.as_deref(), Some("none"));
-    }
-
-    #[test]
-    fn parses_opencode_provider_qualified_models() {
-        let models = parse_opencode_models(
-            "opencode/big-pickle\n\u{1b}[32mgithub-copilot/gpt-5.4\u{1b}[0m\nnoise here\n",
-        );
-        assert_eq!(models.len(), 2);
-        assert_eq!(models[1].id, "github-copilot/gpt-5.4");
-        assert_eq!(models[1].name, "GPT-5.4");
-        assert_eq!(models[1].sub_provider.as_deref(), Some("Github Copilot"));
     }
 
     #[test]
@@ -2643,50 +2326,6 @@ opencode/big-pickle
             presets[1].description.as_deref(),
             Some("A local composition")
         );
-    }
-
-    #[test]
-    fn parses_opencode_agents_into_the_startable_presets() {
-        let presets = parse_opencode_agent_presets(&json!([
-            {
-                "name": "build",
-                "mode": "primary",
-                "builtIn": true,
-                "description": "Build agent for editing files and running commands"
-            },
-            {
-                "name": "plan",
-                "mode": "primary",
-                "builtIn": true,
-                "description": "Planning agent for exploration"
-            },
-            {
-                "name": "reviewer",
-                "mode": "all",
-                "description": "  A custom reviewer composition  "
-            },
-            {"name": "general", "builtIn": true},
-            {"name": "librarian", "mode": "subagent", "builtIn": true},
-            {"name": "title", "mode": "primary", "hidden": true},
-            {"name": "   ", "mode": "primary"},
-            {"mode": "primary"}
-        ]));
-
-        assert_eq!(
-            presets
-                .iter()
-                .map(|preset| preset.id.as_str())
-                .collect::<Vec<_>>(),
-            ["build", "plan", "reviewer", "general"]
-        );
-        assert!(presets[0].is_default);
-        assert!(!presets[1].is_default);
-        assert_eq!(
-            presets[2].description.as_deref(),
-            Some("A custom reviewer composition")
-        );
-        // A missing description stays empty rather than a placeholder string.
-        assert_eq!(presets[3].description, None);
     }
 
     /// Writes a `~/.codex/agents` directory under a temp `CODEX_HOME` and
@@ -3340,188 +2979,5 @@ done
                     .join(",")
             );
         }
-    }
-}
-
-#[cfg(test)]
-mod opencode_catalog_failure {
-    use super::*;
-
-    /// OpenCode reports its own startup failures on stderr behind an ANSI
-    /// banner, and a config error then dumps the offending file. The reason has
-    /// to survive the color codes and the banner while dropping the dump: it is
-    /// the only thing that tells the user their catalog is stale rather than
-    /// simply unchanged.
-    #[test]
-    fn a_failed_probe_reports_the_cli_reason_without_ansi_noise() {
-        // Captured verbatim from `opencode models` with an invalid config.
-        let reason = failure_reason_from_parts(
-            Some(1),
-            b"\x1b[91m\x1b[1mError: \x1b[0mConfig file at C:\\tmp\\opencode.json is not valid JSON(C): \n--- JSONC Input ---\n{ this is not valid json\n\n--- Errors ---\nInvalidSymbol at line 1, column 3\n",
-            b"",
-        );
-
-        assert!(reason.contains("is not valid JSON"), "{reason}");
-        assert!(!reason.contains('\u{1b}'), "ANSI codes leaked: {reason}");
-        assert!(!reason.contains('\n'), "must stay one line: {reason}");
-        assert!(
-            !reason.contains("JSONC Input") && !reason.contains("InvalidSymbol"),
-            "the config dump is not a status line: {reason}"
-        );
-    }
-
-    /// OpenCode's generic banner sits above the line that actually says what
-    /// broke, so the real cause has to survive alongside it.
-    #[test]
-    fn a_generic_banner_does_not_hide_the_underlying_cause() {
-        let reason = failure_reason_from_parts(
-            Some(1),
-            b"\x1b[91m\x1b[1mError: \x1b[0mUnexpected error\n\nno such column: project_id\n",
-            b"",
-        );
-
-        assert!(reason.contains("no such column: project_id"), "{reason}");
-        assert!(!reason.contains('\u{1b}'), "ANSI codes leaked: {reason}");
-        assert!(!reason.contains('\n'), "must stay one line: {reason}");
-    }
-
-    /// A provider's own message can contain a percent sign, which must reach
-    /// the UI literally rather than being read as another interpolation slot.
-    #[test]
-    fn a_percent_sign_in_the_cli_message_survives_interpolation() {
-        let reason = failure_reason_from_parts(Some(1), b"quota 100% exceeded\n", b"");
-
-        assert!(reason.contains("100%"), "{reason}");
-    }
-
-    /// A silent failure still has to say something, so the exit code is the
-    /// fallback rather than an empty status line.
-    #[test]
-    fn a_silent_failure_falls_back_to_the_exit_code() {
-        let reason = failure_reason_from_parts(Some(3), b"", b"");
-
-        assert!(reason.contains('3'), "{reason}");
-    }
-
-    /// The picker keeps the last good catalog when a probe fails, so the reason
-    /// has to arrive alongside that catalog. Without it a stale list looks
-    /// exactly like a healthy one, and a newly configured model silently never
-    /// appears — the failure that motivated this.
-    #[test]
-    fn an_unrunnable_cli_reports_a_reason_and_keeps_the_previous_catalog() {
-        let absent = std::env::temp_dir().join("waku-catalog-probe-absent-binary");
-        // What the failed probe must fall back to. Computed rather than
-        // assumed non-empty: a machine with no cache and no fallback catalog
-        // legitimately yields nothing, and asserting otherwise would make this
-        // test pass or fail on the developer's disk instead of on the code.
-        let expected = cached_models(ProviderKind::OpenCode)
-            .unwrap_or_else(|| fallback_models(ProviderKind::OpenCode));
-
-        let (models, _presets, error) = discover_catalog(ProviderKind::OpenCode, &absent);
-
-        assert!(
-            error.is_some(),
-            "an unrunnable CLI must report why the catalog is stale"
-        );
-        assert_eq!(
-            models, expected,
-            "a failed probe must fall back to the previous catalog"
-        );
-    }
-
-    /// Proves the whole path against the real CLI: a config OpenCode refuses to
-    /// load makes the probe report *why* instead of silently serving the cached
-    /// catalog. Ignored by default because it needs the CLI installed.
-    #[test]
-    #[ignore = "requires an installed opencode"]
-    fn a_rejected_config_surfaces_the_cli_reason() {
-        let binary =
-            crate::command_env::find_executable("opencode").expect("opencode is not installed");
-        let config_root = std::env::temp_dir().join(format!(
-            "waku-catalog-bad-config-{}",
-            std::process::id()
-        ));
-        let config_directory = config_root.join("opencode");
-        std::fs::create_dir_all(&config_directory).expect("the config directory should be created");
-        std::fs::write(
-            config_directory.join("opencode.json"),
-            "{ this is not valid json",
-        )
-        .expect("the broken config should be written");
-
-        // The probe shells out through this process's environment, so the
-        // override has to be scoped to the call and then restored.
-        let previous = std::env::var_os("XDG_CONFIG_HOME");
-        // SAFETY: single-threaded test binary section; no other thread reads
-        // the environment while this is set.
-        unsafe { std::env::set_var("XDG_CONFIG_HOME", &config_root) };
-        let (models, _presets, error) = discover_catalog(ProviderKind::OpenCode, &binary);
-        match previous {
-            Some(value) => unsafe { std::env::set_var("XDG_CONFIG_HOME", value) },
-            None => unsafe { std::env::remove_var("XDG_CONFIG_HOME") },
-        }
-        let _ = std::fs::remove_dir_all(&config_root);
-
-        let error = error.expect("a rejected config must be reported as a failed probe");
-        assert!(
-            error.contains("not valid JSON") || error.contains("Config file"),
-            "the CLI's own explanation should survive: {error}"
-        );
-        assert!(
-            error.chars().count() < 400,
-            "the reason must stay a status line, not a config dump: {error}"
-        );
-        // The failed probe retains the previous catalog rather than shrinking
-        // the picker. Computed rather than assumed non-empty, so the assertion
-        // tests the code instead of whatever happens to be cached on this disk.
-        let expected = cached_models(ProviderKind::OpenCode)
-            .unwrap_or_else(|| fallback_models(ProviderKind::OpenCode));
-        assert_eq!(
-            models, expected,
-            "a failed probe must keep the catalog it had"
-        );
-    }
-}
-
-#[cfg(test)]
-mod opencode_effort_smoke {
-    use super::CatalogProbe;
-
-    /// Proves against the real CLI that the effort ladder is populated, which
-    /// canned JSON cannot.
-    #[test]
-    #[ignore = "requires an installed, authenticated opencode"]
-    fn discovers_reasoning_efforts_from_the_installed_cli() {
-        let CatalogProbe::Authoritative(models) =
-            super::discover_opencode_models(std::path::Path::new("opencode"))
-        else {
-            panic!("expected an authoritative probe from the installed CLI");
-        };
-        let with_efforts: Vec<_> = models
-            .iter()
-            .filter(|model| !model.reasoning_efforts.is_empty())
-            .collect();
-        println!(
-            "models={} with efforts={}",
-            models.len(),
-            with_efforts.len()
-        );
-        for model in with_efforts.iter().take(4) {
-            println!(
-                "  {} -> {:?} (default {:?})",
-                model.id,
-                model
-                    .reasoning_efforts
-                    .iter()
-                    .map(|effort| effort.id.as_str())
-                    .collect::<Vec<_>>(),
-                model.default_reasoning_effort
-            );
-        }
-        assert!(!models.is_empty(), "expected a catalogue");
-        assert!(
-            !with_efforts.is_empty(),
-            "expected some models to expose variants"
-        );
     }
 }

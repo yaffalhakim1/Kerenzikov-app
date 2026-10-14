@@ -78,7 +78,7 @@ settings.daemon: 守护进程
 settings.computer_use: 电脑操作
 settings.general_keywords: 通用 本地 项目 对话 隐私 匿名 使用数据 分析 分享 更新 自动 版本
 settings.appearance_keywords: 外观 主题 系统 浅色 深色 语言 英语 中文 简体 字号 字体 大小 编辑器
-settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode opencode2 amp grok pi
+settings.providers_keywords: 服务商 智能体 模型 命令行 版本 安装 检测 claude codex cursor opencode amp grok pi
 settings.skills: 技能
 settings.skills_keywords: 技能 技能库 智能体 禁用 启用 删除 claude codex cursor opencode pi amp 共享
 settings.usage_keywords: 用量 令牌 费用 支出 缓存 每日 图表 模型 明细 历史 claude codex
@@ -200,10 +200,7 @@ providers.disable: 禁用 %{provider}
 providers.disabled_for_new_tasks: 新建任务时不可用
 providers.model_count_one: "%{count} 个模型"
 providers.model_count_many: "%{count} 个模型"
-providers.catalog_probe_failed: "模型列表可能已过期 — %{error}"
-providers.catalog_probe_failed_to_run: "模型列表可能已过期 — 无法运行 %{command}"
-providers.catalog_probe_exited: "模型列表可能已过期 — CLI 以代码 %{code} 退出"
-providers.not_detected_as: 未在 PATH 中找到 %{command}
+providers.not_detected_as: "在 PATH 上未检测到 %{command}"
 providers.using_override: 正在使用 %{path}，不再从 PATH 自动检测
 providers.invalid_override: 此路径下没有可执行文件。清空后可恢复从 PATH 自动检测
 providers.detected_at: 已在 %{path} 检测到

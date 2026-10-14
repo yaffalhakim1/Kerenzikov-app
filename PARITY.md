@@ -73,12 +73,12 @@ Version at last audit: `0.1.51`.
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Whole-list providers | done | OpenCode `todo.updated`, Codex `turn/plan/updated`, ACP `plan`, DeepSeek `todo/write`. |
+| Whole-list providers | done | Codex `turn/plan/updated`, ACP `plan`, DeepSeek `todo/write`. |
 | Tool-call providers | done | Claude and Amp `TodoWrite`, Pi and Oh My Pi `todo`. |
 | Claude Code task tools | done | v2.1.268's `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet`, including the namespaced `mcp__*` spellings, rebuilt across calls by `activity::TodoAccumulator`. |
 | Footer meter | done | `{completed}/{total}` chip opening a popover, capped at 8 rows. |
 | Tray above the composer | done | Windowed around the in-progress step, collapsible per session. |
-| OpenCode 2 | deferred | Publishes no task-list event on the adopted service stream, so the panel is correctly empty for it. Not a defect. |
+| OpenCode | deferred | Publishes no task-list event on the adopted service stream, so the panel is correctly empty for it. Not a defect. |
 | Forcing Claude's task tools | deferred | The CLI's `Task*` tools are absent by default on current models. Waku does not set `CLAUDE_CODE_ENABLE_TODO_TOOLS`; the list appears only when the provider publishes one. |
 
 ## Sessions and sidebar

@@ -484,7 +484,7 @@ pub(super) fn permission_responses(
 }
 
 /// The same policy without the lock, for a driver whose permission state is
-/// already thread-local. OpenCode 2 runs commands and events on one worker, so
+/// already thread-local. OpenCode runs commands and events on one worker, so
 /// there is nothing to serialize against.
 pub(super) fn permission_responses_in(
     permissions: &mut OpenCodePermissionState,

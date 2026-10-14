@@ -417,7 +417,6 @@ export function providerLabel(provider: ProviderKind): string {
     deepSeek: 'DeepSeek',
     fx: 'Fx',
     openCode: 'OpenCode',
-    openCode2: 'OpenCode 2',
     grok: 'Grok',
     jcode: 'Jcode',
     kimi: 'Kimi',
@@ -442,22 +441,21 @@ export function runtimeModeLabel(mode: RuntimeMode): string {
  * Whether an agent-preset picker has anything useful to offer this session.
  *
  * Mirrors the desktop rule (`AgentSession::can_choose_agent_preset`): presets
- * belong to Codex, DeepSeek, OpenCode and OpenCode 2. A session that has
- * already started keeps them only where the provider can swap a live agent —
- * Codex composes through its own `~/.codex/agents` directory with no live
- * switch, so a started Codex session keeps the role it began with. A busy turn
- * is never interrupted to re-role the agent.
+ * belong to Codex, DeepSeek and OpenCode. A session that has already started
+ * keeps them only where the provider can swap a live agent — Codex composes
+ * through its own `~/.codex/agents` directory with no live switch, so a started
+ * Codex session keeps the role it began with. A busy turn is never interrupted
+ * to re-role the agent.
  */
 export function agentPresetAvailable(session: AgentSession, busy: boolean): boolean {
   if (busy) return false;
   const supported =
     session.provider === 'codex'
     || session.provider === 'deepSeek'
-    || session.provider === 'openCode'
-    || session.provider === 'openCode2';
+    || session.provider === 'openCode';
   if (!supported) return false;
   if (!sessionHasStarted(session)) return true;
-  return session.provider === 'openCode' || session.provider === 'openCode2';
+  return session.provider === 'openCode';
 }
 
 /** Occupancy as a whole percentage, or null when the window size is unknown. */
