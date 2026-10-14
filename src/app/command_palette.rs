@@ -327,7 +327,7 @@ fn resume_sessions_skeleton(theme: &Theme, provider: ProviderKind) -> AnyElement
         // Staggered widths read as distinct titles rather than a filled block.
         let title_width = [212.0, 168.0, 236.0, 148.0, 196.0][index];
         let mark: AnyElement = if index == 0 {
-            provider_mark(theme, provider, 16.0, provider_color(theme, provider)).into_any_element()
+            provider_mark(provider, 16.0, provider_color(theme, provider)).into_any_element()
         } else {
             skeleton::bar(16.0, 16.0, theme).into_any_element()
         };
@@ -1841,7 +1841,6 @@ impl Waku {
                                 .items_center()
                                 .gap(px(7.0))
                                 .child(provider_mark(
-                                    &theme,
                                     provider,
                                     13.0,
                                     provider_color(&theme, provider),
@@ -1872,7 +1871,6 @@ impl Waku {
                                 .hover(|button| button.bg(theme.overlay))
                                 .active(|button| button.opacity(0.82))
                                 .child(provider_mark(
-                                    &theme,
                                     provider,
                                     13.0,
                                     provider_color(&theme, provider),
@@ -1918,12 +1916,12 @@ impl Waku {
                     PaletteIcon::Asset(_) => theme.text_secondary,
                     PaletteIcon::Provider(provider) => provider_color(&theme, provider),
                 };
-                // A provider row renders through `provider_mark` so OpenCode 2
+                // A provider row renders through `provider_mark` so OpenCode
                 // keeps its badge; an asset row stays a plain tinted icon.
                 let row_mark = match item.icon {
                     PaletteIcon::Asset(path) => icon(path, 16.0, icon_color).into_any_element(),
                     PaletteIcon::Provider(provider) => {
-                        provider_mark(&theme, provider, 16.0, icon_color).into_any_element()
+                        provider_mark(provider, 16.0, icon_color).into_any_element()
                     }
                 };
                 let importing = match &item.action {

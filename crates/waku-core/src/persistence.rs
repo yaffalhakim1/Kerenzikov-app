@@ -3019,18 +3019,22 @@ mod tests {
         let connection = Connection::open_in_memory().unwrap();
         apply_migrations(&connection).unwrap();
 
-        // Drop the record of the last migration without dropping its tables,
-        // as an interrupted run would leave things.
-        let (last, _) = MIGRATIONS.last().expect("at least one migration");
+        // Drop the record of one migration without dropping its tables, as an
+        // interrupted run would leave things. The migration is chosen by
+        // property rather than by position: this asserts that a re-run fails
+        // loudly, which only a non-idempotent migration can demonstrate, and the
+        // newest migration is a data-only `UPDATE … WHERE` that is safe to
+        // repeat. The initial schema creates tables, so re-running it collides.
+        let (tag, _) = MIGRATIONS.first().expect("at least one migration");
         connection
-            .execute("DELETE FROM migrations WHERE tag = ?1", params![last])
+            .execute("DELETE FROM migrations WHERE tag = ?1", params![tag])
             .unwrap();
 
         // It re-runs and fails loudly rather than silently skipping, because
         // the tables it creates already exist.
         let error = apply_migrations(&connection).unwrap_err();
         assert!(
-            error.to_string().contains(last),
+            error.to_string().contains(tag),
             "the failure names the migration: {error}"
         );
     }

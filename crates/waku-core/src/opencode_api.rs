@@ -1,4 +1,4 @@
-//! Typed bindings for the OpenCode 2 background service's HTTP API.
+//! Typed bindings for the OpenCode background service's HTTP API.
 //!
 //! Every function here is a free function over an [`Endpoint`], so this module
 //! knows nothing about who owns the service, how it was discovered, or which
@@ -15,7 +15,7 @@
 //! * The response envelope is per-route. `/api/session*`, `/api/model`,
 //!   `/api/agent`, `/api/command` and `/api/skill` wrap their payload in
 //!   `{ data }` (the catalogue routes add `{ location, data }`), while
-//!   `/api/health` and `POST /api/session/{id}/interrupt` answer bare. One
+//!   `/api/info` and `POST /api/session/{id}/interrupt` answer bare. One
 //!   generic `Envelope<T>` would silently turn a bare payload into a decode
 //!   failure, so unwrapping is chosen per route.
 //! * Pagination terminates on an EMPTY `data` array, never on an absent
@@ -36,8 +36,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::http_wire::{self, Endpoint};
-use crate::opencode_session::encode_path_segment;
+use crate::http_wire::{self, Endpoint, encode_path_segment};
 
 /// The service answers a local request in single-digit milliseconds; a budget
 /// this large only ever covers a machine under load.
@@ -110,14 +109,14 @@ impl std::fmt::Display for ApiError {
                 tag,
                 message,
                 status,
-            } => write!(formatter, "OpenCode 2 {tag} (HTTP {status}): {message}"),
+            } => write!(formatter, "OpenCode {tag} (HTTP {status}): {message}"),
             Self::Http { status, body } if body.trim().is_empty() => {
-                write!(formatter, "OpenCode 2 request failed with HTTP {status}")
+                write!(formatter, "OpenCode request failed with HTTP {status}")
             }
             Self::Http { status, body } => {
                 write!(
                     formatter,
-                    "OpenCode 2 request failed with HTTP {status}: {body}"
+                    "OpenCode request failed with HTTP {status}: {body}"
                 )
             }
             Self::Transport(error) => write!(formatter, "{error}"),
@@ -158,11 +157,18 @@ pub(crate) enum Delivery {
     Queue,
 }
 
+/// What `GET /api/info` answers: the running server identifying itself.
+///
+/// `pid` is load-bearing — it is what proves the port a stale registration file
+/// names is still the process that wrote it — and `version` is surfaced rather
+/// than compared, because the CLI's own incumbency check compares against *its*
+/// build and Waku is not an OpenCode build.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-pub(crate) struct Health {
-    pub healthy: bool,
+pub(crate) struct ServiceInfo {
     pub version: String,
     pub pid: u32,
+    #[serde(default)]
+    pub urls: Vec<String>,
 }
 
 /// A model as a session refers to it.
@@ -833,9 +839,12 @@ pub(crate) struct CommandInfo {
 
 /// A skill as the catalogue lists it.
 ///
-/// The response also carries the skill's whole markdown body under `content`.
-/// It is deliberately not decoded: nothing above this layer renders it, and
-/// keeping it would make every skill's file resident for the life of the app.
+/// The v2 schema is `{ id, name, path, content }` plus optional `description`
+/// and `autoinvoke`. There is no `slash` flag: every skill the route returns is
+/// invocable, which is what the catalogue means. The response also carries the
+/// skill's whole markdown body under `content`; it is deliberately not decoded,
+/// because nothing above this layer renders it and keeping it would make every
+/// skill's file resident for the life of the app.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub(crate) struct SkillInfo {
     pub id: String,
@@ -843,16 +852,20 @@ pub(crate) struct SkillInfo {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
-    pub slash: Option<bool>,
-    #[serde(default)]
     pub autoinvoke: Option<bool>,
-    pub location: String,
 }
 
-pub(crate) fn health(endpoint: &Endpoint) -> Result<Health> {
-    // Bare payload: health is one of the routes with no `{ data }` envelope.
-    let response = request(endpoint, "GET", "/api/health", None, HEALTH_TIMEOUT)?;
-    decode(response, "health")
+/// The daemon's own description of itself.
+///
+/// This is the liveness probe. `GET /api/health` is what it used to be, and
+/// OpenCode 2.0.27 answers that route with 404 — the path now belongs to the web
+/// UI, which serves HTML on `/health`. `/api/info` is the route the CLI's own
+/// troubleshooting flow uses (`opencode api get /api/info`), and it is the only
+/// one that reports the `pid` the registration file has to be checked against.
+pub(crate) fn info(endpoint: &Endpoint) -> Result<ServiceInfo> {
+    // Bare payload: this route carries no `{ data }` envelope.
+    let response = request(endpoint, "GET", "/api/info", None, HEALTH_TIMEOUT)?;
+    decode(response, "info")
 }
 
 /// Creates a session with a CLIENT-MINTED id.
@@ -880,7 +893,7 @@ pub(crate) fn create_session(
     }
     if let Some(model) = model {
         body["model"] = serde_json::to_value(model).map_err(|error| {
-            ApiError::Transport(anyhow!("could not encode the OpenCode 2 model: {error}"))
+            ApiError::Transport(anyhow!("could not encode the OpenCode model: {error}"))
         })?;
     }
     let response = request(
@@ -906,9 +919,11 @@ pub(crate) fn delete_session(endpoint: &Endpoint, session: &str) -> Result<()> {
 }
 
 pub(crate) fn rename_session(endpoint: &Endpoint, session: &str, title: &str) -> Result<()> {
-    let path = format!("/api/session/{}/rename", encode_path_segment(session));
+    // A PATCH on the session itself; the dedicated `/rename` sub-route this
+    // used to post to is gone.
+    let path = format!("/api/session/{}", encode_path_segment(session));
     let body = json!({ "title": title });
-    request(endpoint, "POST", &path, Some(&body), REQUEST_TIMEOUT)?;
+    request(endpoint, "PATCH", &path, Some(&body), REQUEST_TIMEOUT)?;
     Ok(())
 }
 
@@ -951,8 +966,10 @@ pub(crate) fn export_session(
     session: &str,
     sanitize: bool,
 ) -> Result<SessionExport> {
+    // The export route moved under `/experimental`; the bare `/api/session/{id}`
+    // form answers 404.
     let path = format!(
-        "/api/session/{}/export?sanitize={sanitize}",
+        "/api/experimental/session/{}/export?sanitize={sanitize}",
         encode_path_segment(session)
     );
     let response = request(endpoint, "GET", &path, None, TRANSFER_TIMEOUT)?;
@@ -1010,24 +1027,31 @@ pub(crate) fn list_inbox(endpoint: &Endpoint, session: &str) -> Result<Vec<Value
 }
 
 /// Promotes a queued entry so it interrupts the running turn.
+///
+/// One `PATCH` with a `delivery` body replaced the `/steer` and `/queue`
+/// sub-routes; the `delivery` value is the same enum the prompt body takes.
 pub(crate) fn steer_inbox(endpoint: &Endpoint, session: &str, inbox_id: &str) -> Result<()> {
-    let path = format!(
-        "/api/session/{}/inbox/{}/steer",
-        encode_path_segment(session),
-        encode_path_segment(inbox_id)
-    );
-    request(endpoint, "POST", &path, None, REQUEST_TIMEOUT)?;
-    Ok(())
+    set_inbox_delivery(endpoint, session, inbox_id, Delivery::Steer)
 }
 
 /// Demotes an entry so it waits for the running turn to finish.
 pub(crate) fn queue_inbox(endpoint: &Endpoint, session: &str, inbox_id: &str) -> Result<()> {
+    set_inbox_delivery(endpoint, session, inbox_id, Delivery::Queue)
+}
+
+fn set_inbox_delivery(
+    endpoint: &Endpoint,
+    session: &str,
+    inbox_id: &str,
+    delivery: Delivery,
+) -> Result<()> {
     let path = format!(
-        "/api/session/{}/inbox/{}/queue",
+        "/api/session/{}/inbox/{}",
         encode_path_segment(session),
         encode_path_segment(inbox_id)
     );
-    request(endpoint, "POST", &path, None, REQUEST_TIMEOUT)?;
+    let body = json!({ "delivery": delivery });
+    request(endpoint, "PATCH", &path, Some(&body), REQUEST_TIMEOUT)?;
     Ok(())
 }
 
@@ -1103,7 +1127,7 @@ pub(crate) fn reply_permission(
 ) -> Result<()> {
     if matches!(reply, PermissionReply::Always) {
         return Err(ApiError::Transport(anyhow!(
-            "OpenCode 2 permission replies must not save a persistent rule"
+            "OpenCode permission replies must not save a persistent rule"
         )));
     }
     let path = format!(
@@ -1139,12 +1163,13 @@ pub(crate) fn reply_form(
 }
 
 pub(crate) fn cancel_form(endpoint: &Endpoint, session: &str, form_id: &str) -> Result<()> {
+    // Dismissing a form is a DELETE on the form itself; `/cancel` is gone.
     let path = format!(
-        "/api/session/{}/form/{}/cancel",
+        "/api/session/{}/form/{}",
         encode_path_segment(session),
         encode_path_segment(form_id)
     );
-    request(endpoint, "POST", &path, None, REQUEST_TIMEOUT)?;
+    request(endpoint, "DELETE", &path, None, REQUEST_TIMEOUT)?;
     Ok(())
 }
 
@@ -1163,7 +1188,7 @@ pub(crate) fn active_sessions(endpoint: &Endpoint) -> Result<HashSet<String>> {
     let active = data(response, "active sessions")?;
     let Value::Object(active) = active else {
         return Err(ApiError::Transport(anyhow!(
-            "OpenCode 2 returned an unreadable active session map"
+            "OpenCode returned an unreadable active session map"
         )));
     };
     Ok(active.into_iter().map(|(id, _)| id).collect())
@@ -1265,22 +1290,22 @@ fn request(
 /// Unwraps the `{ data }` envelope.
 ///
 /// Called per route rather than from [`request`], because the envelope is not
-/// universal: `/api/health` and `POST …/interrupt` answer bare, and wrapping
+/// universal: `/api/info` and `POST …/interrupt` answer bare, and wrapping
 /// those would turn a good response into a decode failure.
 fn data(response: Value, what: &str) -> Result<Value> {
     match response {
         Value::Object(mut fields) => fields.remove("data").ok_or_else(|| {
-            ApiError::Transport(anyhow!("OpenCode 2 returned no {what} in its response"))
+            ApiError::Transport(anyhow!("OpenCode returned no {what} in its response"))
         }),
         _ => Err(ApiError::Transport(anyhow!(
-            "OpenCode 2 returned an unreadable {what} response"
+            "OpenCode returned an unreadable {what} response"
         ))),
     }
 }
 
 fn decode<T: DeserializeOwned>(response: Value, what: &str) -> Result<T> {
     serde_json::from_value(response).map_err(|error| {
-        ApiError::Transport(anyhow!("OpenCode 2 returned an invalid {what}: {error}"))
+        ApiError::Transport(anyhow!("OpenCode returned an invalid {what}: {error}"))
     })
 }
 
@@ -1850,15 +1875,15 @@ mod tests {
     /// Reads the user's own running service. Kept out of the default run
     /// because it depends on a daemon this test must never start.
     #[test]
-    #[ignore = "requires a running opencode2 service"]
-    fn live_service_answers_health_and_catalogues() {
+    #[ignore = "requires a running opencode service"]
+    fn live_service_answers_info_and_catalogues() {
         let registration = std::fs::read_to_string(
             dirs::state_dir()
                 .or_else(|| dirs::home_dir().map(|home| home.join(".local/state")))
                 .expect("a state directory")
                 .join("opencode/service.json"),
         )
-        .expect("a registered opencode2 service");
+        .expect("a registered opencode service");
         let registration: Value = serde_json::from_str(&registration).unwrap();
         let endpoint = Endpoint::basic(
             registration["url"].as_str().unwrap(),
@@ -1867,9 +1892,8 @@ mod tests {
         )
         .unwrap();
 
-        let health = health(&endpoint).unwrap();
-        assert!(health.healthy);
-        assert_eq!(health.pid, registration["pid"].as_u64().unwrap() as u32);
+        let info = info(&endpoint).unwrap();
+        assert_eq!(info.pid, registration["pid"].as_u64().unwrap() as u32);
 
         let directory = std::env::current_dir().unwrap();
         let directory = std::fs::canonicalize(directory).unwrap();

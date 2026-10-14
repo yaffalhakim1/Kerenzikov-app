@@ -52,8 +52,8 @@ Tool   write_todos     Tool   manage_todo_list
 Secondary gap: `write_todos`, `WriteTodos`, and `manage_todo_list` are plausible
 tool names used by other harnesses and MCP servers, and none classify as `Plan`.
 
-**Not a bug:** OpenCode 2 publishes no task-list event on the adopted service
-stream (`docs/providers.md:84`). That panel is correctly empty.
+**Not a bug:** OpenCode publishes no task-list event on the adopted service
+stream (`docs/providers.md:101`). That panel is correctly empty.
 
 ---
 

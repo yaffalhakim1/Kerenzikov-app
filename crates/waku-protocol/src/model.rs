@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum ProviderKind {
     Amp,
@@ -22,13 +22,40 @@ pub enum ProviderKind {
     Jcode,
     Kimi,
     OhMyPi,
+    /// OpenCode's v2 CLI. Its daemon (`opencode serve`) is adopted rather than
+    /// owned, and its API is the only dialect the CLI still speaks — the v1
+    /// routes Waku once drove are gone, so there is no second provider to
+    /// choose between.
     OpenCode,
-    OpenCode2,
     Pi,
 }
 
+/// Hand-written rather than derived for one reason: `openCode2` was a separate
+/// provider until the CLI dropped its v1 API, and every artifact written before
+/// that — session rows, persisted session JSON, the settings file — spells the
+/// id that way. Both ids named the same binary, so the retired one reads as
+/// `OpenCode` instead of failing to parse. A derived `Deserialize` would reject
+/// it, and `#[serde(alias)]` is not expressible here because `ts-rs` cannot
+/// parse that attribute and warns on every build.
+impl<'de> Deserialize<'de> for ProviderKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let id = String::deserialize(deserializer)?;
+        // The retired provider was spelled two ways: `opencode2` by
+        // `ProviderKind::id()`, and `openCode2` as its camelCase wire tag.
+        // `opencode` is the surviving id and matches through `kind.id()`.
+        let retired = id == "opencode2" || id == "openCode2";
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.id() == id || (kind == &Self::OpenCode && retired))
+            .ok_or_else(|| serde::de::Error::unknown_variant(&id, &["a known provider id"]))
+    }
+}
+
 impl ProviderKind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 13] = [
         Self::Amp,
         Self::Claude,
         Self::Codex,
@@ -37,7 +64,6 @@ impl ProviderKind {
         Self::DeepSeek,
         Self::Fx,
         Self::OpenCode,
-        Self::OpenCode2,
         Self::Grok,
         Self::Jcode,
         Self::Kimi,
@@ -55,7 +81,6 @@ impl ProviderKind {
             Self::DeepSeek => "deepseek",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
-            Self::OpenCode2 => "opencode2",
             Self::Grok => "grok",
             Self::Jcode => "jcode",
             Self::Kimi => "kimi",
@@ -74,7 +99,6 @@ impl ProviderKind {
             Self::DeepSeek => "DeepSeek Harness",
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
-            Self::OpenCode2 => "OpenCode 2",
             Self::Grok => "Grok Build",
             Self::Jcode => "Jcode",
             Self::Kimi => "Kimi Code",
@@ -93,7 +117,6 @@ impl ProviderKind {
             Self::DeepSeek => "DeepSeek",
             Self::Fx => "Fx",
             Self::OpenCode => "OpenCode",
-            Self::OpenCode2 => "OpenCode 2",
             Self::Grok => "Grok",
             Self::Jcode => "Jcode",
             Self::Kimi => "Kimi",
@@ -116,7 +139,6 @@ impl ProviderKind {
             Self::DeepSeek => "dsh",
             Self::Fx => "fx",
             Self::OpenCode => "opencode",
-            Self::OpenCode2 => "opencode2",
             Self::Grok => "grok",
             Self::Jcode => "jcode",
             Self::Kimi => "kimi",
@@ -140,7 +162,6 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
-                | Self::OpenCode2
                 | Self::Grok
                 | Self::OhMyPi
                 | Self::Pi
@@ -156,7 +177,6 @@ impl ProviderKind {
                 | Self::Cursor
                 | Self::DeepSeek
                 | Self::OpenCode
-                | Self::OpenCode2
                 | Self::Grok
                 | Self::OhMyPi
                 | Self::Pi
@@ -174,7 +194,6 @@ impl ProviderKind {
                 | Self::Fx
                 | Self::Jcode
                 | Self::OpenCode
-                | Self::OpenCode2
                 | Self::Grok
                 | Self::Kimi
                 | Self::OhMyPi
@@ -183,8 +202,8 @@ impl ProviderKind {
     }
 
     /// Providers a session can be composed of: their CLI publishes an agent
-    /// catalogue (`GET /agent` on OpenCode's server, `GET /api/agent` on
-    /// OpenCode 2) and accepts one of its ids for a session.
+    /// catalogue (`GET /api/agent` on OpenCode's v2 server) and accepts one of
+    /// its ids for a session.
     ///
     /// Codex qualifies by a different route: it reads `~/.codex/agents/*.toml`
     /// itself (a documented, user-owned directory), so the catalogue exists and
@@ -193,21 +212,17 @@ impl ProviderKind {
     /// work, not a session-level switch — which is why it is *not* added to
     /// [`Self::supports_live_agent_switch`].
     pub fn supports_agent_presets(self) -> bool {
-        matches!(
-            self,
-            Self::Codex | Self::DeepSeek | Self::OpenCode | Self::OpenCode2
-        )
+        matches!(self, Self::Codex | Self::DeepSeek | Self::OpenCode)
     }
 
     /// Whether an already-started session can be given a different agent.
     ///
-    /// OpenCode sends the agent on every prompt, steer and command body, and
-    /// OpenCode 2 adds `POST /api/session/{id}/agent` — "switch the agent used
-    /// by subsequent provider turns" — so both can change agent between turns.
+    /// OpenCode exposes `POST /api/session/{id}/agent` — "switch the agent used
+    /// by subsequent provider turns" — so it can change agent between turns.
     /// DeepSeek Harness takes the preset once, at `session.create`, and never
     /// re-applies it when resuming, so its choice is fixed once history exists.
     pub fn supports_live_agent_switch(self) -> bool {
-        matches!(self, Self::OpenCode | Self::OpenCode2)
+        matches!(self, Self::OpenCode)
     }
 }
 
@@ -239,10 +254,18 @@ pub enum ProviderResumeCursor {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         fork_context: Option<String>,
     },
+    /// OpenCode's v2 session id.
+    ///
+    /// `directory` is the workspace the session was created in. v2 sessions
+    /// carry their own location, so a cold fork reaches the right session
+    /// without a server working directory — but the field is retained because
+    /// it is what the resume catalog lists, and dropping it would lose the
+    /// distinction between two sessions that share an id across projects.
+    ///
+    /// Sessions persisted while this was a separate `openCode2` provider stored
+    /// the cursor under that tag; migration `0004` rewrites those rows to
+    /// `openCode`, since both named the same server.
     OpenCode {
-        session_id: String,
-    },
-    OpenCode2 {
         session_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         directory: Option<String>,
@@ -293,8 +316,7 @@ impl ProviderResumeCursor {
             },
             ProviderKind::DeepSeek => Self::DeepSeek { session_id: id },
             ProviderKind::Fx => Self::Fx { session_id: id },
-            ProviderKind::OpenCode => Self::OpenCode { session_id: id },
-            ProviderKind::OpenCode2 => Self::OpenCode2 {
+            ProviderKind::OpenCode => Self::OpenCode {
                 session_id: id,
                 directory: None,
             },
@@ -322,7 +344,6 @@ impl ProviderResumeCursor {
             Self::DeepSeek { .. } => ProviderKind::DeepSeek,
             Self::Fx { .. } => ProviderKind::Fx,
             Self::OpenCode { .. } => ProviderKind::OpenCode,
-            Self::OpenCode2 { .. } => ProviderKind::OpenCode2,
             Self::Grok { .. } => ProviderKind::Grok,
             Self::Jcode { .. } => ProviderKind::Jcode,
             Self::Kimi { .. } => ProviderKind::Kimi,
@@ -339,8 +360,7 @@ impl ProviderResumeCursor {
             | Self::Copilot { session_id }
             | Self::DeepSeek { session_id }
             | Self::Fx { session_id }
-            | Self::OpenCode { session_id }
-            | Self::OpenCode2 { session_id, .. }
+            | Self::OpenCode { session_id, .. }
             | Self::Grok { session_id }
             | Self::Jcode { session_id }
             | Self::Kimi { session_id }
@@ -4407,10 +4427,29 @@ mod tests {
         assert_eq!(ProviderKind::DeepSeek.command(), "dsh");
         assert_eq!(ProviderKind::Fx.command(), "fx");
         assert_eq!(ProviderKind::OpenCode.command(), "opencode");
-        assert_eq!(ProviderKind::OpenCode2.id(), "opencode2");
-        assert_eq!(ProviderKind::OpenCode2.command(), "opencode2");
         assert_eq!(ProviderKind::Grok.command(), "grok");
         assert_eq!(ProviderKind::Pi.command(), "pi");
+    }
+
+    /// `openCode2` named the same binary as `openCode` and is still written
+    /// into the settings file and session rows by older builds. Reading it as
+    /// an unknown variant would make those artifacts unparseable — a session
+    /// list that fails to hydrate, or a settings load that silently falls back
+    /// to defaults.
+    #[test]
+    fn the_retired_opencode2_id_deserializes_as_opencode() {
+        // Both spellings the retired provider used: the camelCase wire tag and
+        // the lower-case form `ProviderKind::id()` produced.
+        for retired in ["\"openCode2\"", "\"opencode2\""] {
+            let kind: ProviderKind = serde_json::from_str(retired).unwrap();
+            assert_eq!(kind, ProviderKind::OpenCode, "{retired}");
+        }
+        // The canonical spelling still round-trips unchanged.
+        assert_eq!(
+            serde_json::to_value(ProviderKind::OpenCode).unwrap(),
+            serde_json::json!("openCode")
+        );
+        assert!(serde_json::from_str::<ProviderKind>("\"not-a-provider\"").is_err());
     }
 
     fn import_turn(completed_at: u64) -> AgentTurn {
@@ -4491,7 +4530,6 @@ mod tests {
             ProviderKind::Cursor,
             ProviderKind::DeepSeek,
             ProviderKind::OpenCode,
-            ProviderKind::OpenCode2,
             ProviderKind::Grok,
             ProviderKind::Pi,
         ] {
@@ -4513,7 +4551,6 @@ mod tests {
         assert!(ProviderKind::DeepSeek.supports_model_discovery());
         assert!(ProviderKind::Fx.supports_model_discovery());
         assert!(ProviderKind::OpenCode.supports_model_discovery());
-        assert!(ProviderKind::OpenCode2.supports_model_discovery());
         assert!(ProviderKind::Grok.supports_model_discovery());
         assert!(ProviderKind::Pi.supports_model_discovery());
     }
@@ -4526,13 +4563,11 @@ mod tests {
         assert!(!ProviderKind::Claude.supports_agent_presets());
         assert!(ProviderKind::DeepSeek.supports_agent_presets());
         assert!(ProviderKind::OpenCode.supports_agent_presets());
-        assert!(ProviderKind::OpenCode2.supports_agent_presets());
     }
 
     #[test]
     fn only_opencode_switches_the_agent_of_a_live_session() {
         assert!(ProviderKind::OpenCode.supports_live_agent_switch());
-        assert!(ProviderKind::OpenCode2.supports_live_agent_switch());
         assert!(!ProviderKind::DeepSeek.supports_live_agent_switch());
         assert!(!ProviderKind::Codex.supports_live_agent_switch());
     }
@@ -4579,37 +4614,38 @@ mod tests {
     }
 
     #[test]
-    fn opencode2_cursor_round_trips_with_its_wire_tag() {
+    fn opencode_cursor_round_trips_with_its_wire_tag() {
         let cursor =
-            ProviderResumeCursor::from_session_id(ProviderKind::OpenCode2, "ses_abc".into());
+            ProviderResumeCursor::from_session_id(ProviderKind::OpenCode, "ses_abc".into());
         let json = serde_json::to_string(&cursor).unwrap();
-        assert!(json.contains("\"provider\":\"openCode2\""), "{json}");
+        assert!(json.contains("\"provider\":\"openCode\""), "{json}");
         assert!(json.contains("\"sessionId\":\"ses_abc\""), "{json}");
-        assert_eq!(cursor.provider(), ProviderKind::OpenCode2);
+        assert_eq!(cursor.provider(), ProviderKind::OpenCode);
         assert_eq!(cursor.native_id(), "ses_abc");
         assert_eq!(
-            serde_json::to_value(ProviderKind::OpenCode2).unwrap(),
-            serde_json::json!("openCode2")
+            serde_json::to_value(ProviderKind::OpenCode).unwrap(),
+            serde_json::json!("openCode")
         );
     }
 
-    /// OpenCode 2 must not share v1's cursor variant: every driver asserts
-    /// `cursor.provider() == provider` before resuming, and a shared variant
-    /// would let a v1 session resume against the v2 server.
+    /// Sessions persisted while OpenCode was two providers stored the cursor
+    /// under the `openCode2` tag. Migration `0004` rewrites those rows, so what
+    /// has to hold is that the rewritten form loads into the surviving variant.
     #[test]
-    fn opencode_cursors_are_distinct_per_major_version() {
-        let v1 = ProviderResumeCursor::from_session_id(ProviderKind::OpenCode, "ses_x".into());
-        let v2 = ProviderResumeCursor::from_session_id(ProviderKind::OpenCode2, "ses_x".into());
-        assert_ne!(v1.provider(), v2.provider());
-        assert_ne!(
-            serde_json::to_value(&v1).unwrap(),
-            serde_json::to_value(&v2).unwrap()
-        );
+    fn the_migrated_cursor_tag_loads_into_the_surviving_variant() {
+        let migrated = r#"{"provider":"openCode","sessionId":"ses_abc","directory":"/tmp/w"}"#;
+        let cursor: ProviderResumeCursor = serde_json::from_str(migrated).unwrap();
+        assert_eq!(cursor.provider(), ProviderKind::OpenCode);
+        assert_eq!(cursor.native_id(), "ses_abc");
+        let ProviderResumeCursor::OpenCode { directory, .. } = cursor else {
+            panic!("the migrated tag must land on the OpenCode variant");
+        };
+        assert_eq!(directory.as_deref(), Some("/tmp/w"));
     }
 
     #[test]
     fn all_contains_every_provider_kind() {
-        assert_eq!(ProviderKind::ALL.len(), 14);
+        assert_eq!(ProviderKind::ALL.len(), 13);
         let ids: std::collections::HashSet<_> =
             ProviderKind::ALL.iter().map(|kind| kind.id()).collect();
         assert_eq!(

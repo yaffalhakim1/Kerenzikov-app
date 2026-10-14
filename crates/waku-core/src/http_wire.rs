@@ -92,6 +92,36 @@ pub(crate) fn request_json(
         .with_context(|| format!("OpenCode returned invalid JSON for {method} {path}"))
 }
 
+/// Sends one request to a loopback server that needs no authentication.
+///
+/// Shared by the providers that own their server and hand it a bare port rather
+/// than a registration endpoint.
+pub(crate) fn request_json_on_port(
+    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    timeout: Duration,
+) -> anyhow::Result<Value> {
+    request_json(&Endpoint::local(port), method, path, body, timeout)
+}
+
+/// Percent-encodes one path segment.
+///
+/// Provider ids, session ids and request ids are opaque to Waku, so anything
+/// outside the unreserved set has to be escaped before it reaches a route.
+pub(crate) fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
+}
+
 pub(crate) fn http_request(
     endpoint: &Endpoint,
     method: &str,
@@ -394,7 +424,7 @@ pub(crate) fn open_event_stream(
 pub(crate) enum SseFrame {
     /// A frame with only `data:` lines, which is every ordinary event.
     Data(String),
-    /// A frame carrying an `event:` field. OpenCode 2 uses this solely to
+    /// A frame carrying an `event:` field. OpenCode uses this solely to
     /// report that the stream itself failed
     /// (`event: effect/httpapi/stream/failure`), so a reader that ignores the
     /// field sits blind on a dead stream until its read timeout fires.

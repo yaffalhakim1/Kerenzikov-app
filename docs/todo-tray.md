@@ -91,7 +91,7 @@ transport that publishes a plan — see the table in
 [providers.md](providers.md#the-agents-task-list). Two cases where it stays
 empty, and neither is a defect:
 
-- **OpenCode 2** publishes no task-list event on the adopted service stream.
+- **OpenCode** publishes no task-list event on the adopted service stream.
 - **Claude Code on a current model** may not create tasks at all. The CLI's
   `Task*` tools are default only on older models; on newer ones Claude tracks
   multi-step work without a written list. Waku does not set
