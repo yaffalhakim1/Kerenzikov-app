@@ -1887,7 +1887,7 @@ impl Waku {
 
     fn render_providers_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = Theme::current(cx);
-        let checking = self.provider_detection_remaining > 0;
+        let checking = self.provider_detection_in_flight();
         let checked_label = self
             .provider_detection_checked_at
             .filter(|_| !checking)
