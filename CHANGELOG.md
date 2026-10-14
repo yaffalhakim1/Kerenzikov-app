@@ -12,6 +12,19 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.67]
+
+### Android
+
+- **Fixed: one long task took about eleven seconds to open, then closed the
+  app.** A task whose steps had produced a lot of output — command output,
+  reasoning, arguments — built every step's whole body as a nested disclosure,
+  three deep, whether or not it was shown. The screen now builds a step's body
+  only when it is opened, and a step's sections are headings rather than
+  disclosures of their own. On the task that reported this, opening goes from
+  11.2s to 3.8s, the worst frame from 6.4s to none, and the views it has to
+  create from 743 to 85.
+
 ## [0.1.66]
 
 ### Desktop, web and Android
