@@ -118,6 +118,29 @@ pub(super) fn project_memory_prompt(context: &str, prompt: &str) -> String {
 const PROJECT_MEMORY_OPEN: &str = "<project-memory>";
 const PROJECT_MEMORY_CLOSE: &str = "</project-memory>";
 
+/// How long a provider re-detection may run before it is abandoned.
+///
+/// Detection is a handful of local probes and normally finishes in well under a
+/// second, so this only ever fires on a probe that is not coming back. It exists
+/// because the page reads "in flight" from a counter that no probe can lower on
+/// its own: without a deadline, one lost answer pins the Providers page to
+/// "Checking…" and disables the button that would retry it.
+const PROVIDER_DETECTION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Whether a provider re-detection with this state is still running.
+///
+/// Split from the entity so the one behaviour that matters here — a run whose
+/// budget is spent is finished even though probes are outstanding — is a plain
+/// function with a test, rather than something only reachable through a live
+/// window.
+fn detection_in_flight(
+    remaining: usize,
+    deadline: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    remaining > 0 && !deadline.is_some_and(|deadline| now >= deadline)
+}
+
 /// Remove a leading memory block from text a provider echoed back.
 ///
 /// Providers return the exact transport text as the user turn, so an echoed
@@ -1471,12 +1494,26 @@ impl Waku {
         changed
     }
 
+    /// Whether a provider re-detection is genuinely still running.
+    ///
+    /// Past its deadline the run is treated as finished even though some probes
+    /// never answered, so the page stops saying "Checking…" and the refresh
+    /// button works again. Reading this rather than the raw counter is what
+    /// keeps a lost probe from wedging the page.
+    pub(super) fn provider_detection_in_flight(&self) -> bool {
+        detection_in_flight(
+            self.provider_detection_remaining,
+            self.provider_detection_deadline,
+            Instant::now(),
+        )
+    }
+
     /// Re-detect provider CLIs off-thread — every provider for the Providers
     /// page's refresh, or one whose binary override just changed. Also re-runs
     /// model discovery and version probes for whatever the detection finds
     /// installed.
     pub(super) fn refresh_provider_detection(&mut self, scope: Option<ProviderKind>) {
-        if self.provider_detection_remaining > 0 {
+        if self.provider_detection_in_flight() {
             return;
         }
         let providers = match scope {
@@ -1484,6 +1521,10 @@ impl Waku {
             None => ProviderKind::ALL.to_vec(),
         };
         self.provider_detection_remaining = providers.len();
+        // Bound the run. A provider whose probe never answers — a CLI that
+        // hangs on `--version`, a daemon request that never returns — must not
+        // leave the page stuck in "Checking…" with the refresh button disabled.
+        self.provider_detection_deadline = Some(Instant::now() + PROVIDER_DETECTION_TIMEOUT);
         let overrides = self.state.provider_binary_overrides.clone();
         let provider_detection_tx = self.provider_detection_tx.clone();
         let event_wake = self.event_wake_tx.clone();
@@ -1522,6 +1563,7 @@ impl Waku {
             .is_err()
         {
             self.provider_detection_remaining = 0;
+            self.provider_detection_deadline = None;
             return;
         }
         // A refresh means "re-check everything about these providers":
@@ -1541,6 +1583,7 @@ impl Waku {
             self.provider_detection_remaining = self.provider_detection_remaining.saturating_sub(1);
             if self.provider_detection_remaining == 0 {
                 self.provider_detection_checked_at = Some(Instant::now());
+                self.provider_detection_deadline = None;
             }
             if let Some(existing) = self
                 .probes
@@ -1564,6 +1607,20 @@ impl Waku {
             } else {
                 self.provider_versions.remove(&provider);
             }
+            changed = true;
+        }
+        // A probe that never answered must not hold the page hostage. When the
+        // budget is spent, settle with whatever landed: the missing rows keep
+        // their previous state and the refresh button becomes usable again.
+        if self.provider_detection_remaining > 0
+            && !detection_in_flight(
+                self.provider_detection_remaining,
+                self.provider_detection_deadline,
+                Instant::now(),
+            )
+        {
+            self.provider_detection_remaining = 0;
+            self.provider_detection_deadline = None;
             changed = true;
         }
         for provider in installed_providers {
@@ -3776,6 +3833,30 @@ impl Waku {
         // pump on the metered `StreamFrame` cadence rather than reading as idle.
         changed |= backlog_remains;
         changed || selected_changed
+    }
+}
+
+#[cfg(test)]
+mod provider_detection_tests {
+    use super::detection_in_flight;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_detection_run_past_its_deadline_is_no_longer_in_flight() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_secs(30);
+
+        // Mid-run: outstanding probes and time left.
+        assert!(detection_in_flight(5, Some(deadline), now));
+        // Finished normally: nothing outstanding.
+        assert!(!detection_in_flight(0, None, now));
+        // The case that used to wedge the page: probes never answered, and the
+        // budget is spent. This must read as finished so the button works.
+        assert!(!detection_in_flight(5, Some(deadline), now + Duration::from_secs(31)));
+        // Exactly at the deadline counts as spent.
+        assert!(!detection_in_flight(5, Some(deadline), deadline));
+        // A run with no deadline recorded still settles on the counter alone.
+        assert!(detection_in_flight(1, None, now));
     }
 }
 

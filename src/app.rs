@@ -1194,6 +1194,12 @@ pub struct Waku {
     /// Providers the running re-detection has not answered for yet; empty
     /// means no re-detection is in flight.
     provider_detection_remaining: usize,
+    /// When the running re-detection must be abandoned, whether or not every
+    /// probe answered. A probe that never returns would otherwise leave
+    /// `provider_detection_remaining` above zero forever, which shows the page
+    /// as permanently "Checking…" and — because a refresh is refused while one
+    /// is in flight — makes the button inert with no way back.
+    provider_detection_deadline: Option<Instant>,
     /// When provider detection last completed, for the page's "Checked" label.
     provider_detection_checked_at: Option<Instant>,
     /// The provider row expanded on the Providers page, if any. The binary
@@ -2971,6 +2977,7 @@ impl Waku {
                 provider_detection_tx,
                 provider_detection_events,
                 provider_detection_remaining: 0,
+                provider_detection_deadline: None,
                 provider_detection_checked_at: None,
                 expanded_provider_settings: None,
                 provider_path_input,
