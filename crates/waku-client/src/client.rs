@@ -322,8 +322,26 @@ fn run_client(
 
         match socket.read() {
             Ok(Message::Text(text)) => {
-                let Ok(message) = serde_json::from_str::<ServerMessage>(text.as_ref()) else {
-                    continue;
+                // A message this client cannot decode must not be dropped
+                // silently. Dropping it leaves the request it answers pending
+                // until `REQUEST_TIMEOUT`, so the user sees a bare "timed out
+                // after 120s" naming the operation and nothing else — the
+                // symptom of a wire-tag mismatch, reported as a hang. Fail
+                // every outstanding request with the decoder's own message
+                // instead, which names the field and the unexpected value.
+                let message = match serde_json::from_str::<ServerMessage>(text.as_ref()) {
+                    Ok(message) => message,
+                    Err(error) => {
+                        let detail = format!(
+                            "the Kerenzikov daemon sent a message this client could not decode: {error}"
+                        );
+                        for (_, pending) in inner.pending.lock().drain() {
+                            let _ = pending.send(Err(RpcError {
+                                message: detail.clone(),
+                            }));
+                        }
+                        continue;
+                    }
                 };
                 match message {
                     ServerMessage::Response {

@@ -43,13 +43,19 @@ impl<'de> Deserialize<'de> for ProviderKind {
         D: serde::Deserializer<'de>,
     {
         let id = String::deserialize(deserializer)?;
-        // The retired provider was spelled two ways: `opencode2` by
-        // `ProviderKind::id()`, and `openCode2` as its camelCase wire tag.
-        // `opencode` is the surviving id and matches through `kind.id()`.
+        // Two spellings are both live and both have to be accepted. The wire
+        // and every persisted artifact use `wire_tag()` — the camelCase the
+        // derived `Serialize` emits and the generated TypeScript declares —
+        // while `id()` is the lower-case form used for element keys and
+        // thread names. Accepting only one of them broke the round trip for
+        // every provider whose two spellings differ (`openCode`, `ohMyPi`,
+        // `deepSeek`): the daemon refused the tag its own client sent, and
+        // the client silently dropped the tag its own daemon returned.
         let retired = id == "opencode2" || id == "openCode2";
         Self::ALL
             .into_iter()
-            .find(|kind| kind.id() == id || (kind == &Self::OpenCode && retired))
+            .find(|kind| kind.id() == id || kind.wire_tag() == id)
+            .or_else(|| retired.then_some(Self::OpenCode))
             .ok_or_else(|| serde::de::Error::unknown_variant(&id, &["a known provider id"]))
     }
 }
@@ -85,6 +91,30 @@ impl ProviderKind {
             Self::Jcode => "jcode",
             Self::Kimi => "kimi",
             Self::OhMyPi => "ohmypi",
+            Self::Pi => "pi",
+        }
+    }
+
+    /// The provider's wire tag: the camelCase name the derived `Serialize`
+    /// emits, the generated TypeScript declares, and every persisted artifact
+    /// stores. Distinct from [`Self::id`], which is the lower-case form used
+    /// for element keys and thread names; the two differ for `openCode`,
+    /// `ohMyPi`, and `deepSeek`. `provider_tags_match_serialization` pins this
+    /// table to the derived serialization so the two cannot drift apart again.
+    pub fn wire_tag(self) -> &'static str {
+        match self {
+            Self::Amp => "amp",
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Copilot => "copilot",
+            Self::Cursor => "cursor",
+            Self::DeepSeek => "deepSeek",
+            Self::Fx => "fx",
+            Self::Grok => "grok",
+            Self::Jcode => "jcode",
+            Self::Kimi => "kimi",
+            Self::OhMyPi => "ohMyPi",
+            Self::OpenCode => "openCode",
             Self::Pi => "pi",
         }
     }
@@ -4462,6 +4492,47 @@ mod tests {
         assert_eq!(ProviderKind::OpenCode.command(), "opencode");
         assert_eq!(ProviderKind::Grok.command(), "grok");
         assert_eq!(ProviderKind::Pi.command(), "pi");
+    }
+
+    /// Every provider's `wire_tag()` must equal what the derived `Serialize`
+    /// actually emits. The two were allowed to drift: the hand-written
+    /// `Deserialize` matched `id()`, so `openCode`, `ohMyPi` and `deepSeek`
+    /// round-tripped to a parse error — the daemon rejected the tag its own
+    /// client sent, and the client dropped the tag its own daemon returned,
+    /// which surfaced as a 120s timeout rather than a decode failure.
+    #[test]
+    fn provider_tags_match_serialization() {
+        for kind in ProviderKind::ALL {
+            let serialized = serde_json::to_value(kind).unwrap();
+            assert_eq!(
+                serialized,
+                serde_json::Value::String(kind.wire_tag().to_owned()),
+                "{kind:?} serializes as {serialized} but wire_tag() says {:?}",
+                kind.wire_tag()
+            );
+            let decoded: ProviderKind =
+                serde_json::from_value(serialized.clone()).unwrap_or_else(|error| {
+                    panic!("{kind:?} did not round-trip from {serialized}: {error}")
+                });
+            assert_eq!(decoded, kind, "{kind:?} round-tripped to {decoded:?}");
+        }
+    }
+
+    /// Both live spellings decode, so a caller holding either one — the wire
+    /// tag from an artifact, or the lower-case `id()` used for element keys —
+    /// is understood. Before this, only the lower-case form parsed.
+    #[test]
+    fn both_live_provider_spellings_decode() {
+        for kind in ProviderKind::ALL {
+            for spelling in [kind.id(), kind.wire_tag()] {
+                let decoded: ProviderKind =
+                    serde_json::from_value(serde_json::Value::String(spelling.to_owned()))
+                        .unwrap_or_else(|error| {
+                            panic!("{kind:?} did not decode from {spelling:?}: {error}")
+                        });
+                assert_eq!(decoded, kind, "{spelling:?} decoded to {decoded:?}");
+            }
+        }
     }
 
     /// `openCode2` named the same binary as `openCode` and is still written
