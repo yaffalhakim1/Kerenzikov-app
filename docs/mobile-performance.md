@@ -17,12 +17,13 @@ The phone has two threads that matter:
 - **The JS thread** runs your React render, the event reducer, and every
   `setState`.
 - **The UI thread** (also called the compositor) runs native layout, scrolling,
-  and any animation started with `useNativeDriver`.
+  and any Reanimated worklet animation.
 
 A frame is expensive when JS does work on every frame, or when layout changes on
 every frame. Every rule below limits one of those two things.
 
-Baseline we measured on a Galaxy A55 with a release build (2026-10-07): cold
+Baseline we measured on a Galaxy A55 with a release build (2026-10-07, **before
+the PanelUI reskin**, so it is a floor rather than a current reading): cold
 start 636 ms (621, 631, 649, 643, first run thrown out); stream jank 1.79% while
 idle-following and 6.42% while actively scrolling; frame times p50/p90/p95/p99
 of 13 / 14-15 / 15-21 / 20-27 ms, with no frame over 30 ms; the panel at 120 Hz.
@@ -39,12 +40,44 @@ usually the daemon round-trip or the phone getting hot. Only re-measure (see
 | A stream commit | The live transcript row and the task-list summary entry | The runtime pump, at most ~8.3 times a second |
 | An interactive event | The screen it affects, right away | Permissions, user input, turn start/finish |
 | A user action | The component that handles it | Taps, scroll transitions |
-| A `useNativeDriver` animation | Nothing on the JS thread; the UI thread owns the frames | Veils, loaders, fades, cross-fades |
+| A Reanimated worklet | Nothing on the JS thread; the UI thread owns the frames | Veils, loaders, fades, cross-fades |
 | A timer that re-arms itself | The component, on every tick, on the JS thread | **Never for decoration.** That is a paint loop (see the veil) |
 
 The rule that keeps the app fast: a streamed token must reach **one row and
 nothing else**. Nothing on the stream path may read the whole session object,
 because the reducer replaces that object on every commit.
+
+### The presentation layer is PanelUI, and its rules are ours
+
+The UI is built from [PanelUI](https://panelui.dev) components, styled with
+Uniwind (Tailwind v4) `className` and animated with Reanimated. That is not a
+detail of taste — it decides which APIs are allowed:
+
+- **Never use React Native's core `Animated`.** PanelUI's own performance rule
+  forbids it alongside the library, and it is a real bug, not a style note: a
+  core `Easing` function handed to Reanimated's `withTiming` is called on the UI
+  runtime, where a plain JS function cannot run, and the process aborts with
+  "Tried to synchronously call a Remote Function". That shipped once, in the
+  streaming veil (`md/render.tsx`), and killed the app mid-turn. `Easing` comes
+  from `react-native-reanimated`, never from `react-native`.
+- **A `className` that compiles to nothing is a blank screen.** Uniwind compiles
+  utilities at bundle time from the `@source` paths in `src/global.css`. Point
+  one at a directory that does not exist and no utility is generated, so
+  PanelUI's `flex-1` collapses the tree to zero height — with the provider's own
+  background still painted, which is why it reads as "nothing renders" rather
+  than as an error.
+- **Import components by subpath** (`panelui-native/components/task`). The root
+  entry re-exports all of them and Metro does not tree-shake, so a root import
+  evaluates the whole library before the first screen paints.
+- **`Collapse` keeps its children mounted.** `Task`, `Reasoning` and `Plan` fold
+  their bodies by animating a clip height, not by unmounting. Rendering `null`
+  into a closed one still builds nothing, but *rendering the body* into a closed
+  one still lays it out. If a body is expensive, mount it on `open` — see
+  [the activity surface](#the-activity-surface-what-one-long-task-cost).
+- **Count the components a row builds.** This is the mobile form of the desktop
+  rule that a frame may only touch what is already in memory: cost is
+  *rows × components per row*, and a nested disclosure per section is how one
+  real task reached 743 views.
 
 ---
 
@@ -230,7 +263,7 @@ fades and for how long. The UI thread draws.
 - **The streaming veil is a schedule, not a sampler.**
   `apps/mobile/src/md/veil.ts` gives each fading run an opacity and the time it
   has left. `VeilFade` in `apps/mobile/src/md/render.tsx` turns that into a
-  `useNativeDriver` opacity animation. Both the text and the reasoning tickers
+  Reanimated worklet on the UI thread. Both the text and the reasoning tickers
   are gone, so a row only renders when its text changes. The old design re-armed
   a `setTimeout` every 33 ms (66 ms for reasoning) and rebuilt every fading
   span's colour string each frame. That is a paint loop competing with the very
