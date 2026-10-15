@@ -567,7 +567,7 @@ export function TranscriptList({
         <View pointerEvents="none" style={styles.emptyOverlay}>
           {/* The only thing in the transcript body while it is in flight, so it
               names itself rather than announcing a bare "Working". */}
-          <Blocks color={theme.accent} label="Loading messages" size={24} />
+          <Blocks color={theme.accent} label="Loading messages" />
         </View>
       )}
       {showEmpty && (

@@ -173,9 +173,9 @@ function NoticeCard({ floating, notice }: { floating: boolean; notice: Connectio
         variant={floating ? 'default' : alertVariant(notice)}>
         <Alert.Indicator>
           {notice.kind === 'reconnecting' && notice.attempting ? (
-            <Blocks color={tint} size={18} />
+            <Blocks color={tint} />
           ) : (
-            <AppSymbol name={noticeIcon(notice)} size={18} tintColor={tint} />
+            <AppSymbol name={noticeIcon(notice)} tintColor={tint} />
           )}
         </Alert.Indicator>
         <Alert.Content>

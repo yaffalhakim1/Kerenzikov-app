@@ -124,7 +124,7 @@ function UpdateRow() {
               tap and flashed while it ran. A failed check still offers a retry,
               which is the one case the user has something to do about. */}
           {checking ? (
-            <Blocks color={theme.accent} size={18} />
+            <Blocks color={theme.accent} />
           ) : update ? (
             <AppPressable
               accessibilityRole="button"
@@ -252,7 +252,7 @@ export default function SettingsScreen() {
             ]}>
             <AppSymbol
               name={{ ios: 'plus', android: 'add', web: 'add' }}
-              size={16}
+             
               tintColor={theme.accent}
             />
             <Text style={[styles.rowLabel, { color: theme.text }]}>Add daemon</Text>
@@ -302,7 +302,7 @@ export default function SettingsScreen() {
 
         {!settings.data ? (
           <View style={styles.loading}>
-            <Blocks color={theme.accent} size={24} />
+            <Blocks color={theme.accent} />
           </View>
         ) : (
           <>

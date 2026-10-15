@@ -100,8 +100,6 @@ export function ComposerSurface({
         { paddingBottom: Math.max(insets.bottom, 10) + keyboardHeight + 8 },
       ]}
     >
-      {error}
-      {aboveCard}
 
       <AIInput
         avoidKeyboard={false}
@@ -120,6 +118,16 @@ export function ComposerSurface({
         value={value}
       >
         {header}
+
+        {/* The queue and the error strip sit above the field, inside the card:
+            they then inherit the card's exact width. They used to render above
+            the card in the padded shell, but the Android queue row is wrapped
+            in `@expo/ui`'s `MenuView`, whose Compose host measures itself
+            against the window — a stretch or a `100%` child resolved wider
+            than the card by one shell padding. Inside the card, the row
+            inherits its width and a bottom margin keeps it off the field. */}
+        {aboveCard ? <View className="mb-1.5">{aboveCard}</View> : null}
+        {error}
 
         {attachments.length > 0 || (pendingFiles?.length ?? 0) > 0 ? (
           <View className="flex-row flex-wrap gap-2 px-1 pb-1">

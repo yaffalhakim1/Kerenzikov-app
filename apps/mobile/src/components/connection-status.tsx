@@ -16,7 +16,7 @@ export function ConnectionStatus({
   return (
     <View style={styles.container}>
       {presentation.busy ? (
-        <Blocks color={presentation.color} size={12} />
+        <Blocks color={presentation.color} />
       ) : (
         <View style={[styles.dot, { backgroundColor: presentation.color }]} />
       )}

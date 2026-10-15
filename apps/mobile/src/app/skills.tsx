@@ -92,7 +92,7 @@ export default function SkillsScreen() {
         <ConnectionBanner />
         {!skills.data ? (
           <View style={styles.loading}>
-            <Blocks color={theme.accent} size={24} />
+            <Blocks color={theme.accent} />
             <Text style={[styles.loadingLabel, { color: theme.textTertiary }]}>
               {skills.isPending ? 'Reading skills…' : 'No skills yet'}
             </Text>

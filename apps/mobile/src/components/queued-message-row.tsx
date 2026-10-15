@@ -8,11 +8,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { tapHaptic } from '@/lib/haptics';
 
-import {
-  queuedMessageLabel,
-  queuedMessageRowStyles as styles,
-  type QueuedMessageRowProps,
-} from '@/components/queued-message-row.types';
+import { queuedMessageLabel, type QueuedMessageRowProps } from '@/components/queued-message-row.types';
 
 /**
  * A queued follow-up on Android. The row is a PanelUI `Item` and its trailing
@@ -49,14 +45,10 @@ export function QueuedMessageRow({
         else if (nativeEvent.event === 'edit') onEdit();
         else if (nativeEvent.event === 'remove') onRemove();
       }}
-      // `MenuView` renders a bare `View` around its Compose host, so this is
-      // what makes the row span the composer rather than shrink to its label.
-      style={styles.menu}
       shouldOpenOnLongPress>
       <Item
         accessibilityHint="Opens queued message actions"
         accessibilityLabel={label}
-        className="mb-1.5"
         onPress={openMenu}
         size="xs"
         variant="muted">

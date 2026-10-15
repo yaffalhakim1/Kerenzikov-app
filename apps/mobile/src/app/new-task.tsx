@@ -736,7 +736,7 @@ export default function NewTaskScreen() {
           leading={(
             <AppSymbol
               name={{ ios: 'folder.badge.plus', android: 'create_new_folder', web: 'create_new_folder' }}
-              size={16}
+             
               tintColor={theme.textSecondary}
             />
           )}
@@ -785,7 +785,7 @@ export default function NewTaskScreen() {
       <Sheet onDismiss={() => setOpenSheet(null)} title="Base branch" visible={openSheet === 'branch'}>
         {branches.isPending ? (
           <View style={styles.sheetLoading}>
-            <Blocks color={theme.accent} size={20} />
+            <Blocks color={theme.accent} />
           </View>
         ) : branches.error ? (
           <Text style={[styles.sheetNote, { color: theme.danger }]}>
@@ -859,7 +859,7 @@ function SelectorRow({
       </Item.Media>
       <Item.Content>
         {loading ? (
-          <Blocks color={theme.accent} size={16} />
+          <Blocks color={theme.accent} />
         ) : (
           <Item.Title numberOfLines={1}>{value}</Item.Title>
         )}

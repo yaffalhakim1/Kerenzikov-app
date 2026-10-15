@@ -200,36 +200,14 @@ export function ComposerIconButton({
 }
 
 /**
- * The size of everything drawn inside the send/stop slot.
+ * The glyph inside the send/stop slot.
  *
  * 19 is what the toolbar's own icon controls already draw — the attachment
  * menu, the access menu and `ComposerIconButton` all pass 19 to `AppSymbol` —
  * so the slot agrees with the row it sits in. Send already drew 19 and Stop
- * drew 18; the 1pt difference was not doing any work, and the desktop does not
- * settle it either (its toolbar draws send at 16 and stop at 18 in the same
- * 32px button), so the row's own step is the one worth agreeing with.
- *
- * The loader asks for the same number rather than a size of its own: `Blocks`
- * snaps the request to `Loader`'s named steps, so the number picks the step and
- * is not the drawn size. The ring is therefore *not* 19pt and does not shrink
- * with this change — the previous 16 already landed on the same `sm` step, a
- * 25.5pt ring, which is what makes the number honest to state. `sm` is also the
- * only step that fits: `MorphRing` pads the rotation's own clearance around the
- * ring — `box * √2`, so 36.06pt here, the slot's box to the sub-pixel — where
- * `md` would be 48pt and spill.
+ * drew 18; the 1pt difference was not doing any work.
  */
-const SEND_SLOT_CONTENT_SIZE = 19;
-
-/**
- * What a loader in a labelled `sm` button asks for.
- *
- * Those buttons carry a 14px label, and 16 is what PanelUI's own spinner for
- * `sm` measures (`h-4`) — so a `Blocks` ring here is asked for the same size
- * the library would have drawn, rather than for a third number. `Blocks` snaps
- * it to `sm` either way, which the previous 14 and 16 literals both did; the
- * value exists to name what it is matching.
- */
-const SM_BUTTON_LOADER_SIZE = 16;
+const SEND_SLOT_GLYPH = 19;
 
 export function SendButton({
   onPress,
@@ -248,25 +226,24 @@ export function SendButton({
   return (
     <Button
       accessibilityLabel={label}
-      // `h-9 w-9` because the slot is 36pt and `size="icon"` is a 44pt box —
-      // without it Send overflowed its own container by 8pt on every side while
-      // the Stop beside it sat flush. No `shadow-none` here: `ghost` carries no
-      // shadow to remove, and Stop's is only there because `destructive` does.
-      // Both buttons take the same box either way, which is the point.
-      className="h-9 w-9"
+      // `size="sm"` is the library's own 36pt box — the same height as the slot
+      // this control sits in, and the same box Stop takes, so neither is a
+      // 44pt `icon` button overflowing its container. No `shadow-none` here:
+      // `ghost` carries no shadow to remove, and Stop's is only there because
+      // `destructive` does.
       disabled={disabled}
       onPress={onPress}
-      size="icon"
+      size="sm"
       variant="ghost"
     >
       {busy ? (
-        <Blocks color={theme.textSecondary} size={SEND_SLOT_CONTENT_SIZE} />
+        <Blocks color={theme.textSecondary} />
       ) : (
         <AppSymbol
           name={queueing
             ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
             : { ios: 'paperplane.fill', android: 'send', web: 'send' }}
-          size={SEND_SLOT_CONTENT_SIZE}
+          size={SEND_SLOT_GLYPH}
           tintColor={disabled ? theme.textTertiary : theme.text}
         />
       )}
@@ -347,9 +324,8 @@ export function SendStopSlot({
           */}
           <Button
             accessibilityLabel="Stop agent"
-            className="h-9 w-9 shadow-none"
             onPress={onStop}
-            size="icon"
+            size="sm"
             variant="destructive"
           >
             <AppSymbol
@@ -359,7 +335,7 @@ export function SendStopSlot({
               // desktop draws send and stop at different sizes in the same
               // button (16 and 18), which is exactly the drift being fixed
               // here, so it is not the reference to follow.
-              size={SEND_SLOT_CONTENT_SIZE}
+              size={SEND_SLOT_GLYPH}
               tintColor={theme.danger}
             />
           </Button>
@@ -712,7 +688,7 @@ export function MobileComposer({
             variant="ghost">
             <AppSymbol
               name={{ ios: 'xmark', android: 'close', web: 'close' }}
-              size={12}
+             
               tintColor={theme.danger}
             />
           </Button>
@@ -827,7 +803,7 @@ export function MobileComposer({
                         name={file.is_dir
                           ? { ios: 'folder', android: 'folder', web: 'folder' }
                           : { ios: 'doc.text', android: 'description', web: 'description' }}
-                        size={14}
+                       
                         tintColor={theme.textSecondary}
                       />
                     </Item.Media>
@@ -873,7 +849,7 @@ export function MobileComposer({
                   className="max-w-48"
                   key={file.id}
                   size="sm"
-                  start={<UploadRing size={14} />}>
+                  start={<UploadRing />}>
                   <PanelText className="shrink text-xs text-secondary-foreground" numberOfLines={1}>
                     {file.name}
                   </PanelText>
@@ -993,7 +969,7 @@ function PermissionPanel({
       <View style={styles.requestHeading}>
         <AppSymbol
           name={{ ios: 'hand.raised.fill', android: 'front_hand', web: 'pan_tool' }}
-          size={16}
+         
           tintColor={theme.warning}
         />
         <Text style={[styles.requestTitle, { color: theme.text }]}>{permission.title}</Text>
@@ -1029,7 +1005,7 @@ function PermissionPanel({
             {responding === option.id && (
               <Blocks
                 color={option.allow ? theme.onInverse : theme.text}
-                size={SM_BUTTON_LOADER_SIZE}
+               
               />
             )}
             {option.label}
@@ -1178,7 +1154,7 @@ function UserInputPanel({
           size="sm"
           variant="primary">
           {submitting && (
-            <Blocks color={theme.onInverse} size={SM_BUTTON_LOADER_SIZE} />
+            <Blocks color={theme.onInverse} />
           )}
           {last ? 'Submit' : 'Next'}
         </Button>

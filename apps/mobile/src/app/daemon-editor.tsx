@@ -278,7 +278,7 @@ export default function DaemonEditorScreen() {
                       }
                     : { ios: "eye", android: "visibility", web: "visibility" }
                 }
-                size={18}
+               
                 tintColor={colors.secondaryText}
               />
             </AppPressable>
@@ -297,7 +297,7 @@ export default function DaemonEditorScreen() {
                 android: "error",
                 web: "error",
               }}
-              size={14}
+             
               tintColor={colors.danger}
             />
             <Text style={[styles.messageText, { color: colors.danger }]}>
@@ -319,7 +319,7 @@ export default function DaemonEditorScreen() {
             ]}
           >
             {saving && (
-              <Blocks color="#ffffff" size={16} />
+              <Blocks color="#ffffff" />
             )}
             <Text style={styles.primaryLabel}>
               {saving ? "Saving…" : profile ? "Save" : "Add"}
@@ -369,7 +369,7 @@ export default function DaemonEditorScreen() {
                 ]}
               >
                 {removing && (
-                  <Blocks color={colors.danger} size={16} />
+                  <Blocks color={colors.danger} />
                 )}
                 <Text style={[styles.removeText, { color: colors.danger }]}>
                   {removing ? "Removing…" : "Remove Daemon"}
@@ -486,7 +486,7 @@ function ConnectionFootnote({
 
   return (
     <View style={styles.messageRow}>
-      <AppSymbol name={icon} size={16} tintColor={color} />
+      <AppSymbol name={icon} tintColor={color} />
       <Text style={[styles.messageText, { color }]}>{text}</Text>
     </View>
   );

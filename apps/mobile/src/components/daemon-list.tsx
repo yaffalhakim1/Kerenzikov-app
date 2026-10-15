@@ -74,11 +74,11 @@ export function DaemonList({
                   </Text>
                 </View>
                 {selecting ? (
-                  <Blocks color={NativeTint} size={16} />
+                  <Blocks color={NativeTint} />
                 ) : active ? (
                   <AppSymbol
                     name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-                    size={16}
+                   
                     tintColor={NativeTint}
                   />
                 ) : null}
@@ -92,7 +92,7 @@ export function DaemonList({
                   style={({ pressed }) => [styles.infoButton, { opacity: pressed ? 0.45 : 1 }]}>
                   <AppSymbol
                     name={{ ios: 'info.circle', android: 'info', web: 'info' }}
-                    size={20}
+                   
                     tintColor={NativeTint}
                   />
                 </AppPressable>
