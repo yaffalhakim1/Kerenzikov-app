@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { MessageAttachment, ProviderKind, RuntimeMode } from '@waku/client';
 import {
   rememberedModelTraits,
@@ -50,7 +50,9 @@ import { Spacing } from '@/constants/theme';
 import {
   useAllProviderModels,
   useComposerCommands,
+  useDaemonSettings,
   useProjectFiles,
+  providerModelsQuery,
   useProviderCatalog,
   useProviderModels,
   useTaskState,
@@ -101,6 +103,32 @@ type SheetKind =
   | 'traits'
   | 'workspace'
   | 'branch';
+
+/**
+ * One provider probe + model discovery per connect, fired after first paint
+ * rather than inside render: `useAllProviderModels` on mount ran a probe per
+ * installed agent against the single daemon WebSocket while the screen was
+ * measuring its first frame. The model sheet re-reads the same query keys, so
+ * it stays warm for free.
+ */
+function useModelCatalogPrefetch(installedProviders: ProviderKind[]) {
+  const queryClient = useQueryClient();
+  const { client, activeProfile, phase } = useDaemon();
+  const settings = useDaemonSettings();
+  const providersRef = useRef(installedProviders);
+  providersRef.current = installedProviders;
+  const connected = phase === 'connected' && Boolean(client && activeProfile && settings.data);
+  useEffect(() => {
+    if (!connected || !client || !settings.data || !activeProfile) return;
+    for (const provider of providersRef.current) {
+      void queryClient.prefetchQuery(
+        providerModelsQuery({ activeProfile, client, phase }, settings, provider),
+      );
+    }
+    // Re-runs on daemon/settings identity changes only; the provider list is
+    // read through the ref so a re-ordered catalog cannot restart prefetches.
+  }, [connected, client, activeProfile, phase, settings.data, queryClient]);
+}
 
 /**
  * Ready-made openings for the blank-page problem, mirroring the desktop's
@@ -179,7 +207,10 @@ export default function NewTaskScreen() {
     () => catalog.providers.filter((item) => item.installed).map((item) => item.id),
     [catalog.providers],
   );
-  const modelCatalog = useAllProviderModels(installedProviders);
+  // Only the selected provider is probed on mount; the rest warm via
+  // useModelCatalogPrefetch after first paint, deduped by query key.
+  const modelCatalog = useAllProviderModels(provider ? [provider] : []);
+  useModelCatalogPrefetch(installedProviders);
   const projects = taskState.data?.projects ?? [];
   const selectedProject = projects.find((item) => item.id === projectId);
   // Same resolution the session composer applies, so a command typed as the
@@ -192,7 +223,10 @@ export default function NewTaskScreen() {
       selectedProject?.path ?? 'missing',
     ),
     queryFn: () => inspectBranches(daemon.client!, selectedProject!.path),
-    enabled: daemon.phase === 'connected' && Boolean(daemon.client && selectedProject) && isolated,
+    // Deferred to sheet-open: a git inspect over the daemon WS is only worth
+    // paying for when the user actually picks a branch.
+    enabled: daemon.phase === 'connected' && Boolean(daemon.client && selectedProject) &&
+      isolated && openSheet === 'branch',
     staleTime: 30_000,
   });
 

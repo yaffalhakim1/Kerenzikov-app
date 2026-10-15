@@ -57,7 +57,10 @@ export function useTaskState() {
     queryKey: daemonKeys.taskState(activeProfile?.id ?? 'disconnected'),
     queryFn: () => loadTaskState(requireClient(client)),
     enabled: phase === 'connected' && Boolean(activeProfile && client),
-    staleTime: 1_000,
+    // Push events (subscribeTaskState) and reconnects invalidate this query,
+    // so freshness is event-driven; a short staleTime here only made every
+    // mount refetch over the one WebSocket the whole app shares.
+    staleTime: Number.POSITIVE_INFINITY,
   });
 }
 
@@ -91,10 +94,12 @@ export function useDaemonSettings() {
 
 /** Web's probe-query recipe: seed from the persistent probe cache so model
  * lists render instantly across app restarts, refresh after the shared 24h
- * staleness, and write fresh probes back through the same cache. */
-function providerModelsQuery(
-  daemon: ReturnType<typeof useDaemon>,
-  settings: ReturnType<typeof useDaemonSettings>,
+ * staleness, and write fresh probes back through the same cache. Exported and
+ * narrowed so prefetch paths (new-task) reuse the exact keys the pickers
+ * read without needing the full hook result. */
+export function providerModelsQuery(
+  daemon: Pick<ReturnType<typeof useDaemon>, 'client' | 'phase' | 'activeProfile'>,
+  settings: Pick<ReturnType<typeof useDaemonSettings>, 'data'>,
   provider: ProviderKind,
 ) {
   const address = daemon.activeProfile?.address ?? 'disconnected';
