@@ -12,6 +12,17 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.74]
+
+### Android
+
+- **Fixed: the app felt slow right after opening.** Opening a task kicked off
+  half a dozen background lookups at once — saved tasks, installed agents,
+  model lists, a branch inspection — all over one connection, while the screen
+  was still drawing its first frame. Those lookups now start only when what
+  they serve is actually needed: branch lists wait until you open the branch
+  picker, and model lists load in the background just before you'd want them.
+
 ## [0.1.73]
 
 ### Android
