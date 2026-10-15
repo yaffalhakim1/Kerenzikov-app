@@ -238,6 +238,10 @@ export function ComposerV2({
       pendingAttachmentImports.current -= 1;
       if (mounted.current && pendingAttachmentImports.current === 0) {
         setImportingAttachments(false);
+        // A failed import leaves its tile behind otherwise: the per-file
+        // removal only runs on the success path, so one error would strand a
+        // spinner in the composer with nothing behind it.
+        setPendingFiles([]);
       }
     }
   }

@@ -16,6 +16,16 @@ the original feature bullet instead of adding separate entries for them.
 
 ### Android
 
+- **Fixed: attaching a file or photo could spin forever.** Picking a file into a
+  task that was pointed at an older daemon left the attachment loading with no
+  way out: the app asked for something that daemon did not understand, the
+  daemon answered nothing at all, and the request sat until it timed out. The
+  spinner is gone either way now — the daemon always answers a request it cannot
+  read, so the reason reaches you as an error, and a failed attachment no longer
+  leaves its loading row behind. The app also refuses the connection up front
+  when it is talking to a daemon too old to work with, instead of failing later
+  on the first attachment. Attachments need the daemon from the same release.
+
 - **Fixed: the app felt slow right after opening.** Opening a task kicked off
   half a dozen background lookups at once — saved tasks, installed agents,
   model lists, a branch inspection — all over one connection, while the screen
