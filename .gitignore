@@ -23,3 +23,5 @@ MEMORY.md
 repro-connect.ts
 
 .DS_Store
+
+.tmp-shots/
