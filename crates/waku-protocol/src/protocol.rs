@@ -251,6 +251,31 @@ pub enum Command {
         #[ts(type = "string")]
         path: PathBuf,
     },
+    /// Begin a chunked attachment upload. The bytes arrive over the
+    /// following `AppendAttachmentUpload` requests, so no single wire
+    /// message has to carry the whole file.
+    BeginAttachmentUpload {
+        name: String,
+        total_bytes: u64,
+    },
+    /// Append one sequential chunk. `offset` must equal the bytes
+    /// already received, so a gap, an overlap or a replay is refused
+    /// rather than silently corrupting the file.
+    AppendAttachmentUpload {
+        upload_id: Uuid,
+        offset: u64,
+        #[serde(with = "base64_bytes")]
+        #[ts(type = "string")]
+        data: Vec<u8>,
+    },
+    /// Commit the upload; the staged bytes become a stored attachment.
+    FinishAttachmentUpload {
+        upload_id: Uuid,
+    },
+    /// Discard the upload and its staged bytes.
+    AbortAttachmentUpload {
+        upload_id: Uuid,
+    },
     ReadBlob {
         reference: String,
     },
@@ -512,6 +537,9 @@ pub enum ResponsePayload {
     AttachmentStored {
         attachment: StoredAttachment,
     },
+    AttachmentUploadStarted {
+        upload_id: Uuid,
+    },
     BlobData {
         #[serde(with = "base64_bytes")]
         #[ts(type = "string")]
@@ -680,6 +708,46 @@ mod tests {
             "01900000-0000-7000-8000-000000000001"
         );
         assert_eq!(load["cwd"], "/tmp/project");
+    }
+
+    /// The chunked-upload commands are additive: web and desktop keep using
+    /// the one-shot `importAttachment`, so these tags must stay stable for the
+    /// mobile client that streams a large file through them.
+    #[test]
+    fn chunked_attachment_upload_has_stable_wire_fields() {
+        let upload_id = Uuid::from_u128(11);
+        let begin = serde_json::to_value(Command::BeginAttachmentUpload {
+            name: "photo.png".into(),
+            total_bytes: 27 * 1024 * 1024,
+        })
+        .unwrap();
+        assert_eq!(begin["type"], "beginAttachmentUpload");
+        assert_eq!(begin["name"], "photo.png");
+        assert_eq!(begin["totalBytes"], 27 * 1024 * 1024);
+
+        let append = serde_json::to_value(Command::AppendAttachmentUpload {
+            upload_id,
+            offset: 4096,
+            data: b"chunk".to_vec(),
+        })
+        .unwrap();
+        assert_eq!(append["type"], "appendAttachmentUpload");
+        assert_eq!(append["uploadId"], upload_id.to_string());
+        assert_eq!(append["offset"], 4096);
+        assert_eq!(append["data"], "Y2h1bms=");
+
+        let finish = serde_json::to_value(Command::FinishAttachmentUpload { upload_id }).unwrap();
+        assert_eq!(finish["type"], "finishAttachmentUpload");
+        assert_eq!(finish["uploadId"], upload_id.to_string());
+
+        let abort = serde_json::to_value(Command::AbortAttachmentUpload { upload_id }).unwrap();
+        assert_eq!(abort["type"], "abortAttachmentUpload");
+        assert_eq!(abort["uploadId"], upload_id.to_string());
+
+        let started = serde_json::to_value(ResponsePayload::AttachmentUploadStarted { upload_id })
+            .unwrap();
+        assert_eq!(started["type"], "attachmentUploadStarted");
+        assert_eq!(started["uploadId"], upload_id.to_string());
     }
 
     /// A timeout names the operation that stalled, so the label has to be the

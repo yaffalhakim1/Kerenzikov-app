@@ -389,6 +389,18 @@ middle of it. So we refresh it later, not eagerly.
   `AsyncStorage`. Daemon tokens live in the device keychain through `SecureStore`
   (`lib/daemon-storage.native.ts`). The boot path reads profiles and the active id
   in parallel.
+- **A single WebSocket message must stay well under 16 MiB.** React Native's
+  Android socket is OkHttp, and `RealWebSocket.send` closes the connection with
+  code 1001 the moment a queued message would take its buffer past 16 MiB — it
+  does not reject the send, it kills the link. The app reports that as
+  "Kerenzikov daemon disconnected", which names none of it. Anything that can
+  carry user-sized data has to be chunked rather than sent whole:
+  `lib/attachments.ts` streams an attachment through
+  `beginAttachmentUpload` / `appendAttachmentUpload` / `finishAttachmentUpload`
+  in 1 MiB pieces (`ATTACHMENT_CHUNK_BYTES`) for exactly this reason, and that
+  ceiling is what sets the chunk size — not the daemon's 32 MiB per-attachment
+  limit, which is the one the protocol advertises and is unreachable in a single
+  frame.
 
 ---
 

@@ -71,7 +71,7 @@ pub use protocol::{
     WireDriverEvent, WireDriverStartOptions, WireSessionOptions,
 };
 pub use server::{
-    Backend, DEFAULT_CLIENT_KEEPALIVE_PING_INTERVAL, EventSink, ServerOptions, serve,
+    Backend, DEFAULT_CLIENT_KEEPALIVE_PING_INTERVAL, EventSink, ReadLimits, ServerOptions, serve,
 };
 pub use settings::{DaemonSettings, DaemonSettingsStore};
 pub use workspace::{WorkspaceOperation, WorkspaceResult};

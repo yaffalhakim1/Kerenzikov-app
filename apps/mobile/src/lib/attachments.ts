@@ -20,6 +20,20 @@ export interface LocalAttachmentFile {
   base64?: string | null;
 }
 
+/**
+ * How many bytes one chunk carries.
+ *
+ * The ceiling is the transport's, not the daemon's: React Native's Android
+ * WebSocket is OkHttp, and `RealWebSocket.send` closes the socket with 1001 as
+ * soon as a queued message would take the buffer past 16 MiB. A whole
+ * attachment in one request therefore killed the connection — the app reported
+ * it as "Kerenzikov daemon disconnected" — which is what this path exists to
+ * avoid. 1 MiB keeps every frame far under that line even after base64 inflates
+ * it by a third, while staying large enough that a 32 MiB attachment is a few
+ * dozen round-trips rather than a few thousand.
+ */
+export const ATTACHMENT_CHUNK_BYTES = 1024 * 1024;
+
 export async function importLocalAttachment(
   client: WakuClient,
   local: LocalAttachmentFile,
@@ -28,29 +42,202 @@ export async function importLocalAttachment(
     throw attachmentTooLarge(local.name);
   }
 
-  const encoded = local.base64 ?? await readBase64(local.uri);
-  const dataBase64 = encoded.includes(',') ? encoded.slice(encoded.indexOf(',') + 1) : encoded;
-  if (base64ByteLength(dataBase64) > MAX_ATTACHMENT_BYTES) {
-    throw attachmentTooLarge(local.name);
+  // A picker that already handed us the bytes has no file to read, so those are
+  // the source. Everything else is read from the URI it gave us.
+  if (local.base64) {
+    const encoded = local.base64.includes(',')
+      ? local.base64.slice(local.base64.indexOf(',') + 1)
+      : local.base64;
+    const totalBytes = base64ByteLength(encoded);
+    if (totalBytes <= 0) throw new Error(`${local.name} could not be read`);
+    if (totalBytes > MAX_ATTACHMENT_BYTES) throw attachmentTooLarge(local.name);
+    return uploadAttachmentInChunks(client, local, totalBytes, base64Reader(encoded));
   }
 
-  const response = await client.request({
-    type: 'importAttachment',
-    name: local.name,
-    upload: { kind: 'file', data_base64: dataBase64 },
+  return importUriAttachment(client, local);
+}
+
+/**
+ * Streams a file the picker gave us as a URI.
+ *
+ * The bytes never all exist at once: one chunk is read, encoded, sent and
+ * released before the next is read, so a 32 MiB attachment costs one chunk of
+ * heap rather than the whole file plus its base64.
+ */
+async function importUriAttachment(
+  client: WakuClient,
+  local: LocalAttachmentFile,
+): Promise<MessageAttachment> {
+  // Dynamic, not static: a top-level import would load an Expo native module
+  // into Bun's pure projection tests, which import this file. Metro still
+  // bundles it for device builds.
+  const { File, FileMode } = await import('expo-file-system');
+  const file = new File(local.uri);
+  // The file's own size, not the picker's `fileSize`. That field describes the
+  // asset in the library, while the bytes being read here are the copy the
+  // picker handed over — and a picker that recompresses makes the two disagree,
+  // which would abort the upload at `finish` on a byte-count mismatch.
+  const totalBytes = file.size ?? 0;
+  if (totalBytes <= 0) throw new Error(`${local.name} could not be read`);
+  if (totalBytes > MAX_ATTACHMENT_BYTES) throw attachmentTooLarge(local.name);
+  // Read-only explicitly: `open()` otherwise defaults to read-write for a plain
+  // path, and a photo handed over by the picker is one this app may be able to
+  // read but not open for writing.
+  const handle = file.open(FileMode.ReadOnly);
+  return uploadAttachmentInChunks(client, local, totalBytes, {
+    read: (length) => {
+      const bytes = handle.readBytes(length);
+      return bytes.byteLength === 0 ? null : encodeBase64(bytes);
+    },
+    close: () => handle.close(),
   });
-  if (response.type !== 'attachmentStored') {
-    throw new Error(`Expected attachmentStored, received ${response.type}`);
-  }
+}
 
+/** Where a chunked upload's bytes come from. A seam rather than a direct
+ *  `File` handle so the protocol below can be exercised without a native
+ *  filesystem.
+ *
+ *  The reader yields the chunk already base64-encoded: encoding belongs to the
+ *  source, which either has raw bytes to encode or a string that is already
+ *  encoded. Doing it here would force the string source to decode what it was
+ *  just handed. */
+export interface AttachmentChunkReader {
+  /** The next chunk, or `null` at end of input. */
+  read(length: number): string | null;
+  close(): void;
+}
+
+/**
+ * A reader over a string the picker already encoded.
+ *
+ * The slice is taken on base64 character boundaries — four characters per three
+ * bytes — so every chunk decodes to whole bytes and the daemon's running total
+ * is the byte count rather than the character count.
+ */
+function base64Reader(encoded: string): AttachmentChunkReader {
+  let cursor = 0;
   return {
-    path: response.attachment.path,
-    mention: response.attachment.path,
-    name: response.attachment.name,
-    is_dir: response.attachment.isDir,
-    is_image: local.mimeType?.startsWith('image/') === true || isImageName(local.name),
-    blob_reference: response.attachment.reference,
+    read: (length) => {
+      if (cursor >= encoded.length) return null;
+      // `length` is a byte budget and this is a string of characters: four
+      // characters per three bytes. Comparing the two directly would under-read
+      // by a third, which is why the conversion is here rather than a plain
+      // slice.
+      const characters = Math.floor(length / 3) * 4;
+      const chunk = encoded.slice(cursor, cursor + characters);
+      cursor += chunk.length;
+      return chunk;
+    },
+    close: () => {},
   };
+}
+
+/**
+ * The chunked upload protocol, independent of where the bytes come from.
+ *
+ * `offset` is sent explicitly and the daemon refuses a mismatch, so a retry
+ * that replays a chunk is rejected rather than appended twice — the failure
+ * mode that would silently corrupt the file.
+ */
+export async function uploadAttachmentInChunks(
+  client: WakuClient,
+  local: LocalAttachmentFile,
+  totalBytes: number,
+  reader: AttachmentChunkReader,
+): Promise<MessageAttachment> {
+  const started = await client.request({
+    type: 'beginAttachmentUpload',
+    name: local.name,
+    totalBytes,
+  });
+  if (started.type !== 'attachmentUploadStarted') {
+    throw new Error(`Expected attachmentUploadStarted, received ${started.type}`);
+  }
+  const uploadId = started.uploadId;
+
+  try {
+    let offset = 0;
+    try {
+      for (;;) {
+        const data = reader.read(ATTACHMENT_CHUNK_BYTES);
+        if (data === null) break;
+        const response = await client.request({
+          type: 'appendAttachmentUpload',
+          uploadId,
+          offset,
+          data,
+        });
+        if (response.type !== 'ack') {
+          throw new Error(`Expected ack, received ${response.type}`);
+        }
+        offset += base64ByteLength(data);
+      }
+    } finally {
+      reader.close();
+    }
+
+    if (offset !== totalBytes) {
+      throw new Error(
+        `${local.name} changed while it was being attached (sent ${offset} of ${totalBytes} bytes)`,
+      );
+    }
+
+    const finished = await client.request({
+      type: 'finishAttachmentUpload',
+      uploadId,
+    });
+    if (finished.type !== 'attachmentStored') {
+      throw new Error(`Expected attachmentStored, received ${finished.type}`);
+    }
+    return toMessageAttachment(finished.attachment, local);
+  } catch (cause) {
+    // The daemon holds a staging directory until the upload finishes or is
+    // abandoned, so a failure that never reaches `finish` has to say so.
+    await client
+      .request({ type: 'abortAttachmentUpload', uploadId })
+      .catch(() => {});
+    throw cause;
+  }
+}
+
+function toMessageAttachment(
+  stored: { path: string; name: string; isDir: boolean; reference: string },
+  local: LocalAttachmentFile,
+): MessageAttachment {
+  return {
+    path: stored.path,
+    mention: stored.path,
+    name: stored.name,
+    is_dir: stored.isDir,
+    is_image: local.mimeType?.startsWith('image/') === true || isImageName(local.name),
+    blob_reference: stored.reference,
+  };
+}
+
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/**
+ * Standard base64 over raw bytes.
+ *
+ * Hand-rolled because the runtime this ships on has no encoder: Hermes defines
+ * neither `btoa` nor `Buffer`, and the one dependency that would provide one is
+ * not in the tree. Three bytes in, four characters out, is small enough to own
+ * outright — and unlike a polyfill it cannot disagree with the daemon about
+ * padding.
+ */
+function encodeBase64(bytes: Uint8Array): string {
+  let out = '';
+  for (let index = 0; index < bytes.length; index += 3) {
+    const remaining = bytes.length - index;
+    const a = bytes[index]!;
+    const b = remaining > 1 ? bytes[index + 1]! : 0;
+    const c = remaining > 2 ? bytes[index + 2]! : 0;
+    out += BASE64_ALPHABET[a >> 2];
+    out += BASE64_ALPHABET[((a & 0x03) << 4) | (b >> 4)];
+    out += remaining > 1 ? BASE64_ALPHABET[((b & 0x0f) << 2) | (c >> 6)] : '=';
+    out += remaining > 2 ? BASE64_ALPHABET[c & 0x3f] : '=';
+  }
+  return out;
 }
 
 /** Reads an attachment's bytes back from the daemon as a data URI. Blobs
@@ -126,13 +313,6 @@ export function imagePickerFiles(
     size: asset.fileSize,
     base64: asset.base64,
   }));
-}
-
-async function readBase64(uri: string): Promise<string> {
-  // Kept behind the async boundary so Bun's pure projection tests do not load
-  // an Expo native module. Metro still bundles the module for device builds.
-  const { File } = await import('expo-file-system');
-  return new File(uri).base64();
 }
 
 function base64ByteLength(value: string): number {
