@@ -21,10 +21,12 @@ import {
 
 import { Blocks } from '@/components/blocks';
 
+import { Alert } from 'panelui-native/components/alert';
 import { Chip } from 'panelui-native/components/chip';
 import { AIInput } from 'panelui-native/components/ai-input';
 import { Item } from 'panelui-native/components/item';
 import { AppSymbol } from '@/components/app-symbol';
+import { ConnectionBanner } from '@/components/connection-banner';
 import { AgentPresetMenu } from '@/components/agent-preset-menu';
 import { ComposerAccessMenu } from '@/components/composer-access-menu';
 import {
@@ -44,7 +46,7 @@ import {
   type ProviderModelSelection,
 } from '@/components/session-option-sheets';
 import { Sheet, SheetRow } from '@/components/sheet';
-import { Radius, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import {
   useAllProviderModels,
   useComposerCommands,
@@ -81,6 +83,7 @@ import {
   type ModelTraitSelection,
 } from '@/lib/model-traits';
 import { useRuntime } from '@/lib/runtime-context';
+import { isDaemonDisconnectError } from '@/lib/runtime-errors';
 import { providerLabel } from '@/lib/session-presentation';
 
 /**
@@ -621,14 +624,21 @@ export default function NewTaskScreen() {
 
       <ComposerSurface
         attachments={attachments}
+        aboveCard={<ConnectionBanner />}
         commands={commandNames.length > 0 ? commandNames : undefined}
         editable={!submitting}
-        error={error ? (
-          <View
-            accessibilityLiveRegion="polite"
-            style={[styles.error, { backgroundColor: theme.dangerSoft }]}>
-            <Text style={[styles.errorText, { color: theme.danger }]}>{error}</Text>
-          </View>
+        error={error && !isDaemonDisconnectError(error) ? (
+          // A PanelUI `Alert`, not the tinted `View` this used to be: every
+          // other failure in the app is an `Alert`, and a hand-rolled strip
+          // here made the same class of failure read as a different component
+          // on this screen than on a session. A disconnect is left out because
+          // the banner above the card already owns it — showing both says the
+          // same thing twice, which is the rule the composer follows too.
+          <Alert className="mb-1.5" variant="destructive">
+            <Alert.Content>
+              <Alert.Title className="text-destructive">{error}</Alert.Title>
+            </Alert.Content>
+          </Alert>
         ) : null}
         header={provider && supportsAgentPreset && agentPresets.length > 0 && !submitting ? (
           // The agent preset is the one control the session composer has no
@@ -726,7 +736,7 @@ export default function NewTaskScreen() {
           leading={(
             <AppSymbol
               name={{ ios: 'folder.badge.plus', android: 'create_new_folder', web: 'create_new_folder' }}
-              size={16}
+             
               tintColor={theme.textSecondary}
             />
           )}
@@ -775,7 +785,7 @@ export default function NewTaskScreen() {
       <Sheet onDismiss={() => setOpenSheet(null)} title="Base branch" visible={openSheet === 'branch'}>
         {branches.isPending ? (
           <View style={styles.sheetLoading}>
-            <Blocks color={theme.accent} size={20} />
+            <Blocks color={theme.accent} />
           </View>
         ) : branches.error ? (
           <Text style={[styles.sheetNote, { color: theme.danger }]}>
@@ -849,7 +859,7 @@ function SelectorRow({
       </Item.Media>
       <Item.Content>
         {loading ? (
-          <Blocks color={theme.accent} size={16} />
+          <Blocks color={theme.accent} />
         ) : (
           <Item.Title numberOfLines={1}>{value}</Item.Title>
         )}
@@ -882,8 +892,6 @@ const styles = StyleSheet.create({
   // A nudge in from the card's corner: the round action sits on the field's
   // own inset, which is tighter than a circle wants against the edge.
   agentPicker: { marginLeft: 2, marginTop: 2 },
-  error: { borderRadius: Radius.medium, marginBottom: 8, padding: 11 },
-  errorText: { fontSize: 12.5, fontWeight: '600', lineHeight: 17 },
   sheetLoading: { alignItems: 'center', paddingVertical: 14 },
   sheetSection: {
     fontSize: 11,

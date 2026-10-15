@@ -33,5 +33,8 @@ export const queuedMessageRowStyles = StyleSheet.create({
     minHeight: 34,
     paddingHorizontal: 10,
   },
+  // `flex: 1` (grow, shrink and a zero basis) so a long label gives way to the
+  // trailing actions rather than pushing them out; `numberOfLines={1}` on the
+  // text is what truncates it.
   text: { flex: 1, fontSize: 12.5 },
 });

@@ -488,7 +488,7 @@ function TaskDrawerContent({
               style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}>
               <AppSymbol
                 name={{ ios: 'xmark.circle.fill', android: 'cancel', web: 'cancel' }}
-                size={16}
+               
                 tintColor={theme.textTertiary}
               />
             </AppPressable>
@@ -831,7 +831,7 @@ function UndoBanner({
           style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}>
           <AppSymbol
             name={{ ios: 'xmark', android: 'close', web: 'close' }}
-            size={14}
+           
             tintColor={theme.onInverse}
           />
         </AppPressable>
@@ -895,7 +895,7 @@ function DaemonPill({ onPress }: { onPress: () => void }) {
         {daemon.activeProfile ? <ConnectionStatus compact phase={daemon.phase} /> : (
           <AppSymbol
             name={{ ios: 'plus', android: 'add', web: 'add' }}
-            size={14}
+           
             tintColor={theme.text}
           />
         )}
@@ -904,7 +904,7 @@ function DaemonPill({ onPress }: { onPress: () => void }) {
         </Text>
         <AppSymbol
           name={{ ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
-          size={12}
+         
           tintColor={theme.textTertiary}
         />
       </AppPressable>
@@ -931,7 +931,7 @@ function TaskListEmpty({
   if (phase === 'booting' || phase === 'connecting' || phase === 'reconnecting') {
     return (
       <View style={styles.emptyState}>
-        <Blocks color={theme.accent} size={24} />
+        <Blocks color={theme.accent} />
         <Text style={[styles.emptyTitle, { color: theme.textSecondary }]}>
           {phase === 'reconnecting' ? 'Reconnecting…' : 'Connecting to daemon…'}
         </Text>
@@ -1102,7 +1102,7 @@ const SessionRow = memo(function SessionRow({
           </View>
           {running ? (
             <View style={styles.sessionSpinner}>
-              <Blocks color={theme.accent} size={14} />
+              <Blocks color={theme.accent} />
             </View>
           ) : badge ? (
             <Text style={[styles.sessionStatus, { color: statusColor }]}>{badge.label}</Text>

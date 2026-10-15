@@ -1,0 +1,21 @@
+# Smoke test for the Kerenzikov mobile app: the connection banner on the home
+# screen (item 1).
+#
+# The emulator's network is disabled before the flow runs (svc wifi/data
+# disable), so the home screen comes up against an unreachable daemon and the
+# banner is on it from the start.
+#
+# Restore afterwards:
+#   adb shell svc wifi enable && adb shell svc data enable
+#
+# Run from the repo root:
+#   cmd /c "C:\Users\yafit\maestro\maestro\bin\maestro.bat test maestro\verify-banner.yaml"
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+# The daemon is unreachable: the banner names it and offers the retry, and the
+# templates below it still render.
+- assertVisible: "Can’t reach Host"
+- assertVisible: "Retry now"

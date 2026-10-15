@@ -256,7 +256,7 @@ export function ModelSheet({
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} model`} visible={visible}>
       {probe.isPending ? (
         <View className="items-center justify-center py-10">
-          <Blocks color={theme.accent} size={20} />
+          <Blocks color={theme.accent} />
         </View>
       ) : probe.error ? (
         <SheetError message={errorMessage(probe.error)} />
@@ -490,7 +490,7 @@ export function ModelPickerSheet({
               renderItem={({ item: id }) => (
                 <OptionRow
                   label={providerLabel(id)}
-                  leading={<ProviderIcon provider={id} size={20} />}
+                  leading={<ProviderIcon provider={id} />}
                   onPress={() => {
                     tapHaptic();
                     setBrowsing(id);
@@ -518,7 +518,7 @@ export function ModelPickerSheet({
               startContent={(
                 <AppSymbol
                   name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-                  size={14}
+                 
                   tintColor={theme.accent}
                 />
               )}
@@ -537,7 +537,7 @@ export function ModelPickerSheet({
             />
             {entry?.isPending ? (
               <View className="items-center justify-center" style={{ height: listHeight }}>
-                <Blocks color={theme.accent} size={20} />
+                <Blocks color={theme.accent} />
               </View>
             ) : (
               <BottomSheetFlatList
@@ -604,7 +604,7 @@ export function AgentPresetSheet({
     <Sheet onDismiss={onDismiss} title={`${providerLabel(provider)} agent`} visible={visible}>
       {probe.isPending ? (
         <View className="items-center justify-center py-10">
-          <Blocks color={theme.accent} size={20} />
+          <Blocks color={theme.accent} />
         </View>
       ) : probe.error ? (
         <SheetError message={errorMessage(probe.error)} />
@@ -741,7 +741,7 @@ export function ResumeSessionSheet({
           <OptionRow
             key={candidate}
             label={providerLabel(candidate)}
-            leading={<ProviderIcon provider={candidate} size={18} />}
+            leading={<ProviderIcon provider={candidate} />}
             onPress={() => setProvider(candidate)}
           />
         ))
@@ -752,7 +752,7 @@ export function ResumeSessionSheet({
             leading={(
               <AppSymbol
                 name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-                size={16}
+               
                 tintColor={theme.textSecondary}
               />
             )}
@@ -763,7 +763,7 @@ export function ResumeSessionSheet({
           />
           {pending ? (
             <View className="items-center justify-center py-10">
-              <Blocks color={theme.accent} size={20} />
+              <Blocks color={theme.accent} />
             </View>
           ) : error ? (
             <SheetError message={error} />

@@ -59,6 +59,26 @@ const MAX_CACHED_RESPONSES: usize = 2048;
 const MAX_CACHED_RESPONSE_BYTES: usize = 64 * 1024 * 1024;
 const NATIVE_CLIENT_HEADER: &str = "x-waku-client";
 const NATIVE_CLIENT_HEADER_VALUE: &str = "native";
+/// The largest payload a React Native client can be sent in one message.
+///
+/// React Native's Android socket is OkHttp, and `RealWebSocket.send` does not
+/// reject an oversized message — it closes the connection with code 1001 as
+/// soon as the queued bytes would pass `OKHTTP_MAX_MESSAGE_BYTES`. A client
+/// cannot detect that as a too-large read, because the socket simply dies, so
+/// the daemon refuses the read instead.
+///
+/// The number is set from the base64 arithmetic rather than the ceiling itself:
+/// a payload of `n` bytes becomes `4 * ceil(n / 3)` characters, so a 10 MiB read
+/// leaves the wire message at about 13.3 MiB, with room for the JSON envelope.
+/// Naming the 16 MiB directly would be the bug — 12 MiB of bytes base64s to just
+/// over 16 MiB and takes the connection down.
+///
+/// Browsers and the desktop are not capped: the daemon's own advertised maximum
+/// is `MAX_WIRE_MESSAGE_BYTES`, and they read their own uploads back.
+const NATIVE_READ_BYTES: usize = 10 * 1024 * 1024;
+/// OkHttp's per-message queue ceiling (`RealWebSocket.MAX_QUEUE_SIZE`). Past it
+/// the socket is closed with 1001 rather than the send being refused.
+const OKHTTP_MAX_MESSAGE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct ServerOptions {
@@ -94,9 +114,48 @@ impl Drop for ConnectionPermit {
 }
 
 pub trait Backend: Send + Sync + 'static {
-    fn handle(&self, request: Request, events: EventSink) -> anyhow::Result<ResponsePayload>;
+    fn handle(
+        &self,
+        request: Request,
+        events: EventSink,
+        limits: ReadLimits,
+    ) -> anyhow::Result<ResponsePayload>;
 
     fn shutdown(&self) {}
+}
+
+/// What the requesting client's transport can carry back in one message.
+///
+/// The backend owns the bytes, so only it can tell a read that fits from one
+/// that does not; the transport knows the ceiling. Passing it down lets a read
+/// be refused with a reason instead of killing the connection at the socket
+/// layer, where the client sees a disconnect rather than an error.
+#[derive(Clone, Copy, Debug)]
+pub struct ReadLimits {
+    /// The largest payload that may be returned in one response.
+    pub max_bytes: usize,
+}
+
+impl ReadLimits {
+    /// The daemon's own advertised maximum, for a transport with no smaller
+    /// ceiling of its own.
+    pub const fn unrestricted() -> Self {
+        Self {
+            max_bytes: MAX_WIRE_MESSAGE_BYTES,
+        }
+    }
+
+    /// A React Native client cannot be sent more than `NATIVE_READ_BYTES` in one
+    /// message without its socket closing.
+    pub const fn for_transport(native: bool) -> Self {
+        if native {
+            Self {
+                max_bytes: NATIVE_READ_BYTES,
+            }
+        } else {
+            Self::unrestricted()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -132,12 +191,28 @@ struct Subscriber {
     kicked: Sender<()>,
     /// The client's self-reported identity for the connected-clients view.
     client: ConnectedClient,
+    /// The handshake identified a React Native client (`x-waku-client: native`).
+    /// Only that transport has the 16 MiB per-message ceiling, so only it is
+    /// refused the reads that cannot fit in one frame.
+    native: bool,
 }
 
 impl Subscriber {
-    fn new(messages: Sender<ServerMessage>, client: ConnectedClient) -> (Self, Receiver<()>) {
+    fn new(
+        messages: Sender<ServerMessage>,
+        client: ConnectedClient,
+        native: bool,
+    ) -> (Self, Receiver<()>) {
         let (kicked, kicked_rx) = unbounded();
-        (Self { messages, kicked, client }, kicked_rx)
+        (
+            Self {
+                messages,
+                kicked,
+                client,
+                native,
+            },
+            kicked_rx,
+        )
     }
 
     /// A subscriber without a meaningful identity, for hub tests.
@@ -150,6 +225,7 @@ impl Subscriber {
                 name: "test".into(),
                 connected_at: 0,
             },
+            false,
         )
         .0
     }
@@ -236,6 +312,7 @@ struct DispatchedRequest {
     request: Request,
     outgoing: Sender<ServerMessage>,
     source_subscriber_id: u64,
+    native: bool,
 }
 
 struct RuntimeMailbox {
@@ -314,6 +391,18 @@ impl Hub {
             }
         }
         Self::broadcast(&mut state, &ServerMessage::Event(event), None);
+    }
+
+    /// Whether the given subscriber's transport is a React Native client, which
+    /// cannot be sent an arbitrarily large message. Unknown ids (a request from
+    /// a connection that has since closed) are treated as unrestricted: the
+    /// response has nowhere to go anyway.
+    fn subscriber_is_native(&self, subscriber_id: u64) -> bool {
+        self.state
+            .lock()
+            .subscribers
+            .get(&subscriber_id)
+            .is_some_and(|subscriber| subscriber.native)
     }
 
     fn subscribe(&self, resume_from: &[ReplayCursor], subscriber: Subscriber) -> u64 {
@@ -496,11 +585,16 @@ impl RequestDispatcher {
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
     ) {
+        let native = self.subscriber_is_native(source_subscriber_id);
         if command_targets_runtime(&request.command) {
-            self.dispatch_runtime(request, outgoing, source_subscriber_id);
+            self.dispatch_runtime(request, outgoing, source_subscriber_id, native);
         } else {
-            self.dispatch_independent(request, outgoing, source_subscriber_id);
+            self.dispatch_independent(request, outgoing, source_subscriber_id, native);
         }
+    }
+
+    fn subscriber_is_native(&self, subscriber_id: u64) -> bool {
+        self.hub.subscriber_is_native(subscriber_id)
     }
 
     fn dispatch_independent(
@@ -508,6 +602,7 @@ impl RequestDispatcher {
         request: Request,
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
+        native: bool,
     ) {
         let backend = self.backend.clone();
         let hub = self.hub.clone();
@@ -516,7 +611,7 @@ impl RequestDispatcher {
         if let Err(error) = std::thread::Builder::new()
             .name("waku-daemon-request".into())
             .spawn(move || {
-                handle_request(request, outgoing, source_subscriber_id, backend, hub);
+                handle_request(request, outgoing, source_subscriber_id, backend, hub, native);
             })
         {
             send_dispatch_error(
@@ -533,6 +628,7 @@ impl RequestDispatcher {
         request: Request,
         outgoing: Sender<ServerMessage>,
         source_subscriber_id: u64,
+        native: bool,
     ) {
         let session_id = request.session_id;
         let failed_request_id = request.request_id;
@@ -541,6 +637,7 @@ impl RequestDispatcher {
             request,
             outgoing,
             source_subscriber_id,
+            native,
         };
         loop {
             let mut mailboxes = self.runtime_mailboxes.lock();
@@ -674,9 +771,17 @@ fn handle_connection(
         .max_message_size(Some(MAX_HANDSHAKE_MESSAGE_BYTES))
         .max_frame_size(Some(MAX_HANDSHAKE_MESSAGE_BYTES));
     let allowed_origins = options.allowed_origins.clone();
+    // Captured out of the handshake callback so the connection knows which
+    // transport it is serving: the callback runs inside the websocket upgrade
+    // and its result cannot be returned.
+    let native_client = Arc::new(AtomicBool::new(false));
+    let observed_native = native_client.clone();
     let mut socket = accept_hdr_with_config(
         stream,
         move |request: &HandshakeRequest, response: HandshakeResponse| {
+            if is_native_client(request) {
+                observed_native.store(true, Ordering::Release);
+            }
             validate_handshake(request, response, &allowed_origins)
         },
         Some(config),
@@ -745,6 +850,7 @@ fn handle_connection(
             name: client_name.unwrap_or_else(|| "Unknown client".into()),
             connected_at: unix_time(),
         },
+        native_client.load(Ordering::Acquire),
     );
     let subscriber_id = hub.subscribe(&resume_from, subscriber);
 
@@ -821,17 +927,12 @@ fn validate_handshake(
             "unknown daemon endpoint",
         ));
     }
-    let is_native_client = request
-        .headers()
-        .get(NATIVE_CLIENT_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value == NATIVE_CLIENT_HEADER_VALUE);
     if let Some(origin) = request.headers().get(ORIGIN) {
         let allowed = origin
             .to_str()
             .ok()
             .is_some_and(|origin| allowed_origins.contains(origin));
-        if !allowed && !is_native_client {
+        if !allowed && !is_native_client(request) {
             return Err(handshake_error(
                 StatusCode::FORBIDDEN,
                 "WebSocket origin is not allowed",
@@ -839,6 +940,16 @@ fn validate_handshake(
         }
     }
     Ok(response)
+}
+
+/// Whether the handshake came from a React Native client, which marks itself
+/// because it cannot set an allowed `Origin` from a browser.
+fn is_native_client(request: &HandshakeRequest) -> bool {
+    request
+        .headers()
+        .get(NATIVE_CLIENT_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == NATIVE_CLIENT_HEADER_VALUE)
 }
 
 fn handshake_error(status: StatusCode, message: &str) -> ErrorResponse {
@@ -916,6 +1027,7 @@ fn run_runtime_mailbox(
             dispatched.source_subscriber_id,
             backend.clone(),
             hub.clone(),
+            dispatched.native,
         );
 
         if handled.executed {
@@ -1011,6 +1123,7 @@ fn handle_request(
     source_subscriber_id: u64,
     backend: Arc<dyn Backend>,
     hub: Arc<Hub>,
+    native: bool,
 ) -> HandledRequest {
     let request_id = request.request_id;
     let notification = request_id.is_nil();
@@ -1039,7 +1152,11 @@ fn handle_request(
         if starts_runtime {
             hub.begin_runtime(session_id, runtime_id);
         }
-        let outcome = match backend.handle(request, hub.event_sink(session_id, runtime_id)) {
+        let outcome = match backend.handle(
+            request,
+            hub.event_sink(session_id, runtime_id),
+            ReadLimits::for_transport(native),
+        ) {
             Ok(payload) => ResponseOutcome::Ok { payload },
             Err(error) => ResponseOutcome::Error {
                 error: RpcError::from(error),
@@ -1187,7 +1304,12 @@ mod tests {
     }
 
     impl Backend for TestBackend {
-        fn handle(&self, request: Request, events: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            events: EventSink,
+            _limits: ReadLimits,
+        ) -> anyhow::Result<ResponsePayload> {
             let session_id = request.session_id;
             let runtime_id = request.runtime_id;
             match request.command {
@@ -1224,7 +1346,12 @@ mod tests {
     }
 
     impl Backend for TaskStateBackend {
-        fn handle(&self, request: Request, _events: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            _events: EventSink,
+            _limits: ReadLimits,
+        ) -> anyhow::Result<ResponsePayload> {
             match request.command {
                 Command::SaveTaskState { sessions, .. } => {
                     let mut stored = self.sessions.lock();
@@ -1989,6 +2116,7 @@ mod tests {
             0,
             Arc::new(TestBackend::default()),
             hub.clone(),
+            false,
         );
 
         assert!(handled.executed);
@@ -2048,6 +2176,70 @@ mod tests {
         assert!(!token_matches("secret", "secret-extra"));
     }
 
+    /// The ceiling has to be set from what the payload becomes on the wire, not
+    /// from the transport's own limit: base64 inflates a byte count by a third,
+    /// so a limit equal to the 16 MiB cap would itself take the connection down.
+    #[test]
+    fn the_native_read_ceiling_leaves_room_for_base64_in_one_message() {
+        let encoded = NATIVE_READ_BYTES.div_ceil(3) * 4;
+        assert!(
+            encoded < OKHTTP_MAX_MESSAGE_BYTES,
+            "a {NATIVE_READ_BYTES} byte read base64s to {encoded}, past the {OKHTTP_MAX_MESSAGE_BYTES} byte message ceiling"
+        );
+    }
+
+    /// Only the transport with the smaller ceiling is capped; a browser or the
+    /// desktop reads its own uploads back at the daemon's advertised maximum.
+    #[test]
+    fn only_the_native_transport_is_given_a_read_ceiling() {
+        assert_eq!(ReadLimits::for_transport(true).max_bytes, NATIVE_READ_BYTES);
+        assert_eq!(
+            ReadLimits::for_transport(false).max_bytes,
+            MAX_WIRE_MESSAGE_BYTES
+        );
+    }
+
+    /// The native flag is what the read ceiling keys off, so it has to survive
+    /// from the handshake onto the subscriber and be readable by id.
+    #[test]
+    fn a_subscriber_reports_whether_its_transport_is_native() {
+        let hub = Arc::new(Hub::default());
+        let (phone_tx, _phone) = bounded(16);
+        let phone = hub.subscribe(
+            &[],
+            Subscriber::new(
+                phone_tx,
+                ConnectedClient {
+                    client_id: Uuid::new_v4(),
+                    name: "phone".into(),
+                    connected_at: 0,
+                },
+                true,
+            )
+            .0,
+        );
+        let (desktop_tx, _desktop) = bounded(16);
+        let desktop = hub.subscribe(
+            &[],
+            Subscriber::new(
+                desktop_tx,
+                ConnectedClient {
+                    client_id: Uuid::new_v4(),
+                    name: "desktop".into(),
+                    connected_at: 0,
+                },
+                false,
+            )
+            .0,
+        );
+
+        assert!(hub.subscriber_is_native(phone));
+        assert!(!hub.subscriber_is_native(desktop));
+        // A connection that has since closed is not treated as capped: its
+        // response has nowhere to go.
+        assert!(!hub.subscriber_is_native(u64::MAX));
+    }
+
     #[test]
     fn connected_clients_lists_subscribers_oldest_first_and_drops_closed() {
         let hub = Arc::new(Hub::default());
@@ -2060,6 +2252,7 @@ mod tests {
                     name: name.into(),
                     connected_at: at,
                 },
+                false,
             )
             .0
         };
@@ -2167,6 +2360,7 @@ mod tests {
                 name: "test".into(),
                 connected_at: 0,
             },
+            false,
         );
         hub.subscribe(&[], subscriber);
         hub.begin_runtime(session_id, runtime_id);
@@ -2224,7 +2418,12 @@ mod tests {
     }
 
     impl Backend for BlockingProbeBackend {
-        fn handle(&self, request: Request, _: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            _: EventSink,
+            _limits: ReadLimits,
+        ) -> anyhow::Result<ResponsePayload> {
             if matches!(request.command, Command::ProbeProvider { .. }) {
                 self.probe_started.send(()).unwrap();
                 self.release_probe.recv().unwrap();
@@ -2297,7 +2496,12 @@ mod tests {
     }
 
     impl Backend for RuntimeOrderingBackend {
-        fn handle(&self, request: Request, _: EventSink) -> anyhow::Result<ResponsePayload> {
+        fn handle(
+            &self,
+            request: Request,
+            _: EventSink,
+            _limits: ReadLimits,
+        ) -> anyhow::Result<ResponsePayload> {
             let command = match request.command {
                 Command::Start { .. } => {
                     self.handled.send((request.session_id, "start")).unwrap();

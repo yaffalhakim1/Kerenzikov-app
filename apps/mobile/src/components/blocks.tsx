@@ -4,51 +4,44 @@ import { Loader } from 'panelui-native/components/loader';
 import { useTheme } from '@/hooks/use-theme';
 
 /**
- * The house loading indicator, drawn by PanelUI's `Loader` with the
- * `morph-ring` variant: a square that rotates while its corners round off into
- * a circle and back.
+ * The house loading indicator: PanelUI's `Loader`, `bouncing-bars` variant, at
+ * the library's `sm` step — the same mark everywhere, for everything that is
+ * waited on.
  *
- * This keeps the `Blocks` name and its props, so the twenty-three call sites —
- * buttons, sheet bodies, the drawer's empty state, the connection banner — did
- * not have to move. What changed is the animation inside it: the house pulsing
- * square is gone, and every loader in the app now runs the library's ring.
+ * One variant and one size, deliberately. The loader appears next to an
+ * `AppSymbol` glyph in a button as often as it stands alone on an empty screen,
+ * and the previous ring at `md` measured 34pt against a 36pt button — bigger
+ * than the control it was blocking. At `sm` the three bars are 20.25 × 22.5pt,
+ * which reads inside a toolbar and still carries an empty screen.
  *
- * ## Why the size is not drawn exactly
+ * ## Why there is no `size`
  *
- * `Loader` scales through three named steps — `sm`, `md`, `lg`, being 0.75, 1
- * and 1.35 of a 34pt box — and `MorphRing` picks its border width at that
- * natural scale (`Math.max(2, 3 * scale)`). So a caller's exact points cannot
- * be honoured without scaling the finished ring with a transform, which would
- * take the border below a pixel at the small end and leave a hairline that
- * does not read as a ring at all. The requested size therefore selects the
- * nearest step: everything up to 20pt is `sm` (25.5pt), 22pt and above is `md`
- * (34pt). Sizes are coarser than they were; the ring is legible at each one,
- * which the exact-size version would not have been.
+ * Call sites used to pass one, and the component snapped it to the nearest of
+ * `Loader`'s three steps — so a requested 12pt and a requested 24pt landed two
+ * steps apart and the app grew a loader for every context. One size ends that:
+ * if a spot ever genuinely needs a bigger mark, that is a new component, not a
+ * prop on this one.
  *
- * Reduced motion is the library's own — it parks the ring on a representative
- * still frame rather than freezing it mid-turn.
+ * Reduced motion is the library's own — it parks the bars on a representative
+ * still frame rather than freezing them mid-turn, which is why a mark that only
+ * ever sits still (`EarlierIndicator`) passes `speed={0}` and stays drawn.
  */
-const MD_FROM = 22;
-
 export function Blocks({
   color,
-  size = 20,
   style,
   label = 'Working',
   speed,
 }: {
   /** Tint; defaults to the brand accent. */
   color?: ColorValue;
-  /** Requested edge in points. Selects the nearest `Loader` step — see above. */
-  size?: number;
   style?: StyleProp<ViewStyle>;
-  /** What the ring means to a screen reader. Adjacent-text sites pass their own
+  /** What the bars mean to a screen reader. Adjacent-text sites pass their own
    *  wording; the default keeps a bare "progressbar" from announcing itself
    *  with no name at all. */
   label?: string | null;
   /**
-   * `Loader`'s own rate multiplier. Left undefined the ring loops forever,
-   * which is right for something being waited on; `0` stops it and draws the
+   * `Loader`'s own rate multiplier. Left undefined the bars loop forever,
+   * which is right for something being waited on; `0` stops them and draws the
    * still frame, which is right for a mark that is only ever a position —
    * `EarlierIndicator` is the one such call site, and it mounts for every
    * transcript longer than the initial window.
@@ -69,14 +62,14 @@ export function Blocks({
       // its default for `undefined`, so a `null` has to survive the trip to
       // mean "no announcement".
       label={label as string}
-      size={size >= MD_FROM ? 'md' : 'sm'}
+      size="sm"
       // `Loader` spreads `ViewProps`, so the caller's own placement goes
       // straight onto its root rather than onto a wrapper view. This surface
       // sits on scrolling lists, where a loader per row is the norm, so the
       // extra view is worth not having.
       style={style}
       speed={speed}
-      variant="morph-ring"
+      variant="bouncing-bars"
     />
   );
 }

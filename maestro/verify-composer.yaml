@@ -1,0 +1,16 @@
+# Smoke test for the Kerenzikov mobile app: the composer's send control size
+# (items 2 and 3).
+#
+# With an empty draft the send arrow is the only content in the slot, so its
+# measured box is the control's size. The flow asserts it renders (the size
+# assertion lives in the device measurement, not here — Maestro asserts on
+# visibility and text, not bounds).
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Add attachment"
+    timeout: 30000
+- assertVisible: "Add attachment"

@@ -28,6 +28,7 @@ import { ScrollViewMarker } from 'react-native-screens/experimental';
 
 
 import { AppSymbol } from '@/components/app-symbol';
+import { Blocks } from '@/components/blocks';
 import { useMarkdownStyles, VeilRegistry } from '@/components/md-block-row';
 import { RowAnchorProvider } from '@/components/transcript-anchor';
 import {
@@ -483,6 +484,33 @@ export function TranscriptList({
 
   const showEmpty = hydrated && !running && rows.length === 0;
 
+  /*
+   * The other half of an empty body: the session in hand is the task list's
+   * skeleton, and its messages are still in flight.
+   *
+   * `session_data()` strips messages into their own table and the list
+   * projection hands the client a session with `messages: []` on purpose, so
+   * the skeleton is legitimately empty until `hydrateSession()` lands. That is
+   * a real request, not a frame, and without this the body sat blank for its
+   * whole duration. `showEmpty` cannot cover it — it requires `hydrated`, which
+   * is the very thing that is false.
+   *
+   * Why this cannot flash the two-frame deferral: the deferral lives in
+   * `session-view`, which holds the transcript back behind its own blank
+   * placeholder until two `requestAnimationFrame`s have passed. While it runs
+   * this component is not mounted at all, so nothing here executes. A cached
+   * task cannot flash either — `placeholderData` only substitutes while the
+   * query has no data of its own, so a cache hit renders its first frame with
+   * `hydrated` already true.
+   *
+   * `!running` for the same reason `showEmpty` has it: `WorkingStrip` already
+   * owns that state, and a second spinner beside it would be two answers to
+   * one question. `rows.length === 0` is what makes the loader yield the
+   * instant there is something to draw, without waiting for `hydrated` to
+   * follow it.
+   */
+  const showHydrating = !hydrated && !running && rows.length === 0;
+
   return (
     <View style={styles.frame}>
       <ScrollViewMarker
@@ -535,6 +563,13 @@ export function TranscriptList({
           </View>
         </ScrollView>
       </ScrollViewMarker>
+      {showHydrating && (
+        <View pointerEvents="none" style={styles.emptyOverlay}>
+          {/* The only thing in the transcript body while it is in flight, so it
+              names itself rather than announcing a bare "Working". */}
+          <Blocks color={theme.accent} label="Loading messages" />
+        </View>
+      )}
       {showEmpty && (
         <View pointerEvents="none" style={styles.emptyOverlay}>
           <SessionEmpty error={null} loading={false} missing={false} />

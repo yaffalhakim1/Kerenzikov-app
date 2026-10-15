@@ -30,10 +30,14 @@ export function QueuedMessageRow({
   const theme = useTheme();
   const label = queuedMessageLabel(message);
   return (
-    <Host ignoreSafeArea="all" matchContents style={styles.menu}>
+    // `matchContents` is off, on both the Host and the `RNHostView`, so the row
+    // is not sized to its label: the host fills its parent, which is the
+    // composer card, and `numberOfLines={1}` ellipsizes a long label instead of
+    // setting the row's size.
+    <Host ignoreSafeArea="all" style={styles.menu}>
       <Menu
         label={(
-          <RNHostView matchContents>
+          <RNHostView>
             <View
               style={[
                 styles.row,

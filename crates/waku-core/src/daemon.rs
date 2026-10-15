@@ -23,6 +23,7 @@ use crate::model::{
     PermissionOption, Project, ProviderKind, ProviderResumeCursor, QueuedMessage, SessionStatus,
 };
 use crate::persistence::{ComposerDraftStore, PersistedState, StateStore};
+use crate::server::ReadLimits;
 use crate::settings::DaemonSettingsStore;
 use waku_protocol::provider_session::{ProviderSessionFork, ProviderSessionForkRequest};
 
@@ -54,7 +55,7 @@ pub struct WakuBackend {
     task_store: Arc<StateStore>,
     removed_session_ids: Mutex<HashSet<Uuid>>,
     composer_drafts: ComposerDraftStore,
-    attachments: AttachmentStore,
+    attachments: Arc<AttachmentStore>,
     usage_scan_cache: Mutex<crate::usage_history::ScanCache>,
     checkpoint_capture_locks: Mutex<HashMap<(PathBuf, Uuid, usize), Arc<Mutex<()>>>>,
     usage_rates_dir: std::path::PathBuf,
@@ -95,13 +96,13 @@ impl WakuBackend {
         migrate_projectless_state(&task_store, &mut task_state)?;
         let (drain_requests, drain_request_rx) = crossbeam_channel::unbounded::<DrainRequest>();
         let composer_drafts = ComposerDraftStore::for_state_path(task_store.path());
-        let attachments = AttachmentStore::new(
+        let attachments = Arc::new(AttachmentStore::new(
             task_store
                 .path()
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("attachments"),
-        );
+        ));
         let usage_rates_dir = task_store
             .path()
             .parent()
@@ -118,6 +119,16 @@ impl WakuBackend {
                 .name("waku-daemon-queue-drain".into())
                 .spawn(move || run_queue_drain_worker(task_state, task_store, drain_request_rx))
                 .context("could not start Kerenzikov queue drain worker")?;
+        }
+        {
+            // Same lifetime contract as the drain worker. This exists because
+            // nothing else reclaims a chunked upload's staging directory: the
+            // attachment sweep deliberately skips `.{uuid}.tmp`.
+            let attachments = Arc::downgrade(&attachments);
+            std::thread::Builder::new()
+                .name("waku-daemon-attachment-upload-sweep".into())
+                .spawn(move || run_attachment_upload_sweeper(attachments))
+                .context("could not start Kerenzikov attachment upload sweeper")?;
         }
         Ok(Self {
             sessions: Mutex::new(HashMap::new()),
@@ -267,7 +278,12 @@ fn migrate_projectless_state(
 }
 
 impl Backend for WakuBackend {
-    fn handle(&self, request: Request, events: EventSink) -> anyhow::Result<ResponsePayload> {
+    fn handle(
+        &self,
+        request: Request,
+        events: EventSink,
+        limits: ReadLimits,
+    ) -> anyhow::Result<ResponsePayload> {
         let session_id = request.session_id;
         let runtime_id = request.runtime_id;
         match &request.command {
@@ -811,6 +827,28 @@ impl Backend for WakuBackend {
             Command::ImportPathAttachment { path } => Ok(ResponsePayload::AttachmentStored {
                 attachment: self.attachments.import_path(&path)?,
             }),
+            Command::BeginAttachmentUpload { name, total_bytes } => {
+                Ok(ResponsePayload::AttachmentUploadStarted {
+                    upload_id: self.attachments.begin_upload(&name, total_bytes)?,
+                })
+            }
+            Command::AppendAttachmentUpload {
+                upload_id,
+                offset,
+                data,
+            } => {
+                self.attachments.append_upload(upload_id, offset, &data)?;
+                Ok(ResponsePayload::Ack)
+            }
+            Command::FinishAttachmentUpload { upload_id } => {
+                Ok(ResponsePayload::AttachmentStored {
+                    attachment: self.attachments.finish_upload(upload_id)?,
+                })
+            }
+            Command::AbortAttachmentUpload { upload_id } => {
+                self.attachments.abort_upload(upload_id)?;
+                Ok(ResponsePayload::Ack)
+            }
             Command::ReadBlob { reference } => {
                 let path = self
                     .task_store
@@ -818,11 +856,13 @@ impl Backend for WakuBackend {
                     .path_for(&reference)
                     .ok_or_else(|| anyhow!("invalid blob reference"))?;
                 Ok(ResponsePayload::BlobData {
-                    bytes: std::fs::read(path)?,
+                    bytes: read_within_limit(&path, limits.max_bytes)?,
                 })
             }
             Command::ReadAttachment { reference, path } => Ok(ResponsePayload::BlobData {
-                bytes: self.attachments.read_file(&reference, &path)?,
+                bytes: self
+                    .attachments
+                    .read_file(&reference, &path, limits.max_bytes)?,
             }),
             Command::SweepBlobs => {
                 self.task_store.blob_sweep()();
@@ -2155,6 +2195,10 @@ fn handle_driver_command(
         | Command::StoreBlob { .. }
         | Command::ImportAttachment { .. }
         | Command::ImportPathAttachment { .. }
+        | Command::BeginAttachmentUpload { .. }
+        | Command::AppendAttachmentUpload { .. }
+        | Command::FinishAttachmentUpload { .. }
+        | Command::AbortAttachmentUpload { .. }
         | Command::ReadBlob { .. }
         | Command::ReadAttachment { .. }
         | Command::SweepBlobs
@@ -2231,6 +2275,40 @@ fn ensure_shell_environment() {
     REFRESHED.get_or_init(|| {
         crate::command_env::refresh_from_default_shell();
     });
+}
+
+/// How often abandoned chunked uploads are reclaimed.
+///
+/// Well under [`crate::attachments::ATTACHMENT_UPLOAD_IDLE_DEADLINE`], so a
+/// staging directory outlives its deadline by at most one tick.
+const ATTACHMENT_UPLOAD_SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Reads a file for a client that cannot be sent an arbitrarily large message.
+///
+/// The size is checked before the bytes are read, so an oversized file costs a
+/// metadata call rather than loading the whole thing only to refuse it. The
+/// error is what the client sees instead of a dropped connection.
+fn read_within_limit(path: &Path, max_bytes: usize) -> anyhow::Result<Vec<u8>> {
+    let size = std::fs::metadata(path)?.len();
+    if size > max_bytes as u64 {
+        bail!(
+            "this file is {size} bytes and is too large to open on this device ({max_bytes} byte maximum)"
+        );
+    }
+    Ok(std::fs::read(path)?)
+}
+
+fn run_attachment_upload_sweeper(attachments: std::sync::Weak<AttachmentStore>) {
+    loop {
+        std::thread::sleep(ATTACHMENT_UPLOAD_SWEEP_INTERVAL);
+        let Some(attachments) = attachments.upgrade() else {
+            // Backend dropped: daemon is shutting down.
+            return;
+        };
+        if let Err(error) = attachments.sweep_idle_uploads() {
+            eprintln!("waku-daemon could not reclaim abandoned attachment uploads: {error}");
+        }
+    }
 }
 
 /// Settled turns are posted here by the per-session event forwarding

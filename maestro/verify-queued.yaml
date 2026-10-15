@@ -1,0 +1,16 @@
+# Smoke test for the Kerenzikov mobile app: the queued follow-up row (item 5).
+#
+# Deep-links into the session that has one queued, so the row is on screen. It
+# renders inside the composer card now, so it spans the card's width.
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "Work on Host"
+    timeout: 30000
+- openLink: "waku://session/e35c98a0-564a-479f-b7cc-a62516e959a2"
+- extendedWaitUntil:
+    visible: "where is the whats new anyway"
+    timeout: 30000

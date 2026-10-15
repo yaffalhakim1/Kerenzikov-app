@@ -84,7 +84,7 @@ export default function UsageScreen() {
               onPress={rescan}>
               <AppSymbol
                 name={{ ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' }}
-                size={20}
+               
                 tintColor={theme.text}
               />
             </AppPressable>
@@ -117,7 +117,7 @@ export default function UsageScreen() {
           ]}>
           <AppSymbol
             name={{ ios: 'calendar', android: 'calendar_month', web: 'calendar_month' }}
-            size={18}
+           
             tintColor={theme.textSecondary}
           />
           <Text style={[styles.pickerLabel, { color: theme.textSecondary }]}>Window</Text>
@@ -139,7 +139,7 @@ export default function UsageScreen() {
 
         {!history ? (
           <View style={styles.loading}>
-            <Blocks color={theme.accent} size={24} />
+            <Blocks color={theme.accent} />
             <Text style={[styles.loadingLabel, { color: theme.textTertiary }]}>
               Scanning provider transcripts…
             </Text>
@@ -201,7 +201,7 @@ export default function UsageScreen() {
                     key={slice.provider}
                     style={styles.provider}>
                     <View style={styles.providerHead}>
-                      <ProviderIcon provider={slice.provider} size={14} />
+                      <ProviderIcon provider={slice.provider} />
                       <Text
                         numberOfLines={1}
                         style={[styles.providerName, { color: theme.text }]}>
@@ -322,11 +322,11 @@ function PlanCard({
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <View style={styles.planHead}>
-        <ProviderIcon provider={provider} size={14} />
+        <ProviderIcon provider={provider} />
         <Text numberOfLines={1} style={[styles.providerName, { color: theme.text }]}>
           {plan?.planLabel ?? 'Plan'}
         </Text>
-        {isFetching && <Blocks color={theme.accent} size={14} />}
+        {isFetching && <Blocks color={theme.accent} />}
       </View>
       {error ? (
         <Text style={[styles.detail, { color: theme.danger }]}>

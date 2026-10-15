@@ -385,7 +385,7 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
       {/* The orb's silhouette names the kind of busy; the word shimmers while
           it changes every 7s so a swap never reads as a static relabel. */}
-      <ThinkingOrb size={18} state={waiting ? 'listening' : 'working'} />
+      <ThinkingOrb state={waiting ? 'listening' : 'working'} />
       <Shimmer enabled={!waiting} textClassName="text-[12.5px] font-medium">
         {word}
       </Shimmer>
@@ -417,7 +417,7 @@ export function EarlierIndicator() {
   const theme = useTheme();
   return (
     <View accessibilityLabel="Earlier messages above" style={styles.earlier}>
-      <Blocks color={theme.textTertiary} size={14} speed={0} />
+      <Blocks color={theme.textTertiary} speed={0} />
     </View>
   );
 }
@@ -435,7 +435,7 @@ export function SessionEmpty({
   onRetry?: () => void;
 }) {
   const theme = useTheme();
-  if (loading) return <Blocks color={theme.accent} size={24} />;
+  if (loading) return <Blocks color={theme.accent} />;
   return (
     <View style={styles.empty}>
       <Text style={[styles.emptyTitle, { color: theme.text }]}>

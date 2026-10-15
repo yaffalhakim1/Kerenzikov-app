@@ -8,10 +8,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTheme } from '@/hooks/use-theme';
 import { tapHaptic } from '@/lib/haptics';
 
-import {
-  queuedMessageLabel,
-  type QueuedMessageRowProps,
-} from '@/components/queued-message-row.types';
+import { queuedMessageLabel, type QueuedMessageRowProps } from '@/components/queued-message-row.types';
 
 /**
  * A queued follow-up on Android. The row is a PanelUI `Item` and its trailing
@@ -52,7 +49,6 @@ export function QueuedMessageRow({
       <Item
         accessibilityHint="Opens queued message actions"
         accessibilityLabel={label}
-        className="mb-1.5"
         onPress={openMenu}
         size="xs"
         variant="muted">
