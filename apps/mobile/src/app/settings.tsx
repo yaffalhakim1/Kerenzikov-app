@@ -14,6 +14,7 @@ import {
 
 import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
+import { ConnectionBanner } from '@/components/connection-banner';
 
 import { AppSymbol } from '@/components/app-symbol';
 import { ProviderIcon } from '@/components/provider-icon';
@@ -187,6 +188,10 @@ export default function SettingsScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.content}>
+        {/* Every setting here is stored on the daemon and shared by all
+            devices, so a down link means these values are the last ones seen,
+            not the current ones — say so rather than showing stale rows. */}
+        <ConnectionBanner />
         <Text style={[styles.sectionTitle, { color: theme.textTertiary }]}>Appearance</Text>
         <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           {/* One row that opens a sheet, rather than three inline rows: the

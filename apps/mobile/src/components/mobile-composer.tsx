@@ -199,6 +199,38 @@ export function ComposerIconButton({
   );
 }
 
+/**
+ * The size of everything drawn inside the send/stop slot.
+ *
+ * 19 is what the toolbar's own icon controls already draw — the attachment
+ * menu, the access menu and `ComposerIconButton` all pass 19 to `AppSymbol` —
+ * so the slot agrees with the row it sits in. Send already drew 19 and Stop
+ * drew 18; the 1pt difference was not doing any work, and the desktop does not
+ * settle it either (its toolbar draws send at 16 and stop at 18 in the same
+ * 32px button), so the row's own step is the one worth agreeing with.
+ *
+ * The loader asks for the same number rather than a size of its own: `Blocks`
+ * snaps the request to `Loader`'s named steps, so the number picks the step and
+ * is not the drawn size. The ring is therefore *not* 19pt and does not shrink
+ * with this change — the previous 16 already landed on the same `sm` step, a
+ * 25.5pt ring, which is what makes the number honest to state. `sm` is also the
+ * only step that fits: `MorphRing` pads the rotation's own clearance around the
+ * ring — `box * √2`, so 36.06pt here, the slot's box to the sub-pixel — where
+ * `md` would be 48pt and spill.
+ */
+const SEND_SLOT_CONTENT_SIZE = 19;
+
+/**
+ * What a loader in a labelled `sm` button asks for.
+ *
+ * Those buttons carry a 14px label, and 16 is what PanelUI's own spinner for
+ * `sm` measures (`h-4`) — so a `Blocks` ring here is asked for the same size
+ * the library would have drawn, rather than for a third number. `Blocks` snaps
+ * it to `sm` either way, which the previous 14 and 16 literals both did; the
+ * value exists to name what it is matching.
+ */
+const SM_BUTTON_LOADER_SIZE = 16;
+
 export function SendButton({
   onPress,
   disabled,
@@ -216,19 +248,25 @@ export function SendButton({
   return (
     <Button
       accessibilityLabel={label}
+      // `h-9 w-9` because the slot is 36pt and `size="icon"` is a 44pt box —
+      // without it Send overflowed its own container by 8pt on every side while
+      // the Stop beside it sat flush. No `shadow-none` here: `ghost` carries no
+      // shadow to remove, and Stop's is only there because `destructive` does.
+      // Both buttons take the same box either way, which is the point.
+      className="h-9 w-9"
       disabled={disabled}
       onPress={onPress}
       size="icon"
       variant="ghost"
     >
       {busy ? (
-        <Blocks color={theme.textSecondary} size={16} />
+        <Blocks color={theme.textSecondary} size={SEND_SLOT_CONTENT_SIZE} />
       ) : (
         <AppSymbol
           name={queueing
             ? { ios: 'text.append', android: 'playlist_add', web: 'playlist_add' }
             : { ios: 'paperplane.fill', android: 'send', web: 'send' }}
-          size={19}
+          size={SEND_SLOT_CONTENT_SIZE}
           tintColor={disabled ? theme.textTertiary : theme.text}
         />
       )}
@@ -304,11 +342,8 @@ export function SendStopSlot({
           pointerEvents={stopShown ? 'auto' : 'none'}
           style={[styles.sendSlotChild, stopStyle]}>
           {/*
-            `h-9 w-9` because the slot is 36pt and `size="icon"` is a 44pt box —
-            it overflowed its own container by 8pt on every side. `shadow-none`
-            because `destructive` is the one variant that carries a shadow, and
-            against the ghost Send it crossfades with that read as the heavier
-            control. The two are one slot, so they are one box.
+            The same box Send carries — one slot, so one control that changes
+            colour rather than two that happen to share a home.
           */}
           <Button
             accessibilityLabel="Stop agent"
@@ -319,11 +354,12 @@ export function SendStopSlot({
           >
             <AppSymbol
               name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
-              // 18, not the 14 it was: the two controls share a slot, and a
-              // 14pt square in a 36pt circle reads as a smaller control than
-              // the 19pt Send arrow beside it. The desktop's stop glyph is 18
-              // in its 26pt circle, which is the same proportion this lands on.
-              size={18}
+              // Same glyph size as the Send arrow it swaps with, so the square
+              // does not read as the smaller control mid-cross-fade. The
+              // desktop draws send and stop at different sizes in the same
+              // button (16 and 18), which is exactly the drift being fixed
+              // here, so it is not the reference to follow.
+              size={SEND_SLOT_CONTENT_SIZE}
               tintColor={theme.danger}
             />
           </Button>
@@ -991,7 +1027,10 @@ function PermissionPanel({
             size="sm"
             variant={option.allow ? 'primary' : 'secondary'}>
             {responding === option.id && (
-              <Blocks color={option.allow ? theme.onInverse : theme.text} size={14} />
+              <Blocks
+                color={option.allow ? theme.onInverse : theme.text}
+                size={SM_BUTTON_LOADER_SIZE}
+              />
             )}
             {option.label}
           </Button>
@@ -1138,7 +1177,9 @@ function UserInputPanel({
           onPress={() => void advance()}
           size="sm"
           variant="primary">
-          {submitting && <Blocks color={theme.onInverse} size={16} />}
+          {submitting && (
+            <Blocks color={theme.onInverse} size={SM_BUTTON_LOADER_SIZE} />
+          )}
           {last ? 'Submit' : 'Next'}
         </Button>
       </View>

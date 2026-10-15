@@ -30,10 +30,17 @@ export function QueuedMessageRow({
   const theme = useTheme();
   const label = queuedMessageLabel(message);
   return (
-    <Host ignoreSafeArea="all" matchContents style={styles.menu}>
+    // `matchContents` is off, on both the Host and the `RNHostView`, so the row
+    // is not sized to its label. Matching contents makes the host adopt the
+    // SwiftUI content's size, and the `Menu`'s label is sized by the row inside
+    // it — which for a one-word follow-up is a narrow pill. Left to fill its
+    // parent, the host takes the composer's width, and the row's own
+    // `alignSelf: 'stretch'` carries it across; `numberOfLines={1}` then
+    // ellipsizes a long label instead of widening the row.
+    <Host ignoreSafeArea="all" style={styles.menu}>
       <Menu
         label={(
-          <RNHostView matchContents>
+          <RNHostView>
             <View
               style={[
                 styles.row,

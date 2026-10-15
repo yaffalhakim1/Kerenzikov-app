@@ -10,6 +10,7 @@ import { tapHaptic } from '@/lib/haptics';
 
 import {
   queuedMessageLabel,
+  queuedMessageRowStyles as styles,
   type QueuedMessageRowProps,
 } from '@/components/queued-message-row.types';
 
@@ -48,6 +49,9 @@ export function QueuedMessageRow({
         else if (nativeEvent.event === 'edit') onEdit();
         else if (nativeEvent.event === 'remove') onRemove();
       }}
+      // `MenuView` renders a bare `View` around its Compose host, so this is
+      // what makes the row span the composer rather than shrink to its label.
+      style={styles.menu}
       shouldOpenOnLongPress>
       <Item
         accessibilityHint="Opens queued message actions"

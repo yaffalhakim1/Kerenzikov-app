@@ -12,6 +12,7 @@ import {
 
 import { AppPressable } from '@/components/app-pressable';
 import { Blocks } from '@/components/blocks';
+import { ConnectionBanner } from '@/components/connection-banner';
 
 import { NativeTint, Radius, Spacing } from '@/constants/theme';
 import {
@@ -86,6 +87,9 @@ export default function SkillsScreen() {
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={styles.content}>
+        {/* Skills are read from the daemon, so a link that is down is the
+            reason this screen is empty — the banner names it. */}
+        <ConnectionBanner />
         {!skills.data ? (
           <View style={styles.loading}>
             <Blocks color={theme.accent} size={24} />

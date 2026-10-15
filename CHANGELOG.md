@@ -25,6 +25,35 @@ the original feature bullet instead of adding separate entries for them.
   belongs. A step that failed opens itself, so a problem is still the first
   thing you see.
 
+- **Fixed: attaching a photo could drop the daemon connection.** A large photo
+  — anything past roughly 12 MB — closed the link and the app reported
+  "Kerenzikov daemon disconnected", so the attachment was lost and the task
+  went offline until it reconnected. The whole file was being sent as one
+  message, and the platform's WebSocket refuses a message that big by closing
+  the connection. Attachments now stream in chunks, so any size the daemon
+  accepts arrives intact. This needs the daemon from the same release: an older
+  daemon does not know the chunked upload and the attachment will time out.
+
+- **A disconnected daemon now says so wherever you are.** The connection's
+  state was only reported on a task, the task list and a few settings screens;
+  starting a new task on a home screen showed nothing at all, so a daemon that
+  was still connecting — or had failed to connect — looked like an app that had
+  simply gone quiet. Every screen that reads from the daemon now explains the
+  link, in the same banner, with the same way to retry.
+
+- **Fixed: opening a task could show an empty conversation.** A task whose
+  messages were still being fetched rendered a blank transcript, which read as
+  a task with nothing in it. It shows a loading indicator until the messages
+  land.
+
+- **The send, stop and loading controls in the composer are one size.** Send
+  was drawn larger than the stop beside it, so the two did not line up and the
+  send arrow overflowed its own button.
+
+- **A queued follow-up is as wide as the composer.** It used to shrink to fit
+  its own text, so a one-word queued message was a narrow chip. Long ones now
+  truncate instead of stretching the row.
+
 ## [0.1.71]
 
 ### Desktop
