@@ -12,6 +12,32 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.73]
+
+### Android
+
+- **Fixed: attaching a large photo dropped the daemon connection.** A photo past
+  roughly 12 MB closed the link and the app reported "Kerenzikov daemon
+  disconnected" — the attachment was lost and the task went offline until it
+  reconnected. The whole file was being sent as one message, and the platform's
+  WebSocket refuses a message that big by closing the connection. Attachments
+  now stream in chunks, so any size the daemon accepts arrives intact. This
+  needs the daemon from the same release: an older daemon does not know the
+  chunked upload and the attachment will time out.
+- **A disconnected daemon now says so wherever you are.** The home screen
+  mounted no banner at all, so a daemon that was connecting, reconnecting or had
+  failed looked like an app gone quiet; Settings and Skills showed an empty
+  screen with no reason either. Every screen that reads from the daemon now
+  explains the link, in the same banner, with the same way to retry.
+- **A task whose messages are still arriving shows a loading state**, instead of
+  a blank transcript that read as a task with nothing in it.
+- **The send, stop and loading controls in the composer are one size.** Send was
+  drawn larger than the stop beside it, and the loading ring was bigger than the
+  button it blocked. They now share the library's own small size.
+- **A queued follow-up is as wide as the composer card.** It used to shrink to
+  fit its own text, so a one-word queued message was a narrow chip. Long ones
+  now truncate instead of stretching the row.
+
 ## [0.1.72]
 
 ### Android
