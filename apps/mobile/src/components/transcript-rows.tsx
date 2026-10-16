@@ -1,4 +1,5 @@
 import type { AgentSession, Checkpoint, Message } from '@waku/client';
+import { activitiesForBlock } from '@waku/client/event-reducer';
 import { formatMessageTime } from '@waku/client/transcript-presentation';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -7,7 +8,7 @@ import { Button } from 'panelui-native/components/button';
 import { Message as MessageBubble } from 'panelui-native/components/message';
 import { Shimmer } from 'panelui-native/components/shimmer';
 import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
@@ -33,7 +34,7 @@ import { MonoFont, Radius } from '@/constants/theme';
 import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
 import { mentionSegments } from '@/lib/composer-commands';
-import type { TranscriptRow } from '@/lib/session-presentation';
+import { workingOrbState, type TranscriptRow } from '@/lib/session-presentation';
 import type { MarkdownStyles } from '@/md/render';
 import type { TranscriptMarkdownCache } from '@/md/transcript-cache';
 
@@ -344,6 +345,18 @@ function ChangedFilesCard({ checkpoint }: { checkpoint: Checkpoint }) {
   );
 }
 
+/**
+ * The working orb's side, in points.
+ *
+ * 20 is the size PanelUI documents for the orb beside a line of text, and it
+ * is inside the library's small tuning (at or below 32 the orb switches to a
+ * separate design with far fewer, proportionally much larger dots, because a
+ * faithful lattice at this size is grey mush). It reads against the 12.5pt
+ * word it leads without becoming the tallest thing on the screen, which is
+ * what the 64pt default did.
+ */
+const WORKING_ORB_SIZE = 20;
+
 /** Working-indicator flavour words, rotated every 7s, seeded per chat. */
 const FLAVOUR_WORDS = [
   'Thinking', 'Pondering', 'Scheming', 'Brewing', 'Weaving', 'Tinkering',
@@ -381,11 +394,25 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
   const word = waiting
     ? 'Waiting for you'
     : `${FLAVOUR_WORDS[(flavourSeed(session.id) + Math.floor(elapsed / 7)) % FLAVOUR_WORDS.length]}…`;
+  // The newest activity the running turn produced, so the orb's silhouette says
+  // *which* kind of busy this is rather than always showing the same mark.
+  const liveActivities = useMemo(() => {
+    const block = session.transcript_blocks.at(-1);
+    if (!block) return [];
+    const activities = activitiesForBlock(block);
+    const runningTurnId = session.turns.find((turn) => turn.status === 'running')?.id ?? null;
+    return runningTurnId && block.turn_id === runningTurnId ? activities : [];
+  }, [session.transcript_blocks, session.turns]);
   return (
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
-      {/* The orb's silhouette names the kind of busy; the word shimmers while
-          it changes every 7s so a swap never reads as a static relabel. */}
-      <ThinkingOrb state={waiting ? 'listening' : 'working'} />
+      {/* `size={20}` is the library's own small tuning for a line of text: at
+          or below 32 the orb switches to a separate design with far fewer,
+          proportionally larger dots, because a faithful lattice at this size
+          is grey mush. */}
+      <ThinkingOrb
+        size={WORKING_ORB_SIZE}
+        state={waiting ? 'listening' : workingOrbState(liveActivities)}
+      />
       <Shimmer enabled={!waiting} textClassName="text-[12.5px] font-medium">
         {word}
       </Shimmer>

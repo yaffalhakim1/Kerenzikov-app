@@ -23,9 +23,14 @@ export function queuedMessageLabel(message: QueuedMessage): string {
 
 /** Shared by both platform wrappers so the row cannot drift between them. */
 export const queuedMessageRowStyles = StyleSheet.create({
-  menu: { marginBottom: 6 },
+  // Stretched, not sized to its content. The Android wrapper is a bare view
+  // around a Compose host, and Compose lays that content out against the
+  // window: left to itself the row settled as a 166pt pill in a 340pt slot.
+  // This is the parent-sized box the row fills, so the two agree.
+  menu: { alignSelf: 'stretch', marginBottom: 6 },
   row: {
     alignItems: 'center',
+    alignSelf: 'stretch',
     borderRadius: Radius.small,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',

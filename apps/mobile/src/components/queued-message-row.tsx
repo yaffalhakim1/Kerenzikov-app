@@ -40,6 +40,12 @@ export function QueuedMessageRow({
       ref={menu}
       actions={actions}
       colorScheme={scheme}
+      // `alignSelf: 'stretch'` with no width: the host is a bare view around
+      // its Compose content, and Compose measures that content against the
+      // *window* rather than the parent — outside the composer card it settled
+      // as a 166pt pill instead of a full-width row. A stretched host gives the
+      // row a parent-sized box to fill, and the row inside it fills that.
+      style={styles.menu}
       onPressAction={({ nativeEvent }) => {
         if (nativeEvent.event === 'send-now') onSendNow();
         else if (nativeEvent.event === 'edit') onEdit();

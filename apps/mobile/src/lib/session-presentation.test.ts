@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentSession, AgentTurn, Message, Project } from '@waku/client';
+import type { ActivityItem, AgentSession, AgentTurn, Message, Project } from '@waku/client';
 import { activitiesForBlock, reduceRuntimeEvent } from '@waku/client/event-reducer';
 
 import { TranscriptMarkdownCache } from '../md/transcript-cache';
@@ -23,6 +23,7 @@ import {
   stabilizeSessionSummaries,
   stabilizeTranscriptRows,
   turnOptionsForSession,
+  workingOrbState,
 } from './session-presentation';
 
 describe('task list projection', () => {
@@ -285,6 +286,46 @@ describe('mobile session presentation', () => {
     expect(contextPercent(session({}))).toBeNull();
     expect(contextPercent(session({ context_usage: { tokens: 50_000, window: 200_000 } }))).toBe(25);
     expect(contextPercent(session({ context_usage: { tokens: 500, window: null } }))).toBeNull();
+  });
+
+  test('names the kind of busy from the newest activity', () => {
+    const item = (overrides: Partial<ActivityItem> & Pick<ActivityItem, 'kind'>): ActivityItem => ({
+      id: overrides.kind,
+      source_id: null,
+      title: 'step',
+      detail: null,
+      failed: false,
+      complete: true,
+      ...overrides,
+    });
+
+    // Nothing readable yet, and a provider that reports no activities at all:
+    // both are a turn in flight, which is the honest default.
+    expect(workingOrbState([])).toBe('working');
+    expect(workingOrbState([item({ kind: 'command' })])).toBe('working');
+    expect(workingOrbState([item({ kind: 'tool' })])).toBe('working');
+
+    expect(workingOrbState([item({ kind: 'search' })])).toBe('searching');
+    expect(workingOrbState([item({ kind: 'fileRead' })])).toBe('searching');
+    expect(workingOrbState([item({ kind: 'fileChange' })])).toBe('shaping');
+    expect(workingOrbState([item({ kind: 'plan' })])).toBe('solving');
+
+    // The newest step wins: a read that followed a plan is a search, not a solve.
+    expect(
+      workingOrbState([item({ kind: 'plan' }), item({ kind: 'fileRead' })]),
+    ).toBe('searching');
+
+    // A reasoning trace is a thought, so it reads as composing whatever its
+    // `kind` claims.
+    expect(
+      workingOrbState([
+        item({ kind: 'command' }),
+        item({
+          kind: 'tool',
+          reasoning: { content: 'weighing it', started_at_ms: 0, finished_at_ms: 1 },
+        }),
+      ]),
+    ).toBe('composing');
   });
 
   test('keeps provider ordering inline when the turn is unknown', () => {

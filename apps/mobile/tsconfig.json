@@ -2,15 +2,6 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
-    /*
-     * `expo/types` is here rather than left to the generated `expo-env.d.ts`.
-     * That file is written only by `expo start`, and it is gitignored, so a
-     * fresh checkout that never starts the dev server has no declaration for
-     * `import '../global.css'` and `tsc` fails on it — which is exactly what CI
-     * did: "Cannot find module or type declarations for side-effect import of
-     * '../global.css'". Naming the types package directly resolves the same
-     * declaration without depending on a generated file.
-     */
     "types": [
       "bun",
       "expo/types"
@@ -27,6 +18,7 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
-    ".expo/types/**/*.ts"
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
   ]
 }

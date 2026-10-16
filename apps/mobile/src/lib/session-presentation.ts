@@ -1,4 +1,5 @@
 import type {
+  ActivityItem,
   AgentSession,
   AgentTurn,
   Checkpoint,
@@ -462,6 +463,58 @@ export function agentPresetAvailable(session: AgentSession, busy: boolean): bool
 export function contextUsagePercent(usage: AgentSession['context_usage']): number | null {
   if (!usage || !usage.window) return null;
   return Math.max(0, Math.min(100, Math.round((usage.tokens / usage.window) * 100)));
+}
+
+/** Which of `ThinkingOrb`'s six animations describes what the agent is doing. */
+export type WorkingOrbState =
+  | 'working'
+  | 'searching'
+  | 'solving'
+  | 'listening'
+  | 'composing'
+  | 'shaping';
+
+/**
+ * The orb state for the work in flight, from the newest activity the live turn
+ * has produced.
+ *
+ * The orb exists to say *which kind of busy* an agent is — the library's own
+ * warning is that "a `solving` orb over a network request is a lie" — so the
+ * state is read from the work rather than defaulted. `working` (particles on
+ * tilted orbits) is the honest answer for "running a turn" and stays the
+ * fallback: it is what a turn with no readable activity yet is doing, and what
+ * a provider that reports no activities at all shows.
+ *
+ * `listening` is deliberately absent: it means *taking input*, which is the
+ * blocked-on-the-user state `WorkingStrip` already draws, not a kind of work.
+ */
+export function workingOrbState(activities: readonly ActivityItem[]): WorkingOrbState {
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index]!;
+    // A reasoning trace is a thought rather than an action, so it reads as
+    // composing whatever its `kind` claims.
+    if (activity.reasoning) return 'composing';
+    switch (activity.kind) {
+      // Looking something up: a query, a directory listing, or a file read.
+      case 'search':
+      case 'fileSearch':
+      case 'fileList':
+      case 'fileRead':
+        return 'searching';
+      // Forming a structure: an edit is a shape being written into the tree.
+      case 'fileChange':
+        return 'shaping';
+      case 'plan':
+        return 'solving';
+      case 'reasoning':
+        return 'composing';
+      // `command` and `tool` are the fallback: a shell command is work in
+      // flight with no sharper silhouette of its own.
+      default:
+        break;
+    }
+  }
+  return 'working';
 }
 
 export function contextPercent(session: AgentSession): number | null {

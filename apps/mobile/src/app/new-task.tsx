@@ -581,6 +581,13 @@ export default function NewTaskScreen() {
       style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Title and back button are the native navigation bar's; keep clear of it. */}
       <View style={{ height: headerInset }} />
+      {/* The connection state belongs at the top, where every other screen puts
+          it, and outside the scroll region so it cannot be scrolled away. It
+          used to ride the composer's `aboveCard` slot, which is the *bottom* of
+          the screen — a daemon that was down announced itself under the
+          keyboard, past the setup rows, and read as part of the composer rather
+          than as the reason nothing could be sent. */}
+      <ConnectionBanner />
       {/* The setup area scrolls. With the keyboard up this region is all that
           can give, and without a scroll it simply overflowed — which pushed the
           composer, the last child, under the keyboard. */}
@@ -658,7 +665,6 @@ export default function NewTaskScreen() {
 
       <ComposerSurface
         attachments={attachments}
-        aboveCard={<ConnectionBanner />}
         commands={commandNames.length > 0 ? commandNames : undefined}
         editable={!submitting}
         error={error && !isDaemonDisconnectError(error) ? (

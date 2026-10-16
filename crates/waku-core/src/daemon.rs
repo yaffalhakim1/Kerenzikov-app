@@ -2112,6 +2112,11 @@ fn handle_driver_command(
     match command {
         Command::Prompt { prompt, .. } => driver.prompt(prompt),
         Command::Steer { prompt } => driver.steer(prompt),
+        // Stop has two halves and both are required: the suppression mark
+        // applied in `handle` keeps the next settle from draining the queue,
+        // and this tells the provider to actually abandon the running turn.
+        // Without this the queue stayed put and the agent kept working.
+        Command::Cancel => driver.cancel(),
         Command::CancelComputerUse => driver.cancel_computer_use(),
         Command::RefreshBackgroundWork => driver.refresh_background_work(),
         Command::StopBackgroundWork { key, control_id } => {
@@ -2211,11 +2216,9 @@ fn handle_driver_command(
         | Command::ResizeTerminal { .. }
         | Command::CloseTerminal
         | Command::CloseSession
-        // Hub-level (ListConnections) and dispatch-level (Cancel: suppression
-        // is applied in `handle`) commands never reach the driver path.
+        // Hub-level: answered in `handle_request` before the backend sees it.
         | Command::ListConnections
-        | Command::RegisterPushToken { .. }
-        | Command::Cancel => {
+        | Command::RegisterPushToken { .. } => {
             bail!("daemon received a command in the wrong dispatch path")
         }
     }
@@ -3081,17 +3084,23 @@ mod tests {
 
         pub(super) struct RecordingDriver {
             prompts: Mutex<Vec<String>>,
+            cancels: Mutex<usize>,
         }
 
         impl RecordingDriver {
             pub(super) fn new() -> Arc<Self> {
                 Arc::new(Self {
                     prompts: parking_lot::Mutex::new(Vec::new()),
+                    cancels: parking_lot::Mutex::new(0),
                 })
             }
 
             pub(super) fn prompts(&self) -> Vec<String> {
                 self.prompts.lock().clone()
+            }
+
+            pub(super) fn cancels(&self) -> usize {
+                *self.cancels.lock()
             }
         }
 
@@ -3099,7 +3108,9 @@ mod tests {
             fn prompt(&self, prompt: String) {
                 self.prompts.lock().push(prompt);
             }
-            fn cancel(&self) {}
+            fn cancel(&self) {
+                *self.cancels.lock() += 1;
+            }
             fn respond(&self, _request_id: String, _option_id: String) {}
             fn rollback(
                 &self,
@@ -3248,6 +3259,51 @@ mod tests {
         drain_queued_prompt(&fixture.task_state, &fixture.store, request);
 
         assert_eq!(fixture.driver.prompts(), vec!["run me".to_owned()]);
+    }
+
+    /// Stop must reach the provider, not only the drain bookkeeping.
+    ///
+    /// #42 moved the queue drain into the daemon and dropped
+    /// `Command::Cancel => driver.cancel()` with the client-side drain it
+    /// replaced. Stop then marked suppression and answered `Ack` while the
+    /// agent kept working. Both halves are the fix: the mark holds the queue
+    /// back, this call abandons the turn.
+    #[test]
+    fn cancel_reaches_the_driver_and_suppresses_the_drain() {
+        use crate::server::Hub;
+
+        let root = std::env::temp_dir().join(format!("waku-cancel-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let backend = WakuBackend::new(
+            DaemonSettingsStore::open(root.join("settings.json")).unwrap(),
+            StateStore::daemon(root.join("app.db")),
+        )
+        .unwrap();
+        let session_id = Uuid::new_v4();
+        let runtime_id = Uuid::new_v4();
+        let driver = drain::RecordingDriver::new();
+        backend
+            .sessions
+            .lock()
+            .insert(session_id, (runtime_id, DriverHandle::from_control(driver.clone())));
+        let hub = Arc::new(Hub::default());
+
+        let response = backend
+            .handle(
+                Request {
+                    request_id: Uuid::new_v4(),
+                    session_id,
+                    runtime_id,
+                    command: Command::Cancel,
+                },
+                hub.event_sink(session_id, runtime_id),
+                ReadLimits::unrestricted(),
+            )
+            .expect("Stop is answered, not refused");
+
+        assert!(matches!(response, ResponsePayload::Ack));
+        assert_eq!(driver.cancels(), 1);
+        assert!(backend.drain_suppressed.lock().contains(&session_id));
     }
 
     fn task_state_lock_sets_live(

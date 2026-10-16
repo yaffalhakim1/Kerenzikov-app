@@ -101,6 +101,15 @@ export function ComposerSurface({
       ]}
     >
 
+      {/*
+        The queue sits above the card, not inside it. Inside, it inherited the
+        card's radius and read as part of the composer — a queued follow-up is a
+        *pending* message and belongs with the transcript side of the boundary,
+        not with the thing that will send it. It is in the shell, which carries
+        the same horizontal padding as the card, so the two are flush.
+      */}
+      {aboveCard ? <View style={styles.aboveCard}>{aboveCard}</View> : null}
+
       <AIInput
         avoidKeyboard={false}
         // `AIInput`'s root carries `shadow-md` so the card reads as lifted off
@@ -119,14 +128,6 @@ export function ComposerSurface({
       >
         {header}
 
-        {/* The queue and the error strip sit above the field, inside the card:
-            they then inherit the card's exact width. They used to render above
-            the card in the padded shell, but the Android queue row is wrapped
-            in `@expo/ui`'s `MenuView`, whose Compose host measures itself
-            against the window — a stretch or a `100%` child resolved wider
-            than the card by one shell padding. Inside the card, the row
-            inherits its width and a bottom margin keeps it off the field. */}
-        {aboveCard ? <View className="mb-1.5">{aboveCard}</View> : null}
         {error}
 
         {attachments.length > 0 || (pendingFiles?.length ?? 0) > 0 ? (
@@ -302,6 +303,12 @@ const styles = StyleSheet.create({
   // The same shell the app's own composer uses, so every composer in the app
   // sits identically.
   shell: { paddingHorizontal: 12, paddingTop: 4 },
+  // The gap between the queue and the card it sits above. The card's own
+  // horizontal padding is the shell's, so the two are flush by construction.
+  // `gap` rather than a margin per row: the slot carries a run of them — the
+  // recovery strip, one row per queued follow-up, the editing strip — and the
+  // caller no longer needs to know how far apart they should sit.
+  aboveCard: { gap: 6, marginBottom: 6 },
   field: { fontSize: 16, lineHeight: 22, minHeight: 64, paddingHorizontal: 6, paddingVertical: 12 },
   // 16 is `rounded-2xl`, the todo panel's radius, so the two surfaces agree.
   card: { borderRadius: 16 },

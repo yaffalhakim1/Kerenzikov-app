@@ -283,7 +283,6 @@ export function SendStopSlot({
   onStop: () => void;
   onSend: () => void;
 }) {
-  const theme = useTheme();
   const sendDisabled = !canSubmit || submitting || importingAttachments || disconnected;
   const sendVisible = !busy || canSubmit;
   const stopShown = busy && !sendVisible;
@@ -328,16 +327,23 @@ export function SendStopSlot({
             size="sm"
             variant="destructive"
           >
-            <AppSymbol
-              name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
-              // Same glyph size as the Send arrow it swaps with, so the square
-              // does not read as the smaller control mid-cross-fade. The
-              // desktop draws send and stop at different sizes in the same
-              // button (16 and 18), which is exactly the drift being fixed
-              // here, so it is not the reference to follow.
-              size={SEND_SLOT_GLYPH}
-              tintColor={theme.danger}
-            />
+            {/*
+              A rounded square, drawn as a fill rather than an SF Symbol.
+
+              The glyph used to be `stop.fill` tinted `theme.danger` on a
+              `destructive` button — and `destructive` *is* `theme.danger`
+              (#c64a42), so the mark was 1.1:1 against its own fill. On a device
+              the control measured as a solid red square with nothing in it. The
+              ink comes from the on-fill token instead, which is the white/ink
+              pair the palette already defines for text on a solid status fill.
+
+              A fill rather than a symbol because the shape is the point: a
+              rounded square is what a stop control looks like, and it is what
+              the desktop draws (`icons/stop.svg`, a 12-unit square with a 2.5
+              radius). Same reason the size is a constant here — PanelUI's own
+              stop control draws the same 11pt square, so the two agree.
+            */}
+            <View className="bg-destructive-solid-foreground rounded-[3px]" style={styles.stopGlyph} />
           </Button>
         </Animated.View>
       )}
@@ -1228,6 +1234,10 @@ const styles = StyleSheet.create({
   // The morph slot: both states are absolutely positioned in the same 36dp
   // box, so the cross-fade never shifts the toolbar.
   sendSlot: { height: 36, width: 36 },
+  // PanelUI's own stop control draws an 11pt square, so this matches the
+  // library's proportion on the same 36pt button. The radius is a quarter of
+  // the side, which is the desktop's `icons/stop.svg` ratio (2.5 over 12).
+  stopGlyph: { borderRadius: 3, height: 11, width: 11 },
   sendSlotChild: {
     alignItems: 'center',
     height: 36,
