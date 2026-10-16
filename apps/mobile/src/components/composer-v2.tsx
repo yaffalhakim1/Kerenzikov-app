@@ -17,6 +17,7 @@ import { SendStopSlot } from './mobile-composer';
 import { QueuedMessageRow } from './queued-message-row';
 import { ProviderIcon } from './provider-icon';
 import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
+import { PermissionPanel, UserInputPanel } from './request-panels';
 import { useDaemon } from '@/lib/daemon-context';
 import { useTheme } from '@/hooks/use-theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
@@ -101,6 +102,12 @@ export function ComposerV2({
   const disconnected = daemon.phase !== 'connected';
   const queued = session.queued_messages ?? [];
   const liveRuntime = runtime.runtimes[session.id];
+  // The two cards an agent asks a question on. They are read here, not only in
+  // the app's own composer, because the composer is chosen by a build flag:
+  // held in one of them, flipping the flag removed the only control that can
+  // answer a blocked agent — the session goes to `waiting` and nothing draws it.
+  const permission = runtime.permissions[session.id];
+  const userInput = runtime.userInputs[session.id];
   // Whether a queued follow-up can be delivered into the live turn right now,
   // which decides if its Send now action is offered. Mirrors the desktop's
   // `session_can_steer`: an active provider turn AND a driver that takes a
@@ -132,6 +139,18 @@ export function ComposerV2({
     devError
     || (disconnected && isDaemonDisconnectError(localError) ? null : localError)
     || (disconnected && isDaemonDisconnectError(runtimeError) ? null : runtimeError);
+
+  // A request that just arrived gets a warning haptic, the same one the app's
+  // own composer fires. Keyed on the request id so it fires once per request
+  // rather than on every re-render while the card is up.
+  const requestSignature = permission?.requestId ?? userInput?.requestId;
+  const lastRequest = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (requestSignature && requestSignature !== lastRequest.current) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    }
+    lastRequest.current = requestSignature;
+  }, [requestSignature]);
 
   const taskState = useTaskState();
   const projectPath = taskState.data?.projects.find(
@@ -296,6 +315,20 @@ export function ComposerV2({
     <ComposerSurface
       aboveCard={
         <>
+          {permission && !userInput ? (
+            <PermissionPanel
+              permission={permission}
+              onRespond={(optionId) => runtime.respond(session.id, permission.requestId, optionId)}
+            />
+          ) : null}
+
+          {userInput ? (
+            <UserInputPanel
+              input={userInput}
+              onSubmit={(answers) => runtime.respondUserInput(session.id, userInput.requestId, answers)}
+            />
+          ) : null}
+
           {recovery ? (
             <View
               className="mb-1.5 flex-row items-center gap-2.5 rounded-md border px-3 py-2.5"

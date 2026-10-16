@@ -1,0 +1,36 @@
+# Visual check for the mobile polish pass.
+#
+# Session 277e4655 is a one-turn completed transcript whose group carries two
+# reasoning activities — the shortest real fixture that shows the reasoning row.
+#
+# The reasoning row lives behind the turn fold, which sits above the answer, so
+# the flow scrolls toward OLDER content first (in an inverted transcript that is
+# a finger-up swipe), expands the fold, then opens the sheet and asserts it came
+# up.
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "New Task"
+    timeout: 40000
+- openLink: "waku://session/277e4655-f884-4cfb-bc6b-e44d3e00d372"
+- extendedWaitUntil:
+    visible: "Message agent"
+    timeout: 60000
+- repeat:
+    times: 3
+    commands:
+      - swipe:
+          start: 50%, 25%
+          end: 50%, 80%
+          duration: 400
+- tapOn: "Worked for.*"
+- extendedWaitUntil:
+    visible: "Thought for.*"
+    timeout: 20000
+- tapOn: "Thought for.*"
+- extendedWaitUntil:
+    visible: "Close"
+    timeout: 20000

@@ -81,6 +81,18 @@
   --color-input: hsla(220, 10%, 12%, 0.08);
   --color-skeleton: hsla(220, 10%, 12%, 0.06);
   --color-code-keyword: #00814a;
+  /*
+   * The code face. PanelUI's theme leaves `--font-mono` `unset`, so `font-mono`
+   * falls back to the system font — which is what a fenced `CodeBlock` draws
+   * with, while inline code spans already use the bundled JetBrains Mono
+   * (`MonoFont` in constants/theme.ts). Declaring it here makes the two agree:
+   * one code face, block and span alike.
+   *
+   * Not appearance-dependent; it is declared in both blocks because that is the
+   * override pattern this file already uses and these unlayered blocks win over
+   * the library's `@theme` declaration.
+   */
+  --font-mono: 'JetBrains Mono';
 }
 
 @variant dark {
@@ -133,4 +145,5 @@
   --color-input: hsla(220, 10%, 90%, 0.07);
   --color-skeleton: hsla(220, 10%, 90%, 0.07);
   --color-code-keyword: #26e085;
+  --font-mono: 'JetBrains Mono';
 }
