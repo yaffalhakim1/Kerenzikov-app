@@ -52,7 +52,11 @@ export function QueuedMessageRow({
       <Item
         accessibilityHint="Opens queued message actions"
         accessibilityLabel={label}
-        className="mb-1.5"
+        // `mx-1` matches the card's own inset. The shell pads 12pt and
+        // `AIInput` adds 4pt of its own, so a row laid out at the shell's width
+        // is 4pt wider than the card above it on each side and reads as
+        // overhanging rather than as part of the composer.
+        className="mx-1 mb-1.5"
         onPress={openMenu}
         size="xs"
         variant="muted">

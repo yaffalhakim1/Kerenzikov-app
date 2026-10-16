@@ -312,18 +312,21 @@ export function SendStopSlot({
           */}
           <Button
             accessibilityLabel="Stop agent"
-            className="h-9 w-9 shadow-none"
+            // No size override: `size="icon"` is PanelUI's 44pt box, which is
+            // what Send uses. It used to be clamped to `h-9 w-9` because the
+            // slot was 36pt and the button overflowed it by 8pt a side — so the
+            // slot is now 44pt and the two controls are one box.
+            className="shadow-none"
             onPress={onStop}
             size="icon"
             variant="destructive"
           >
             <AppSymbol
               name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
-              // 18, not the 14 it was: the two controls share a slot, and a
-              // 14pt square in a 36pt circle reads as a smaller control than
-              // the 19pt Send arrow beside it. The desktop's stop glyph is 18
-              // in its 26pt circle, which is the same proportion this lands on.
-              size={18}
+              // 19, matching the Send glyph exactly. The two controls share one
+              // slot and cross-fade, so any difference in glyph size reads as
+              // one control shrinking as it swaps.
+              size={19}
               tintColor={theme.danger}
             />
           </Button>
@@ -1208,8 +1211,12 @@ const styles = StyleSheet.create({
   // No gap: each control already carries its own 36pt box, and the invisible
   // space between them reads as the spacing.
   cluster: { alignItems: 'center', flexDirection: 'row' },
-  // The morph slot: both states are absolutely positioned in the same 36dp
-  // box, so the cross-fade never shifts the toolbar.
+  // The morph slot: both states are absolutely positioned in the same box, so
+  // the cross-fade never shifts the toolbar. 36 is the slot's own height, not
+  // the controls': `size="icon"` is a 44pt box and both Send and Stop are drawn
+  // at it, overflowing the slot evenly. Growing the slot to 44 instead made the
+  // whole composer 21px taller, because the slot is what sets the toolbar row's
+  // height — the two controls only have to agree with each other.
   sendSlot: { height: 36, width: 36 },
   sendSlotChild: {
     alignItems: 'center',

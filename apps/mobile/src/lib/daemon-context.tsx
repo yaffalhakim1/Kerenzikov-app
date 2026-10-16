@@ -80,6 +80,18 @@ interface DaemonContextValue extends ConnectionStatus {
    * restarts; after a hard failure the daemon is opened afresh with the
    * token stored now. */
   reconnect: () => Promise<boolean>;
+  /**
+   * Resolves once the link is usable, or `false` if it does not come back
+   * inside `timeoutMs`.
+   *
+   * For work that runs *after* an external activity — a picker, a camera — the
+   * link is usually already reconnecting by the time control returns, and a
+   * check against the rendered `phase` reads a snapshot from the render that
+   * started the work, which is stale. This reads the live link instead and
+   * waits for it, so a caller does not have to fail fast on a race it cannot
+   * see.
+   */
+  waitForConnection: (timeoutMs?: number) => Promise<boolean>;
   disconnect: () => void;
   /** True once the initial profile load has settled (or a safety timeout fired).
    * The splash hides on this, not on the connection phase — otherwise a stalled
@@ -293,6 +305,38 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
     }
   }, [activate]);
 
+  /**
+   * Waits for the link to answer, reading `linkRef` rather than the rendered
+   * phase so a caller mid-post-await is not looking at a stale snapshot.
+   *
+   * Polls rather than subscribing: the link's own subscription is already the
+   * thing that drives `phase`, and a second listener would only be a second
+   * place for the two to disagree. The interval is short enough that the wait
+   * is not felt after a picker closes, and the loop ends on the deadline.
+   */
+  const waitForConnection = useCallback(
+    async (timeoutMs = 5000): Promise<boolean> => {
+      const deadline = Date.now() + timeoutMs;
+      let nudged = false;
+      for (;;) {
+        const link = linkRef.current;
+        if (link?.state.phase === "connected") return true;
+        if (Date.now() >= deadline) return false;
+        // One nudge, so a link that is waiting on a backoff does not make the
+        // caller sit through it. Beyond that the link's own retry owns the
+        // schedule.
+        if (!nudged && activeProfileIdRef.current) {
+          nudged = true;
+          void reconnect();
+        }
+        const { promise, resolve } = Promise.withResolvers<void>();
+        setTimeout(resolve, 120);
+        await promise;
+      }
+    },
+    [reconnect],
+  );
+
   useEffect(() => {
     if (bootstrapped.current) return;
     bootstrapped.current = true;
@@ -462,6 +506,7 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
         selectProfile,
         removeProfile,
         reconnect,
+        waitForConnection,
         disconnect,
         booted,
       }}

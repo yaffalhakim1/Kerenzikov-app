@@ -216,8 +216,23 @@ export function ComposerV2({
     // lands in the order it was chosen rather than whichever upload finishes
     // first.
     const operation = attachmentImportTail.current.catch(() => {}).then(async () => {
+      /*
+       * Wait for the link rather than testing it.
+       *
+       * Picking from the photo library hands control to another activity, and
+       * Android is free to drop this app's socket while it is away — so on
+       * return the import found `phase !== 'connected'` and threw "Kerenzikov
+       * daemon is disconnected" before the reconnect had a chance to land.
+       * Files and Camera happened to win that race; the library picker did not,
+       * which is why only that one source reported a disconnect.
+       *
+       * The wait reads the live link, so the check is about the connection as
+       * it is now rather than as the render that opened the picker saw it.
+       */
+      const connected = daemon.phase === 'connected'
+        || await daemon.waitForConnection();
       const client = daemon.client;
-      if (!client || daemon.phase !== 'connected') {
+      if (!connected || !client) {
         throw new Error('Kerenzikov daemon is disconnected');
       }
       for (let index = 0; index < files.length; index += 1) {

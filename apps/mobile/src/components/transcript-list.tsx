@@ -481,7 +481,16 @@ export function TranscriptList({
   }, [jump, jumpProgress, reducedMotion]);
   const jumpStyle = useAnimatedStyle(() => ({ opacity: jumpProgress.value }));
 
+  /*
+   * While the session is still being fetched there is nothing to draw, and the
+   * screen used to say "No messages yet" — the wording for a task that really
+   * has none. On a long task that copy sat there for the whole round-trip, so a
+   * task that was merely loading looked like an empty one. Loading is its own
+   * state now: `SessionEmpty` already drew a spinner for it, but only once
+   * `hydrated` was true, which is exactly when it stopped being loading.
+   */
   const showEmpty = hydrated && !running && rows.length === 0;
+  const showLoading = !hydrated && rows.length === 0;
 
   return (
     <View style={styles.frame}>
@@ -535,9 +544,9 @@ export function TranscriptList({
           </View>
         </ScrollView>
       </ScrollViewMarker>
-      {showEmpty && (
+      {(showEmpty || showLoading) && (
         <View pointerEvents="none" style={styles.emptyOverlay}>
-          <SessionEmpty error={null} loading={false} missing={false} />
+          <SessionEmpty error={null} loading={showLoading} missing={false} />
         </View>
       )}
       <Animated.View
