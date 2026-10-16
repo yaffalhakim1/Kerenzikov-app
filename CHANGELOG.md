@@ -12,9 +12,16 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
-## [0.1.74]
+## [0.1.75]
 
-### Android
+### Desktop and Android
+
+- **Fixed: a task said it failed even though the answer arrived.** Every message
+  sent to an OpenCode task came back with "OpenCode rejected the prompt" and
+  "could not start the turn", while the reply was sitting right there in the
+  transcript. Two fields of the same exchange had been renamed by the service,
+  and Waku was reading the old names — so it misread a reply it had already
+  received as a rejection.
 
 - **Fixed: attaching a file or photo could spin forever.** Picking a file into a
   task that was pointed at an older daemon left the attachment loading with no
@@ -25,6 +32,10 @@ the original feature bullet instead of adding separate entries for them.
   leaves its loading row behind. The app also refuses the connection up front
   when it is talking to a daemon too old to work with, instead of failing later
   on the first attachment. Attachments need the daemon from the same release.
+
+## [0.1.74]
+
+### Android
 
 - **Fixed: the app felt slow right after opening.** Opening a task kicked off
   half a dozen background lookups at once — saved tasks, installed agents,
