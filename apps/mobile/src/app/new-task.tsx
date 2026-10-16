@@ -581,6 +581,14 @@ export default function NewTaskScreen() {
       style={[styles.screen, { backgroundColor: theme.background }]}>
       {/* Title and back button are the native navigation bar's; keep clear of it. */}
       <View style={{ height: headerInset }} />
+      {/* The connection notice belongs at the top on this screen for the same
+          reason it is at the top on a session: it explains why nothing else on
+          the page will work, and a warning under the setup rows is a warning
+          read after the reader has already tried to use them. It rides the
+          composer card as `aboveCard` today, which puts it at the bottom. */}
+      <View pointerEvents="box-none" style={[styles.linkBanner, { top: headerInset + 8 }]}>
+        <ConnectionBanner floating />
+      </View>
       {/* The setup area scrolls. With the keyboard up this region is all that
           can give, and without a scroll it simply overflowed — which pushed the
           composer, the last child, under the keyboard. */}
@@ -658,7 +666,6 @@ export default function NewTaskScreen() {
 
       <ComposerSurface
         attachments={attachments}
-        aboveCard={<ConnectionBanner />}
         commands={commandNames.length > 0 ? commandNames : undefined}
         editable={!submitting}
         error={error && !isDaemonDisconnectError(error) ? (
@@ -911,6 +918,10 @@ function SelectorRow({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  // The connection notice, floating over the setup area. Absolute so it does
+  // not take a row from the scroll that owns the space, and inset by 12 to
+  // match the shell every other surface on the screen sits in.
+  linkBanner: { left: 12, position: 'absolute', right: 12, zIndex: 30 },
   // Grows to fill when there is room, so the setup rows sit just above the
   // composer; shrinks and scrolls once the keyboard takes the space.
   scroll: { flex: 1 },

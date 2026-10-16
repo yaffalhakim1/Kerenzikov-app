@@ -6,7 +6,7 @@ import { Item } from 'panelui-native/components/item';
 import { Button } from 'panelui-native/components/button';
 import { Message as MessageBubble } from 'panelui-native/components/message';
 import { Shimmer } from 'panelui-native/components/shimmer';
-import { ThinkingOrb } from 'panelui-native/components/thinking-orb';
+import { ThinkingOrb, type ThinkingOrbState } from 'panelui-native/components/thinking-orb';
 import { memo, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
@@ -367,6 +367,59 @@ function formatElapsed(seconds: number): string {
   return `${Math.floor(clamped / 60)}m ${clamped % 60}s`;
 }
 
+/**
+ * Which of the orb's six animations matches what the agent is actually doing.
+ *
+ * The states are not interchangeable decoration — the shape in motion is the
+ * whole reason to use the orb instead of a spinner, so an orb that always
+ * draws `working` is a spinner with extra steps, and one that draws `solving`
+ * over a network read is a lie. The signal is the newest activity the turn
+ * produced, because that is what the agent is on *now*; the transcript already
+ * carries it, so this reads the tail rather than inventing a second source.
+ *
+ * Read from the last block only. A long session's earlier blocks are irrelevant
+ * to what is happening, and walking the whole transcript here would put the
+ * cost on a render that the stream commits drive several times a second.
+ */
+function orbStateFor(session: AgentSession, waiting: boolean): ThinkingOrbState {
+  // Blocked on the reader: the agent is not working, it is listening.
+  if (waiting) return 'listening';
+
+  const last = session.transcript_blocks.at(-1);
+  const activities = last?.content.kind === 'activities' ? last.content.data : undefined;
+  const newest = activities?.at(-1);
+
+  if (newest) {
+    // A tool still in flight is the clearest signal there is: it names the one
+    // thing the turn is blocked on, where a settled tool only names the last
+    // thing it did.
+    if (!newest.complete) {
+      switch (newest.kind) {
+        case 'search':
+        case 'fileSearch':
+        case 'fileRead':
+        case 'fileList':
+          return 'searching';
+        case 'fileChange':
+          return 'shaping';
+        case 'plan':
+          return 'shaping';
+        case 'reasoning':
+          return 'solving';
+        default:
+          return 'working';
+      }
+    }
+    // Nothing in flight and the newest thing was reasoning: the model is
+    // working the problem out rather than reaching for a tool.
+    if (newest.kind === 'reasoning') return 'solving';
+  }
+
+  // No activity yet, or the newest one settled: the turn is composing the
+  // reply the reader is waiting on.
+  return 'composing';
+}
+
 /** The live footer under the streaming tail: spinner, flavour word, elapsed. */
 export function WorkingStrip({ session }: { session: AgentSession }) {
   const theme = useTheme();
@@ -384,9 +437,28 @@ export function WorkingStrip({ session }: { session: AgentSession }) {
   return (
     <View accessibilityLiveRegion="polite" style={styles.workingStrip}>
       {/* The orb's silhouette names the kind of busy; the word shimmers while
-          it changes every 7s so a swap never reads as a static relabel. */}
-      <ThinkingOrb state={waiting ? 'listening' : 'working'} />
-      <Shimmer enabled={!waiting} textClassName="text-[12.5px] font-medium">
+          it changes every 7s so a swap never reads as a static relabel. 20 is
+          the library's small tuning — at or below 32 it draws its own, much
+          sparser dot set, which is the one that reads beside a line of text
+          rather than the 64pt orb built to stand alone. */}
+      <ThinkingOrb size={20} state={orbStateFor(session, waiting)} />
+      {/*
+        The colours are passed rather than left to `Shimmer`'s defaults. Left
+        unset it resolves them from CSS variables on the root through
+        `useCSSVariable`, falling back to its own `#a1a1aa` on `#ffffff` when
+        that read misses — and this app colours everything else from
+        `useTheme()`, so those fallbacks are the path that would run. A white
+        sweep is invisible on the white composer card, which is a word that
+        looks static. Passing the app's own two tiers makes the step between
+        rest and highlight the same one the rest of the app draws, whatever the
+        CSS read does.
+      */}
+      <Shimmer
+        baseColor={theme.textTertiary}
+        enabled={!waiting}
+        shimmerColor={theme.text}
+        textClassName="text-[12.5px] font-medium"
+      >
         {word}
       </Shimmer>
       {startedAt != null && !waiting && (
