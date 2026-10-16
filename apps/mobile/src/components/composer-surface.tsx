@@ -101,6 +101,13 @@ export function ComposerSurface({
       ]}
     >
 
+      {/* The queue sits above the card, not inside it. Inside, it read as a
+          second field belonging to the composer; above, it reads as what it
+          is — messages waiting their turn, outside the thing you type into.
+          The margin is what keeps it off the card's edge so the two do not
+          look welded together. */}
+      {aboveCard ? <View style={styles.aboveCard}>{aboveCard}</View> : null}
+
       <AIInput
         avoidKeyboard={false}
         // `AIInput`'s root carries `shadow-md` so the card reads as lifted off
@@ -119,14 +126,9 @@ export function ComposerSurface({
       >
         {header}
 
-        {/* The queue and the error strip sit above the field, inside the card:
-            they then inherit the card's exact width. They used to render above
-            the card in the padded shell, but the Android queue row is wrapped
-            in `@expo/ui`'s `MenuView`, whose Compose host measures itself
-            against the window — a stretch or a `100%` child resolved wider
-            than the card by one shell padding. Inside the card, the row
-            inherits its width and a bottom margin keeps it off the field. */}
-        {aboveCard ? <View className="mb-1.5">{aboveCard}</View> : null}
+        {/* The error strip stays inside the card: it is the composer's own
+            failure to send, so it belongs to the surface that would have sent
+            it. The queue does not — see above. */}
         {error}
 
         {attachments.length > 0 || (pendingFiles?.length ?? 0) > 0 ? (
@@ -302,6 +304,10 @@ const styles = StyleSheet.create({
   // The same shell the app's own composer uses, so every composer in the app
   // sits identically.
   shell: { paddingHorizontal: 12, paddingTop: 4 },
+  // Full shell width, so the queue's edges line up with the card's rather than
+  // insetting from it. 8pt is the gap the rest of the app uses between a
+  // stacked row and the surface under it.
+  aboveCard: { marginBottom: 8 },
   field: { fontSize: 16, lineHeight: 22, minHeight: 64, paddingHorizontal: 6, paddingVertical: 12 },
   // 16 is `rounded-2xl`, the todo panel's radius, so the two surfaces agree.
   card: { borderRadius: 16 },

@@ -209,6 +209,40 @@ export function ComposerIconButton({
  */
 const SEND_SLOT_GLYPH = 19;
 
+/**
+ * The stop mark: a rounded square drawn as a stroke, not a filled glyph.
+ *
+ * It is drawn rather than taken from a symbol set because it has to read as an
+ * *outline* against a solid fill. The button it sits in is `destructive`, so
+ * the surface under it is the danger colour already — tinting a `stop.fill`
+ * symbol in `theme.danger` painted a red square on a red fill, which is the
+ * blank red chip the stop control was reported as. The stroke takes
+ * `theme.onInverse` — the app's own "content on a solid fill" tier, white on
+ * light and near-black on dark — so it is legible in both appearances. A drawn
+ * mark also cannot drift from the button the way a platform symbol can:
+ * Material's `stop` is a hard-cornered square and SF Symbols' `stop.fill` is a
+ * filled one, so the two platforms disagreed about the shape as well.
+ *
+ * The stroke is 2 of the 19pt box, and the square is inset by half of it so the
+ * stroke lands inside the box rather than being clipped by it.
+ */
+function StopGlyph({ size }: { size: number }) {
+  const theme = useTheme();
+  const stroke = 2;
+  const inset = stroke / 2;
+  return (
+    <View
+      style={{
+        borderColor: theme.onInverse,
+        borderRadius: Math.max(2, size * 0.22),
+        borderWidth: stroke,
+        height: size - inset * 2,
+        width: size - inset * 2,
+      }}
+    />
+  );
+}
+
 export function SendButton({
   onPress,
   disabled,
@@ -328,16 +362,7 @@ export function SendStopSlot({
             size="sm"
             variant="destructive"
           >
-            <AppSymbol
-              name={{ ios: 'stop.fill', android: 'stop', web: 'stop' }}
-              // Same glyph size as the Send arrow it swaps with, so the square
-              // does not read as the smaller control mid-cross-fade. The
-              // desktop draws send and stop at different sizes in the same
-              // button (16 and 18), which is exactly the drift being fixed
-              // here, so it is not the reference to follow.
-              size={SEND_SLOT_GLYPH}
-              tintColor={theme.danger}
-            />
+            <StopGlyph size={SEND_SLOT_GLYPH} />
           </Button>
         </Animated.View>
       )}

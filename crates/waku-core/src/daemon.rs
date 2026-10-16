@@ -1140,6 +1140,35 @@ impl Backend for WakuBackend {
                 drop(removed);
                 Ok(ResponsePayload::Ack)
             }
+            // Stop is two things, and both have to happen. The suppression
+            // above keeps a queued follow-up from draining into the settle;
+            // this is the half that actually stops the work, by telling the
+            // live runtime to interrupt the turn it is running.
+            //
+            // It was lost when the queue drain moved into the daemon: `Cancel`
+            // was reduced to the suppression insert and then fell through to
+            // the driver catch-all, which rejects it as a wrong-path command.
+            // The queue stopped, the turn did not — which is exactly the report
+            // that Stop "lets the agent keep running", and why it only ever
+            // reproduced for clients that reach the daemon over RPC rather than
+            // driving the provider in-process.
+            //
+            // A session with no runtime has nothing to interrupt. Stop on an
+            // already-idle task is a no-op, not the "session is not running"
+            // error the catch-all would have raised.
+            Command::Cancel => {
+                let driver = {
+                    let sessions = self.sessions.lock();
+                    sessions
+                        .get(&session_id)
+                        .filter(|(active_runtime_id, _)| *active_runtime_id == runtime_id)
+                        .map(|(_, driver)| driver.clone())
+                };
+                if let Some(driver) = driver {
+                    driver.cancel();
+                }
+                Ok(ResponsePayload::Ack)
+            }
             command => {
                 let driver = {
                     let sessions = self.sessions.lock();
@@ -2212,7 +2241,8 @@ fn handle_driver_command(
         | Command::CloseTerminal
         | Command::CloseSession
         // Hub-level (ListConnections) and dispatch-level (Cancel: suppression
-        // is applied in `handle`) commands never reach the driver path.
+        // and the runtime interrupt are both applied in `handle`) commands
+        // never reach the driver path.
         | Command::ListConnections
         | Command::RegisterPushToken { .. }
         | Command::Cancel => {
@@ -3081,17 +3111,23 @@ mod tests {
 
         pub(super) struct RecordingDriver {
             prompts: Mutex<Vec<String>>,
+            cancels: Mutex<Vec<()>>,
         }
 
         impl RecordingDriver {
             pub(super) fn new() -> Arc<Self> {
                 Arc::new(Self {
                     prompts: parking_lot::Mutex::new(Vec::new()),
+                    cancels: parking_lot::Mutex::new(Vec::new()),
                 })
             }
 
             pub(super) fn prompts(&self) -> Vec<String> {
                 self.prompts.lock().clone()
+            }
+
+            pub(super) fn cancels(&self) -> usize {
+                self.cancels.lock().len()
             }
         }
 
@@ -3099,7 +3135,9 @@ mod tests {
             fn prompt(&self, prompt: String) {
                 self.prompts.lock().push(prompt);
             }
-            fn cancel(&self) {}
+            fn cancel(&self) {
+                self.cancels.lock().push(());
+            }
             fn respond(&self, _request_id: String, _option_id: String) {}
             fn rollback(
                 &self,
@@ -3258,6 +3296,89 @@ mod tests {
         let mut state = task_state.lock();
         if let Some(session) = state.sessions.iter_mut().find(|s| s.id == session_id) {
             session.live_state = next;
+        }
+    }
+
+    /// Stop must reach the driver.
+    ///
+    /// It was reduced to a suppression insert when the queue drain moved into
+    /// the daemon, and `Command::Cancel` then fell through to the driver
+    /// catch-all, which rejects it as a wrong-path command. The queue stopped
+    /// and the turn did not — the reported "Stop lets the agent keep running".
+    /// This pins the half that actually interrupts.
+    #[test]
+    fn stop_interrupts_the_live_runtime() {
+        let fixture = drain::fixture();
+        let runtime_id = Uuid::new_v4();
+        let backend = stop::backend_with(&fixture, runtime_id);
+
+        let response = backend
+            .handle(
+                stop::request(fixture.session_id, runtime_id, Command::Cancel),
+                stop::sink(fixture.session_id, runtime_id),
+                ReadLimits::unrestricted(),
+            )
+            .expect("Stop on a live session must be accepted");
+
+        assert!(matches!(response, ResponsePayload::Ack));
+        assert_eq!(
+            fixture.driver.cancels(),
+            1,
+            "Stop must tell the driver to interrupt the turn, not just suppress the queue"
+        );
+    }
+
+    /// Stop on a session with no live runtime is a no-op, not an error. A
+    /// client that taps Stop a beat after the turn settled is not at fault,
+    /// and the driver catch-all's "session is not running" would surface that
+    /// as a failure.
+    #[test]
+    fn stop_without_a_runtime_is_a_quiet_no_op() {
+        let fixture = drain::fixture();
+        let runtime_id = Uuid::new_v4();
+        let backend = stop::backend_with(&fixture, runtime_id);
+
+        let response = backend.handle(
+            stop::request(fixture.session_id, Uuid::new_v4(), Command::Cancel),
+            stop::sink(fixture.session_id, runtime_id),
+            ReadLimits::unrestricted(),
+        );
+
+        assert!(matches!(response, Ok(ResponsePayload::Ack)));
+        assert_eq!(fixture.driver.cancels(), 0);
+    }
+
+    mod stop {
+        use super::super::*;
+        use crate::server::Hub;
+
+        /// A backend with the fixture's driver installed as the session's live
+        /// runtime, which is the state Stop has to find.
+        pub(super) fn backend_with(fixture: &super::drain::Fixture, runtime_id: Uuid) -> WakuBackend {
+            let settings = DaemonSettingsStore::open(
+                fixture.store.path().with_extension("settings.json"),
+            )
+            .unwrap();
+            let backend = WakuBackend::new(settings, StateStore::new(fixture.store.path().to_owned()))
+                .unwrap();
+            backend.sessions.lock().insert(
+                fixture.session_id,
+                (runtime_id, DriverHandle::from_control(fixture.driver.clone())),
+            );
+            backend
+        }
+
+        pub(super) fn request(session_id: Uuid, runtime_id: Uuid, command: Command) -> Request {
+            Request {
+                request_id: Uuid::new_v4(),
+                session_id,
+                runtime_id,
+                command,
+            }
+        }
+
+        pub(super) fn sink(session_id: Uuid, runtime_id: Uuid) -> EventSink {
+            Arc::new(Hub::default()).event_sink(session_id, runtime_id)
         }
     }
 }

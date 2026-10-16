@@ -337,9 +337,26 @@ function TaskDrawerContent({
     router.dismissTo('/');
   }, [onClose]);
   const showSession = useCallback((sessionId: string) => {
-    if (selectedSessionId === sessionId) {
-      onClose();
-    } else if (selectedSessionId) {
+    /*
+     * Close first, unconditionally.
+     *
+     * The panel is full-bleed (`panelWidth = width`), so the session screen is
+     * entirely behind it — a drawer that does not close is indistinguishable
+     * from a tap that did nothing, which is exactly how this was reported:
+     * "stuck on the sidebar, the row still takes the tap, the task never
+     * opens".
+     *
+     * The close used to ride the `pathname` effect instead, which only fires
+     * once the router has committed the new route and React has re-rendered
+     * around it. Opening a long task is the single most expensive commit in the
+     * app — `buildTranscriptPipeline` and `expandTranscriptRows` are
+     * synchronous — so on a busy JS thread that round-trip is exactly when the
+     * close is late. Closing here makes it a local state change on the tap, and
+     * the navigation proceeds behind a panel that is already leaving.
+     */
+    onClose();
+    if (selectedSessionId === sessionId) return;
+    if (selectedSessionId) {
       router.setParams({ id: sessionId });
     } else {
       router.replace({ pathname: '/session/[id]', params: { id: sessionId } });

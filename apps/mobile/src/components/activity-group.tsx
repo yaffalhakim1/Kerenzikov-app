@@ -3,15 +3,15 @@ import { activitiesForBlock } from '@waku/client/event-reducer';
 import {
   activityFileChangeStats,
   activityHeaderTitle,
+  reasoningTitle,
 } from '@waku/client/transcript-presentation';
 import { BottomSheet } from 'panelui-native/components/bottom-sheet';
-import { Item } from 'panelui-native/components/item';
 import { Reasoning } from 'panelui-native/components/reasoning';
+import { Shimmer } from 'panelui-native/components/shimmer';
+import { Task } from 'panelui-native/components/task';
 import { memo, useState } from 'react';
 
-import { ACTIVITY_ICONS } from './activity-icons';
 import { ActivityDetail } from './activity-detail';
-import { AppSymbol } from './app-symbol';
 
 import { useTheme } from '@/hooks/use-theme';
 
@@ -49,24 +49,88 @@ export const ActivityGroup = memo(function ActivityGroup({
   block: TranscriptBlock;
   live: boolean;
 }) {
+  const theme = useTheme();
   const activities = activitiesForBlock(block);
+  /*
+   * Declared before the early return, because hooks cannot sit behind one.
+   *
+   * This mirrors the panel's own open state through `onOpenChange` so the body
+   * can be built on open rather than merely folded. It starts closed, which is
+   * the point: a long task holds one of these per step, and `Reasoning.Content`
+   * feeds a `Collapse` that animates a clip height and keeps its children
+   * mounted — so a closed trace still laid out every line of it. That was the
+   * bulk of what a long transcript rendered.
+   */
+  const [reasoningOpen, setReasoningOpen] = useState(false);
   if (!activities.length) return null;
 
   const reasoning = activities.filter((activity) => activity.reasoning);
   const steps = activities.filter((activity) => !activity.reasoning);
+  const reasoningLive = live && reasoning.some((activity) => !activity.complete);
 
   return (
     <>
       {reasoning.length > 0 && (
-        <Reasoning isStreaming={live && reasoning.some((activity) => !activity.complete)}>
-          <Reasoning.Trigger />
-          <Reasoning.Content>{reasoningTrace(reasoning)}</Reasoning.Content>
+        <Reasoning
+          // `defaultOpen={false}` is the library's own opt-out from the
+          // auto-open, so a trace no longer springs open the moment it starts
+          // arriving.
+          defaultOpen={false}
+          /*
+           * `isStreaming` is pinned false rather than driven, and the row's
+           * words are supplied below instead.
+           *
+           * The component latches its auto-close on the first time it sees a
+           * trace finish: with `isStreaming` driven, a trace that never
+           * auto-opened leaves that latch unset, so the reader's first tap
+           * opens the panel and the same effect folds it away a second later.
+           * Driving the flag is what arms that timer, so leaving it false is
+           * what makes a reader's open stick — the one thing `defaultOpen={false}`
+           * alone does not buy. The trigger's own row, icon and chevron are
+           * still the library's; only its text comes from here.
+           */
+          isStreaming={false}
+          onOpenChange={setReasoningOpen}
+        >
+          <Reasoning.Trigger
+            label={() => (
+              <Shimmer
+                baseColor={theme.textTertiary}
+                enabled={reasoningLive}
+                shimmerColor={theme.text}
+                textClassName="text-sm text-muted-foreground"
+              >
+                {reasoningLabel(reasoning)}
+              </Shimmer>
+            )}
+          />
+          {/*
+            The body is built on open, not merely folded. Same trade
+            `ActivityBody` makes for a step, and for the same reason: the trace
+            is text nobody has asked to read, so rebuilding it on open is
+            cheaper than carrying every one of them.
+          */}
+          <Reasoning.Content>
+            {reasoningOpen ? reasoningTrace(reasoning) : null}
+          </Reasoning.Content>
         </Reasoning>
       )}
       {steps.length > 0 && <StepGroup activities={steps} live={live} />}
     </>
   );
 });
+
+/**
+ * The trace's row, in the shared presentation layer's own words: "Thinking"
+ * while it is still arriving, "Thought for 8 seconds" once it has landed.
+ *
+ * Taken from `reasoningTitle` rather than restated here, so the row cannot
+ * drift from the same phrase the desktop draws for the same activity.
+ */
+function reasoningLabel(reasoning: readonly ActivityItem[]): string {
+  const newest = reasoning.at(-1);
+  return newest ? reasoningTitle(newest) : 'Thinking';
+}
 
 /**
  * The joined trace of every reasoning item in the group.
@@ -86,10 +150,11 @@ function reasoningTrace(reasoning: readonly ActivityItem[]): string {
  * The group's row in the transcript, and the sheet its commands live in.
  *
  * The row is one line however much the group did, and pressing it opens the
- * sheet. It is an `Item` rather than a `Task.Trigger` because there is no body
- * to fold: a `Task` trigger carries a chevron that turns as its body opens, and
- * a chevron that turns while nothing unfolds underneath it is a lie about what
- * the tap did.
+ * sheet. The row itself is `Task.Trigger`, because that is the component that
+ * knows what a step looks like — the status glyph, the transcript's type, the
+ * shimmer while it runs. It is not paired with a `Task.Content`: the body is
+ * the sheet, so the chevron reads as "this opens" rather than as a fold, and
+ * the row is wrapped in `BottomSheet.Trigger` to make the tap open the sheet.
  *
  * The sheet is hosted here, one per group, rather than at the session level.
  * That is deliberate and it is what keeps the code honest: `BottomSheet.Content`
@@ -101,7 +166,6 @@ function reasoningTrace(reasoning: readonly ActivityItem[]): string {
  */
 function StepGroup({ activities, live }: { activities: ActivityItem[]; live: boolean }) {
   const [open, setOpen] = useState(false);
-  const theme = useTheme();
 
   const title = activityHeaderTitle(activities, live);
   const failed = activities.filter((activity) => activity.failed).length;
@@ -119,20 +183,48 @@ function StepGroup({ activities, live }: { activities: ActivityItem[]; live: boo
 
   return (
     <BottomSheet open={open} onOpenChange={setOpen}>
-      <BottomSheet.Trigger>
-        <Item className="min-h-7">
-          <Item.Media>
-            <AppSymbol
-              name={ACTIVITY_ICONS[failed > 0 ? 'tool' : 'command']}
-              size={15}
-              tintColor={failed > 0 ? theme.danger : theme.textSecondary}
-            />
-          </Item.Media>
-          <Item.Content>
-            <Item.Title numberOfLines={1}>{rowTitle}</Item.Title>
-          </Item.Content>
-        </Item>
-      </BottomSheet.Trigger>
+      {/*
+        The row is PanelUI's `Task.Trigger`, not a hand-rolled `Item`.
+        `Task.Trigger` is what carries the step's own vocabulary: the status
+        glyph on the left, the title in the transcript's type, the shimmer while
+        the step is still running, and the chevron that says the row opens
+        something. Rebuilding the row out of an `Item` reproduced the text and
+        nothing else, so a running step looked exactly like a settled one and a
+        group read as a generic list row rather than as a step.
+
+        The nesting is what the two components require. `BottomSheet.Trigger`
+        clones its immediate child and adds `onPress`, so that child has to be
+        the pressable `Task.Trigger` itself — handing it the `Task` provider
+        would put `onPress` on a plain `View` and the row would stop opening.
+        `Task` therefore wraps it from the outside and supplies the context.
+
+        No `icon` is passed, so the glyph is PanelUI's own: a check when the
+        step settled, a magnifier while it is running, a warning when it
+        failed. That glyph is the point of the row — it is the one thing that
+        says how the step ended without opening anything, and the activity-kind
+        glyph this used to draw said what kind of tool it was instead, which the
+        title already says.
+
+        `open` is shared with the sheet rather than left to `Task`'s own state:
+        the chevron turns on it, so a chevron driven by a second, hidden flag
+        would stay rotated after the sheet closed.
+      */}
+      <Task
+        onOpenChange={setOpen}
+        open={open}
+        status={
+          failed > 0
+            ? 'error'
+            // `live` as well as the step's own flag: a step left incomplete by
+            // a turn that stopped is not still running, and a shimmer on a
+            // settled transcript is an animation that never ends.
+            : live && activities.some((step) => !step.complete) ? 'running' : 'complete'
+        }
+      >
+        <BottomSheet.Trigger>
+          <Task.Trigger title={rowTitle} />
+        </BottomSheet.Trigger>
+      </Task>
       <BottomSheet.Content
         accessibilityLabel={`${title} — ${summary}`}
         size="full"
