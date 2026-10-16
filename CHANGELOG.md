@@ -12,6 +12,48 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.76]
+
+### Desktop and Android
+
+- **Fixed: Stop did not stop the agent.** Pressing Stop on a running task left
+  it working — the turn carried on to the end, and the only way to actually halt
+  it was to wait. Stop had been reduced to marking the session as "do not run
+  what is queued next" and no longer told the agent to abandon the turn it was
+  in, so the queue stopped and the work did not.
+
+- **Fixed: a long task could freeze the task list.** With a long task open, and
+  another one running behind it, tapping a task in the sidebar sometimes did
+  nothing at all: the list stayed up and the task never opened, however many
+  times you tapped. The sidebar closes itself when you pick a task, and that
+  close was waiting on the task screen being ready — on a long transcript that
+  is the slowest thing the app does, so the list sat over the screen it had
+  already opened. It now closes the moment you tap.
+
+### Android
+
+- **A step in a task now looks like a step.** Steps were drawn as plain list
+  rows, so a step that was still running looked exactly like one that had
+  finished, and the only way to tell was to read the words. Each step now leads
+  with its status — a tick when it settled, a magnifier while it runs, a warning
+  when it failed — and shimmers while it is working.
+
+- **Reasoning is collapsed until you ask for it.** A long task showed every
+  trace the model wrote, whether or not you read it, which made long tasks heavy
+  to scroll and slow to open. Traces now start folded, still shimmer while they
+  are being written, and open on a tap.
+
+- **The stop button is visible.** It drew a red square on a red button, so the
+  control read as a blank chip. It is now a white rounded square on the red
+  button, the same size as the send arrow it replaces.
+
+- **The queued follow-up sits above the message box, not inside it.** A message
+  waiting its turn is not part of the thing you are typing into, and inside the
+  card it read as a second field.
+
+- **A connection problem on the New Task screen is reported at the top.** It was
+  shown under the setup rows, which is after you have already tried to use them.
+
 ## [0.1.75]
 
 ### Desktop and Android
