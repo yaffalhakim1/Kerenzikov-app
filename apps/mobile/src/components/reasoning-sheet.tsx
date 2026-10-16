@@ -71,7 +71,7 @@ export function ReasoningSheet({
         </BottomSheet.Trigger>
       </Task>
       <BottomSheet.Content accessibilityLabel={label} size="half">
-        <BottomSheet.Header description={running ? 'Still arriving' : undefined} title={label} />
+        <BottomSheet.Header title={label} />
         <BottomSheet.Body>
           {/*
             Built inside the body, which is why the trace is assembled here
