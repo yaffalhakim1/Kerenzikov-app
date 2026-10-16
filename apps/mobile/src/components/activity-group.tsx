@@ -3,17 +3,13 @@ import { activitiesForBlock } from '@waku/client/event-reducer';
 import {
   activityFileChangeStats,
   activityHeaderTitle,
-  reasoningTitle,
 } from '@waku/client/transcript-presentation';
 import { BottomSheet } from 'panelui-native/components/bottom-sheet';
-import { Reasoning } from 'panelui-native/components/reasoning';
-import { Shimmer } from 'panelui-native/components/shimmer';
 import { Task } from 'panelui-native/components/task';
 import { memo, useState } from 'react';
 
 import { ActivityDetail } from './activity-detail';
-
-import { useTheme } from '@/hooks/use-theme';
+import { ReasoningSheet } from './reasoning-sheet';
 
 /**
  * A tool group in the transcript.
@@ -37,8 +33,8 @@ import { useTheme } from '@/hooks/use-theme';
  * This is a different call from `a78c7f1`, which moved the sheet inline. That
  * one was right about what it fixed — the sheet was the only drill-down in an
  * otherwise inline transcript, and its host was `@expo/ui`, the last non-PanelUI
- * surface on the page. Both of those are answered here: `Reasoning`, `Plan` and
- * background work still expand in place, and the sheet is PanelUI's.
+ * surface on the page. Both of those are answered here: `Plan` and background
+ * work still expand in place, and every sheet is PanelUI's.
  *
  * Reasoning renders first because it precedes the action it produced.
  */
@@ -49,102 +45,19 @@ export const ActivityGroup = memo(function ActivityGroup({
   block: TranscriptBlock;
   live: boolean;
 }) {
-  const theme = useTheme();
   const activities = activitiesForBlock(block);
-  /*
-   * Declared before the early return, because hooks cannot sit behind one.
-   *
-   * This mirrors the panel's own open state through `onOpenChange` so the body
-   * can be built on open rather than merely folded. It starts closed, which is
-   * the point: a long task holds one of these per step, and `Reasoning.Content`
-   * feeds a `Collapse` that animates a clip height and keeps its children
-   * mounted — so a closed trace still laid out every line of it. That was the
-   * bulk of what a long transcript rendered.
-   */
-  const [reasoningOpen, setReasoningOpen] = useState(false);
   if (!activities.length) return null;
 
   const reasoning = activities.filter((activity) => activity.reasoning);
   const steps = activities.filter((activity) => !activity.reasoning);
-  const reasoningLive = live && reasoning.some((activity) => !activity.complete);
 
   return (
     <>
-      {reasoning.length > 0 && (
-        <Reasoning
-          // `defaultOpen={false}` is the library's own opt-out from the
-          // auto-open, so a trace no longer springs open the moment it starts
-          // arriving.
-          defaultOpen={false}
-          /*
-           * `isStreaming` is pinned false rather than driven, and the row's
-           * words are supplied below instead.
-           *
-           * The component latches its auto-close on the first time it sees a
-           * trace finish: with `isStreaming` driven, a trace that never
-           * auto-opened leaves that latch unset, so the reader's first tap
-           * opens the panel and the same effect folds it away a second later.
-           * Driving the flag is what arms that timer, so leaving it false is
-           * what makes a reader's open stick — the one thing `defaultOpen={false}`
-           * alone does not buy. The trigger's own row, icon and chevron are
-           * still the library's; only its text comes from here.
-           */
-          isStreaming={false}
-          onOpenChange={setReasoningOpen}
-        >
-          <Reasoning.Trigger
-            label={() => (
-              <Shimmer
-                baseColor={theme.textTertiary}
-                enabled={reasoningLive}
-                shimmerColor={theme.text}
-                textClassName="text-sm text-muted-foreground"
-              >
-                {reasoningLabel(reasoning)}
-              </Shimmer>
-            )}
-          />
-          {/*
-            The body is built on open, not merely folded. Same trade
-            `ActivityBody` makes for a step, and for the same reason: the trace
-            is text nobody has asked to read, so rebuilding it on open is
-            cheaper than carrying every one of them.
-          */}
-          <Reasoning.Content>
-            {reasoningOpen ? reasoningTrace(reasoning) : null}
-          </Reasoning.Content>
-        </Reasoning>
-      )}
+      {reasoning.length > 0 && <ReasoningSheet live={live} reasoning={reasoning} />}
       {steps.length > 0 && <StepGroup activities={steps} live={live} />}
     </>
   );
 });
-
-/**
- * The trace's row, in the shared presentation layer's own words: "Thinking"
- * while it is still arriving, "Thought for 8 seconds" once it has landed.
- *
- * Taken from `reasoningTitle` rather than restated here, so the row cannot
- * drift from the same phrase the desktop draws for the same activity.
- */
-function reasoningLabel(reasoning: readonly ActivityItem[]): string {
-  const newest = reasoning.at(-1);
-  return newest ? reasoningTitle(newest) : 'Thinking';
-}
-
-/**
- * The joined trace of every reasoning item in the group.
- *
- * Joined rather than one component each: a provider can emit a run of separate
- * reasoning parts for a single thought, and one panel per part is a column of
- * "Thinking…" rows.
- */
-function reasoningTrace(reasoning: readonly ActivityItem[]): string {
-  return reasoning
-    .map((activity) => activity.reasoning?.content.trim() ?? '')
-    .filter(Boolean)
-    .join('\n\n');
-}
 
 /**
  * The group's row in the transcript, and the sheet its commands live in.

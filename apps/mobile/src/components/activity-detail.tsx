@@ -3,10 +3,9 @@ import {
   activityDisclosureSections,
   activityDisplayTitle,
   activityFileChangeStats,
-  reasoningTitle,
 } from '@waku/client/transcript-presentation';
 import { Task } from 'panelui-native/components/task';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { ACTIVITY_ICONS } from './activity-icons';
@@ -14,10 +13,7 @@ import { AppSymbol } from './app-symbol';
 import { DiffView } from './diff-view';
 
 import { MonoFont, NativeTint, Radius } from '@/constants/theme';
-import { useReducedMotion } from '@/hooks/use-reduced-motion';
 import { useTheme } from '@/hooks/use-theme';
-import { VeilFade } from '@/md/render';
-import { RowVeil, splitRunAtSpans } from '@/md/veil';
 
 /**
  * One command's full detail — output, arguments, diff, file changes, images —
@@ -28,12 +24,14 @@ import { RowVeil, splitRunAtSpans } from '@/md/veil';
  * inside it, rather than the whole transcript being swapped for a sheet. The
  * nested Task is the disclosure, so the same gesture means the same thing at
  * both levels.
+ *
+ * Reasoning never reaches here: `ActivityGroup` splits it out into its own
+ * `ReasoningSheet`, because a trace is one wall of text where a step is a
+ * record.
  */
 export function ActivityDetail({ activity }: { activity: ActivityItem }) {
   const theme = useTheme();
-  const title = activity.reasoning
-    ? reasoningTitle(activity)
-    : activityDisplayTitle(activity);
+  const title = activityDisplayTitle(activity);
   const status = activity.failed ? 'error' : activity.complete ? 'complete' : 'running';
 
   /*
@@ -88,11 +86,6 @@ function ActivityBody({ activity }: { activity: ActivityItem }) {
   const changes = activity.file_changes ?? [];
   const images = activity.image_urls ?? [];
 
-  if (activity.reasoning) {
-    const reasoning = activity.reasoning.content.trim();
-    return <ReasoningText content={plainReasoning(reasoning)} live={!activity.complete} />;
-  }
-
   return (
     <>
       <ActivityStatus activity={activity} />
@@ -137,7 +130,7 @@ function ActivityStatus({ activity }: { activity: ActivityItem }) {
     );
   }
   // A live thought already says "Thinking" in its title.
-  if (!activity.complete && !activity.reasoning) {
+  if (!activity.complete) {
     return (
       <View accessibilityLiveRegion="polite" style={styles.status}>
         <View style={[styles.runningDot, { backgroundColor: NativeTint }]} />
@@ -233,43 +226,9 @@ function FileChange({ change }: { change: ActivityFileChange }) {
   );
 }
 
-/** Streaming reasoning dissolves in like the message veil. Appended text is
- * faded by a compositor animation per run; text present at mount is adopted at
- * full opacity. */
-function ReasoningText({ content, live }: { content: string; live: boolean }) {
-  const theme = useTheme();
-  const reducedMotion = useReducedMotion();
-  const veil = useRef<RowVeil | null>(null);
-  veil.current ??= new RowVeil(content.length > 0);
-  const spans = live && !reducedMotion ? veil.current.advance(0, content, Date.now()) : [];
-  return (
-    <Text selectable style={[styles.bodyText, { color: theme.textSecondary }]}>
-      {splitRunAtSpans(0, content.length, spans).map(([start, end, opacity, remainingMs]) =>
-        opacity >= 1 ? (
-          content.slice(start, end)
-        ) : (
-          <VeilFade key={start} opacity={opacity} remainingMs={remainingMs}>
-            {content.slice(start, end)}
-          </VeilFade>
-        ),
-      )}
-    </Text>
-  );
-}
-
 function boundedText(value: string): string {
   const limit = 12_000;
   return value.length <= limit ? value : `${value.slice(0, limit)}\n\n… Output truncated`;
-}
-
-/** Reasoning is throwaway thinking: render it as quiet plain text, never
- * heavier than the answer. Strips the markdown emphasis and heading markers
- * providers put on their summary headlines. */
-function plainReasoning(value: string): string {
-  return boundedText(value)
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/__([^_]+)__/g, '$1')
-    .replace(/^#{1,6}\s+/gm, '');
 }
 
 const styles = StyleSheet.create({

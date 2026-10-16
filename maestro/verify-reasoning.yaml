@@ -1,0 +1,40 @@
+# Visual check for the reasoning sheet.
+#
+# Session 277e4655 is a one-turn completed transcript whose group carries two
+# reasoning activities — the shortest real fixture that shows the reasoning row,
+# so no long scroll is needed.
+#
+# Selectors are text, not `id`. Maestro's React Native guide recommends `testID`
+# for stability, but this app's nodes reach the accessibility tree with
+# `resource-id=""` — only `action_bar_root` carries a real resource id — so an
+# `id:` selector matches nothing here. The row text is what the app exposes, and
+# the fold's own label is the anchored prefix "Worked for".
+#
+# The reasoning row sits behind the turn fold, so the flow scrolls toward older
+# content (a finger-up swipe in the inverted transcript), expands the fold, then
+# opens the sheet and asserts it came up.
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: "New Task"
+    timeout: 40000
+- openLink: "waku://session/277e4655-f884-4cfb-bc6b-e44d3e00d372"
+- extendedWaitUntil:
+    visible: "Message agent"
+    timeout: 60000
+- scrollUntilVisible:
+    element: "Worked for.*"
+    direction: UP
+    speed: 60
+    timeout: 60000
+- tapOn: "Worked for.*"
+- extendedWaitUntil:
+    visible: "Thought for.*"
+    timeout: 20000
+- tapOn: "Thought for.*"
+- extendedWaitUntil:
+    visible: "Close"
+    timeout: 20000

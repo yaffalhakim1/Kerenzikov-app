@@ -69,11 +69,13 @@ detail of taste — it decides which APIs are allowed:
 - **Import components by subpath** (`panelui-native/components/task`). The root
   entry re-exports all of them and Metro does not tree-shake, so a root import
   evaluates the whole library before the first screen paints.
-- **`Collapse` keeps its children mounted.** `Task`, `Reasoning` and `Plan` fold
-  their bodies by animating a clip height, not by unmounting. Rendering `null`
-  into a closed one still builds nothing, but *rendering the body* into a closed
-  one still lays it out. If a body is expensive, mount it on `open` — see
-  [the activity surface](#the-activity-surface-what-one-long-task-cost).
+- **`Collapse` keeps its children mounted.** `Task` and `Plan` fold their bodies
+  by animating a clip height, not by unmounting. Rendering `null` into a closed
+  one still builds nothing, but *rendering the body* into a closed one still
+  lays it out. If a body is expensive, mount it on `open` — see
+  [the activity surface](#the-activity-surface-what-one-long-task-cost). The
+  reasoning trace used to be a third one of these; it is a sheet now, for the
+  same reason.
 - **Count the components a row builds.** This is the mobile form of the desktop
   rule that a frame may only touch what is already in memory: cost is
   *rows × components per row*, and a nested disclosure per section is how one
@@ -196,6 +198,16 @@ port of the desktop's `md/mend.rs`; keep the two in step.
 activity is the budget; a section inside it is not another `Task`. See
 [the activity surface](#the-activity-surface-what-one-long-task-cost) below for
 why, and for the measurement that found it.
+
+**Reasoning is a sheet, not a fold.** The trace is the one thing in a transcript
+that arrives as a wall of text — one giant paragraph or one giant list, so no
+block-count cap bounds it — and `Collapse` keeps its children mounted. As an
+inline fold it laid out every line of every trace whether or not anyone read it.
+`BottomSheet.Content` returns `null` until it is first presented, so a closed
+trace costs one row. The trace is assembled *inside* the sheet body, not in the
+sheet's own render: the trim and the three regex passes in `plainReasoning` ran
+over every trace on every commit when they sat above it. Same trade
+`ActivityBody` makes for a step.
 
 ---
 
@@ -467,6 +479,11 @@ These pieces carry weight and have tests:
   open, and `StepGroup` mounts its window of steps only when the group is open.
   Rendering the body into a closed `Collapse` is not the same thing: `Collapse`
   keeps children mounted.
+- **A closed reasoning trace builds no body either.** `ReasoningSheet`'s trace
+  is assembled in the sheet body, behind `BottomSheet.Content`'s
+  `if (!presented) return null`. Moving that work back above the sheet — where
+  it is easier to read — puts the trim and three regex passes back on every
+  stream commit.
 
 ---
 
