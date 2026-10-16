@@ -9,6 +9,26 @@
 @source '../../../node_modules/panelui-native/src';
 
 /*
+ * The code face.
+ *
+ * `font-mono` is what a fenced `CodeBlock` draws with, and PanelUI ships no
+ * value for it — its `@theme` leaves `--font-mono` `unset` on the reasoning
+ * that a platform's monospace face is a property of the platform. So the class
+ * resolved through Tailwind's built-in default, which is a *stack* of eight
+ * families separated by commas, and React Native takes `fontFamily` as a single
+ * name: the whole list arrived as one family that does not exist and code fell
+ * back to the system font. Inline code spans already used the bundled JetBrains
+ * Mono (`MonoFont` in constants/theme.ts), so a block and a span in the same
+ * message disagreed.
+ *
+ * One real family name, never a stack — see PanelUI's Fonts guide. Declared
+ * here rather than per-theme because the face is not appearance-dependent.
+ */
+@theme {
+  --font-mono: 'JetBrains Mono';
+}
+
+/*
  * Waku graphite palette mapped onto PanelUI's token names, so PanelUI
  * components render in the house colors without touching the app's own
  * useTheme() tokens (src/constants/theme.ts). Values mirror those tokens —
@@ -81,18 +101,6 @@
   --color-input: hsla(220, 10%, 12%, 0.08);
   --color-skeleton: hsla(220, 10%, 12%, 0.06);
   --color-code-keyword: #00814a;
-  /*
-   * The code face. PanelUI's theme leaves `--font-mono` `unset`, so `font-mono`
-   * falls back to the system font — which is what a fenced `CodeBlock` draws
-   * with, while inline code spans already use the bundled JetBrains Mono
-   * (`MonoFont` in constants/theme.ts). Declaring it here makes the two agree:
-   * one code face, block and span alike.
-   *
-   * Not appearance-dependent; it is declared in both blocks because that is the
-   * override pattern this file already uses and these unlayered blocks win over
-   * the library's `@theme` declaration.
-   */
-  --font-mono: 'JetBrains Mono';
 }
 
 @variant dark {
@@ -145,5 +153,4 @@
   --color-input: hsla(220, 10%, 90%, 0.07);
   --color-skeleton: hsla(220, 10%, 90%, 0.07);
   --color-code-keyword: #26e085;
-  --font-mono: 'JetBrains Mono';
 }
