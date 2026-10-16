@@ -12,6 +12,25 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.77]
+
+### Android
+
+- **Fixed: a question from the agent drew nothing, so the task looked stuck.**
+  When an agent asked which option to take — an OpenCode form, or a permission
+  request — the task sat there doing nothing and there was no way to answer it.
+  The card that asks is now drawn above the message box, whichever composer the
+  app is using, so an agent waiting on you can be answered.
+
+- **Reasoning now opens in a panel instead of expanding in place.** A long task
+  showed every trace the model wrote inline, whether or not you read it, which
+  made long tasks heavy to scroll. A trace is now a row you tap, and it opens in
+  a half-height panel over the task.
+
+- **Fixed: code in an answer was drawn in the wrong typeface.** Fenced blocks
+  came out in the system font while inline code used the app's own monospace
+  face, so the two disagreed inside one answer. They now match.
+
 ## [0.1.76]
 
 ### Desktop and Android
