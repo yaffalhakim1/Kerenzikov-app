@@ -835,15 +835,27 @@ fn native_command_invocation<'a>(
     commands.contains(name).then(|| (name, arguments.trim()))
 }
 
+/// The inbox id carried by a `session.inbox.*` event.
+///
+/// The member moved: a live 2.0.28 service sends `data.inboxID`, while the
+/// pre-beta channel put the same value at `data.id`. Reading only the old name
+/// silently matched NOTHING — `pending_input` was never cleared on delivery and
+/// never matched on cancellation — so both spellings are accepted, the same way
+/// `permission.replied` accepts `requestID` or `id`.
+fn inbox_event_id(data: &Value) -> Option<&str> {
+    data.get("inboxID")
+        .or_else(|| data.get("id"))
+        .and_then(Value::as_str)
+}
+
 fn submit_prompt(
     worker: &Worker,
     endpoint: &Endpoint,
     text: &str,
     delivery: Option<Delivery>,
-) -> Result<Option<opencode_api::InboxUser>, ApiError> {
+) -> Result<Option<opencode_api::PromptAck>, ApiError> {
     if let Some((name, arguments)) = native_command_invocation(text, &worker.command_names) {
-        opencode_api::command(endpoint, &worker.session_id, name, arguments, delivery)
-            .map(|_| None)
+        opencode_api::command(endpoint, &worker.session_id, name, arguments, delivery).map(|_| None)
     } else {
         opencode_api::prompt(endpoint, &worker.session_id, text, delivery).map(Some)
     }
@@ -1145,7 +1157,7 @@ fn reconcile(worker: &Worker, state: &mut StreamState, generation: u64) {
         let undelivered = state.pending_input.as_ref().is_some_and(|pending| {
             inbox
                 .iter()
-                .any(|entry| entry.get("id").and_then(Value::as_str) == Some(&pending.inbox_id))
+                .any(|entry| inbox_event_id(entry) == Some(&pending.inbox_id))
         });
         if !undelivered {
             state.pending_input = None;
@@ -1461,7 +1473,7 @@ fn handle_event(
 
         // Inbox and steering.
         "session.inbox.enqueued" => {
-            let Some(id) = data.get("id").and_then(Value::as_str) else {
+            let Some(id) = inbox_event_id(data) else {
                 return;
             };
             let Some(pending) = state.pending_input.as_mut() else {
@@ -1472,9 +1484,11 @@ fn handle_event(
             }
         }
         "session.inbox.delivered" => {
-            if state.pending_input.as_ref().is_some_and(|pending| {
-                Some(pending.inbox_id.as_str()) == data.get("id").and_then(Value::as_str)
-            }) {
+            if state
+                .pending_input
+                .as_ref()
+                .is_some_and(|pending| Some(pending.inbox_id.as_str()) == inbox_event_id(data))
+            {
                 state.pending_input = None;
             }
         }
@@ -1482,7 +1496,7 @@ fn handle_event(
             let Some(pending) = state.pending_input.as_ref() else {
                 return;
             };
-            if Some(pending.inbox_id.as_str()) != data.get("id").and_then(Value::as_str) {
+            if Some(pending.inbox_id.as_str()) != inbox_event_id(data) {
                 return;
             }
             // The app falls back to its own follow-up queue.
@@ -2797,6 +2811,73 @@ mod tests {
             [DriverEvent::SteerRejected { message, .. }] if message == "keep going"
         ));
         assert!(harness.state.pending_input.is_none());
+    }
+
+    /// The inbox id member moved. A live 2.0.28 service sends `data.inboxID` —
+    /// captured verbatim from the real stream — while the pre-beta channel put
+    /// the same value at `data.id`. Reading only the old name matched NOTHING,
+    /// so a delivered entry never cleared `pending_input`.
+    #[test]
+    fn a_delivered_entry_matches_the_live_inbox_id_spelling() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.state.pending_input = Some(PendingInput {
+            inbox_id: "msg_14276c1d8001rhfIGBuMPoAh2E".into(),
+            message: "reply with one word".into(),
+            steer: true,
+        });
+        harness.feed(json!({
+            "type": "session.inbox.delivered",
+            "data": {
+                "sessionID": "ses_1",
+                "inboxID": "msg_14276c1d8001rhfIGBuMPoAh2E"
+            }
+        }));
+        assert!(
+            harness.state.pending_input.is_none(),
+            "a delivered entry must clear pending_input on the live spelling"
+        );
+    }
+
+    /// A cancelled entry must reach the app's own follow-up queue on the live
+    /// spelling too; matching nothing would swallow the rejection entirely.
+    #[test]
+    fn a_cancelled_entry_reaches_the_app_on_the_live_inbox_id_spelling() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.state.pending_input = Some(PendingInput {
+            inbox_id: "msg_1".into(),
+            message: "keep going".into(),
+            steer: true,
+        });
+        harness.feed(json!({
+            "type": "session.inbox.cancelled",
+            "data": {"sessionID": "ses_1", "inboxID": "msg_1"}
+        }));
+        assert!(matches!(
+            harness.drain().as_slice(),
+            [DriverEvent::SteerRejected { message, .. }] if message == "keep going"
+        ));
+        assert!(harness.state.pending_input.is_none());
+    }
+
+    /// The enqueued frame is where an id Waku does not yet hold is adopted.
+    #[test]
+    fn an_enqueued_entry_adopts_the_live_inbox_id() {
+        let mut harness = Harness::new(RuntimeMode::FullAccess);
+        harness.state.pending_input = Some(PendingInput {
+            inbox_id: String::new(),
+            message: "keep going".into(),
+            steer: true,
+        });
+        harness.feed(json!({
+            "type": "session.inbox.enqueued",
+            "data": {
+                "sessionID": "ses_1",
+                "inboxID": "msg_1",
+                "item": {"type": "user", "payload": {"text": "keep going"}, "delivery": "steer"}
+            }
+        }));
+        let pending = harness.state.pending_input.as_ref().expect("still pending");
+        assert_eq!(pending.inbox_id, "msg_1");
     }
 
     #[test]

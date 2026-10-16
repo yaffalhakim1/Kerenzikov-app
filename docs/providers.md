@@ -630,7 +630,11 @@ client deleted it.
 inbox entry the prompt became; a registered native command goes to
 `POST /api/session/{id}/command` instead. Delivery is read back rather than
 assumed — the server picks one when the caller sends none — and `delivery` is
-what says whether a message steers the running turn or queues behind it.
+what says whether a message steers the running turn or queues behind it. Only
+the entry's `id` and `delivery` are declared (`PromptAck`): the rest of it
+(`sessionID`, `time`, `type`, `payload`) is ignored, because a mandatory member
+nobody reads turned a correct response into "OpenCode rejected the prompt" when
+the service renamed it. Declare another member only when something consumes it.
 
 **Turn end** — `session.execution.{succeeded,failed,interrupted}` on the stream,
 **not** `session.idle`: beta-19192 never emits the latter (verified against a live
@@ -663,7 +667,7 @@ reaches a driver as a resync.
 | `session.step.ended` token counters | `UsageUpdated`, paired with the service's model catalogue for the context limit |
 | `session.step.failed`, `session.execution.failed` | `Error` |
 | `session.execution.*` | `TurnFinished` |
-| `session.inbox.enqueued` / `.delivered` / `.cancelled` | pending-input bookkeeping; a cancelled steer becomes `SteerRejected` |
+| `session.inbox.enqueued` / `.delivered` / `.cancelled` | pending-input bookkeeping; a cancelled steer becomes `SteerRejected`. The id is `data.inboxID` live and `data.id` on the pre-beta channel; both are read |
 | `permission.asked` / `permission.replied` | `Permission` |
 | `form.created` | `UserInputRequested`; `form.replied` / `form.cancelled` only clears the pending question |
 | `session.renamed`, `session.agent.selected`, `session.model.selected` | title, agent preset, model |

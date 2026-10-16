@@ -581,20 +581,19 @@ pub(crate) struct SessionExport {
     pub messages: Vec<MessageInfo>,
 }
 
-/// The inbox entry `POST /prompt` answers with.
+/// What `POST /prompt` answers with: the inbox entry the prompt became.
 ///
-/// The beta build renamed this member from `data` to `payload`; the older name
-/// is gone, not aliased.
+/// Only the two members Waku consumes are declared. The entry carries five
+/// more — `sessionID`, `time`, `type`, `payload` — and demanding any of them is
+/// how a CORRECT response came back as "OpenCode rejected the prompt": the
+/// server had already accepted it, and a mandatory field nobody read turned the
+/// decode into a failed turn. The entry has been renamed under Waku twice
+/// already (`data` became `payload`, a flat `timeCreated` became the `time`
+/// object every other v2 payload uses), and serde ignores members this type
+/// does not name, so a third rename cannot break a prompt again.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
-pub(crate) struct InboxUser {
+pub(crate) struct PromptAck {
     pub id: String,
-    #[serde(rename = "sessionID")]
-    pub session_id: String,
-    #[serde(rename = "timeCreated")]
-    pub time_created: f64,
-    #[serde(rename = "type")]
-    pub kind: String,
-    pub payload: Value,
     pub delivery: Delivery,
 }
 
@@ -976,17 +975,18 @@ pub(crate) fn export_session(
     decode(data(response, "session export")?, "session export")
 }
 
-/// Submits a prompt and returns the inbox entry it became.
+/// Submits a prompt and returns the acknowledgement the service answers with.
 ///
 /// Leaving `delivery` unset lets the server choose, which is what an idle
 /// session wants; a busy session needs the caller to say whether the prompt
-/// steers the running turn or queues behind it.
+/// steers the running turn or queues behind it. The EFFECTIVE delivery comes
+/// back in the acknowledgement rather than being assumed.
 pub(crate) fn prompt(
     endpoint: &Endpoint,
     session: &str,
     text: &str,
     delivery: Option<Delivery>,
-) -> Result<InboxUser> {
+) -> Result<PromptAck> {
     let path = format!("/api/session/{}/prompt", encode_path_segment(session));
     let mut body = json!({ "text": text });
     if let Some(delivery) = delivery {
@@ -1763,21 +1763,76 @@ mod tests {
         assert!(session.parent_id.is_none());
     }
 
-    /// The inbox entry's payload member is `payload` on this build; the older
-    /// `data` name is gone rather than aliased.
+    /// The acknowledgement is read for the two members Waku consumes, from the
+    /// entry a live 2.0.28 service answered `POST /api/session/{id}/prompt`
+    /// with.
     #[test]
-    fn inbox_user_reads_the_payload_member() {
-        let entry: InboxUser = serde_json::from_value(json!({
-            "id": "msg_1",
-            "sessionID": "ses_1",
-            "timeCreated": 1.0,
+    fn prompt_ack_reads_the_id_and_effective_delivery() {
+        let ack: PromptAck = serde_json::from_value(json!({
+            "id": "msg_142517756001PJrhrh00GH7laS",
+            "sessionID": "ses_830ef0b26fc64e55b7576a3e45cb7636",
+            "time": { "created": 1792113997659.0 },
             "type": "user",
             "payload": { "text": "hi" },
             "delivery": "steer",
         }))
         .unwrap();
-        assert_eq!(entry.delivery, Delivery::Steer);
-        assert_eq!(entry.payload["text"], json!("hi"));
+        assert_eq!(ack.id, "msg_142517756001PJrhrh00GH7laS");
+        assert_eq!(ack.delivery, Delivery::Steer);
+    }
+
+    /// The regression this type exists for: a member Waku does not read was
+    /// declared mandatory, so a CORRECT response — the server had already
+    /// accepted the prompt — failed to decode and the turn was reported as
+    /// rejected. Every rename the entry has already survived must keep
+    /// decoding, and a flat `timeCreated` is the shape that broke it.
+    #[test]
+    fn prompt_ack_survives_a_rename_of_a_member_waku_never_reads() {
+        let renamed: PromptAck = serde_json::from_value(json!({
+            "id": "msg_1",
+            "delivery": "queue",
+            "timeCreated": 1.0,
+            "someFutureMember": { "nested": true },
+        }))
+        .unwrap();
+        assert_eq!(renamed.id, "msg_1");
+        assert_eq!(renamed.delivery, Delivery::Queue);
+
+        let minimal: PromptAck =
+            serde_json::from_value(json!({ "id": "msg_1", "delivery": "steer" })).unwrap();
+        assert_eq!(minimal.delivery, Delivery::Steer);
+    }
+
+    /// The whole prompt path, over the real wire layer, against the body a live
+    /// 2.0.28 service answered. The unit tests above pin the shape; this pins
+    /// that `prompt` itself — envelope, status and decode together — accepts it,
+    /// which is what actually broke: the server took the prompt and Waku then
+    /// reported it as rejected.
+    #[test]
+    fn prompt_accepts_the_body_a_live_service_returns() {
+        let body = json!({
+            "data": {
+                "id": "msg_142517756001PJrhrh00GH7laS",
+                "sessionID": "ses_830ef0b26fc64e55b7576a3e45cb7636",
+                "time": { "created": 1792113997659.0 },
+                "type": "user",
+                "payload": { "text": "say only the word ping" },
+                "delivery": "steer",
+            }
+        })
+        .to_string();
+        let endpoint = serve_responses(vec![format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )]);
+        let ack = prompt(
+            &endpoint,
+            "ses_830ef0b26fc64e55b7576a3e45cb7636",
+            "hi",
+            None,
+        )
+        .expect("a prompt the service accepted must not decode as rejected");
+        assert_eq!(ack.delivery, Delivery::Steer);
     }
 
     #[test]
