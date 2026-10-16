@@ -899,7 +899,21 @@ fn handle_connection(
                 }
                 Ok(ClientMessage::Hello { .. }) => {}
                 Err(error) => {
-                    eprintln!("waku-daemon ignored invalid message: {error}");
+                    // A request the daemon cannot deserialize must still be
+                    // answered. Dropping it leaves the client waiting out its
+                    // whole request timeout with nothing to report, so a wire
+                    // mismatch — an app newer than the daemon it is pointed at,
+                    // where a command it sends did not exist yet — reaches the
+                    // user as an indefinite spinner rather than an error.
+                    eprintln!("waku-daemon rejected an unreadable message: {error}");
+                    if let Some(request_id) = unparsed_request_id(text.as_ref()) {
+                        send_dispatch_error(
+                            request_id,
+                            outgoing.clone(),
+                            &hub,
+                            format!("the daemon does not understand this request: {error}"),
+                        );
+                    }
                 }
             },
             Ok(Message::Close(_)) => break,
@@ -1214,6 +1228,24 @@ fn task_catalog_action(command: &Command) -> TaskCatalogAction {
         | Command::RewindSessionToMessage { .. } => TaskCatalogAction::Changed,
         _ => TaskCatalogAction::None,
     }
+}
+
+/// The request id of a message the daemon could not deserialize.
+///
+/// A failed parse is usually a `command` this daemon is too old to know, and
+/// the envelope around it is still readable: pulling the id out lets the
+/// daemon answer with a reason instead of leaving the client to time out. A
+/// message with no usable id — a malformed one, or a fire-and-forget request
+/// whose id is nil — has no one to answer, and `send_dispatch_error` drops it.
+fn unparsed_request_id(text: &str) -> Option<Uuid> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    if value.get("type")?.as_str()? != "request" {
+        return None;
+    }
+    value
+        .get("requestId")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
 }
 
 fn send_dispatch_error(
@@ -2123,6 +2155,133 @@ mod tests {
         assert!(matches!(handled.outcome, ResponseOutcome::Ok { .. }));
         assert!(responses.try_recv().is_err());
         assert!(hub.cached_response(Uuid::nil()).is_none());
+    }
+
+    #[test]
+    fn an_unparsed_request_envelope_still_yields_its_id() {
+        let request_id = Uuid::new_v4();
+        let message = json!({
+            "type": "request",
+            "requestId": request_id.to_string(),
+            "sessionId": Uuid::nil().to_string(),
+            "runtimeId": Uuid::nil().to_string(),
+            "command": { "type": "aCommandFromTheFuture" },
+        })
+        .to_string();
+
+        assert_eq!(unparsed_request_id(&message), Some(request_id));
+        // A fire-and-forget request parses to the nil id, which
+        // `send_dispatch_error` drops rather than answering — there is no
+        // requester to answer. A non-request message and outright garbage have
+        // no envelope to read at all.
+        assert_eq!(
+            unparsed_request_id(
+                &json!({
+                    "type": "request",
+                    "requestId": Uuid::nil().to_string(),
+                    "command": { "type": "aCommandFromTheFuture" },
+                })
+                .to_string()
+            ),
+            Some(Uuid::nil())
+        );
+        assert_eq!(unparsed_request_id(r#"{"type":"hello"}"#), None);
+        assert_eq!(unparsed_request_id("not json at all"), None);
+    }
+
+    /// A client that sends a command this daemon does not know must be told,
+    /// not left waiting.
+    ///
+    /// This is the shape of an app newer than the daemon it is pointed at: the
+    /// handshake matches, the command does not. Dropping the message made the
+    /// failure invisible — the client sat on its full request timeout and the
+    /// user saw an attachment spinner that never resolved.
+    #[test]
+    fn a_command_the_daemon_cannot_parse_is_answered_with_an_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = shutdown.clone();
+        let server = std::thread::spawn(move || {
+            serve(
+                listener,
+                "secret".into(),
+                Arc::new(TestBackend::default()),
+                server_shutdown,
+                ServerOptions::default(),
+            )
+            .unwrap()
+        });
+
+        use tungstenite::client::IntoClientRequest;
+        let request = format!("ws://{address}/v1").into_client_request().unwrap();
+        let stream = std::net::TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let (mut socket, _response) = tungstenite::client(request, stream).unwrap();
+
+        let hello = serde_json::to_string(&ClientMessage::Hello {
+            protocol_version: PROTOCOL_VERSION,
+            token: "secret".into(),
+            client_id: Uuid::new_v4(),
+            client_name: Some("test client".into()),
+            resume_from: Vec::new(),
+        })
+        .unwrap();
+        socket.send(Message::Text(hello.into())).unwrap();
+
+        let request_id = Uuid::new_v4();
+        let unknown = json!({
+            "type": "request",
+            "requestId": request_id.to_string(),
+            "sessionId": Uuid::nil().to_string(),
+            "runtimeId": Uuid::nil().to_string(),
+            "command": { "type": "aCommandFromTheFuture" },
+        });
+        socket
+            .send(Message::Text(unknown.to_string().into()))
+            .unwrap();
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut reported = None;
+        while std::time::Instant::now() < deadline && reported.is_none() {
+            match socket.read() {
+                Ok(Message::Text(text)) => {
+                    let Ok(ServerMessage::Response {
+                        request_id: answered,
+                        outcome,
+                    }) = serde_json::from_str(text.as_ref())
+                    else {
+                        continue;
+                    };
+                    if answered == request_id {
+                        reported = Some(outcome);
+                    }
+                }
+                Ok(_) => continue,
+                Err(tungstenite::Error::Io(error))
+                    if error.kind() == std::io::ErrorKind::WouldBlock =>
+                {
+                    continue;
+                }
+                Err(error) => panic!("unexpected read error: {error}"),
+            }
+        }
+
+        let outcome = reported.expect("the daemon must answer a request it could not parse");
+        let ResponseOutcome::Error { error } = outcome else {
+            panic!("an unparseable command must be reported as an error, not accepted");
+        };
+        assert!(
+            error.message.contains("aCommandFromTheFuture"),
+            "the error should name what the daemon did not understand: {}",
+            error.message
+        );
+
+        let _ = socket.send(Message::Close(None));
+        shutdown.store(true, Ordering::Release);
+        server.join().unwrap();
     }
 
     #[test]
