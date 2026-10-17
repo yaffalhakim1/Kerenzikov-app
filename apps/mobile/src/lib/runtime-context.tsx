@@ -71,6 +71,7 @@ import {
   sessionListSummary,
   shouldApplyRuntimeEvent,
   submittedTurnIdentity,
+  withLiveQueue,
   type NewSessionOptions,
   type SessionOptionChanges,
 } from './mobile-runtime';
@@ -314,13 +315,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         // committed while it was in flight are newer than that snapshot, so
         // once the cache has moved on keep it and take only what the daemon
         // owns — turn checkpoints — from the reply.
+        const latest = queryClient.getQueryData<AgentSession>(
+          daemonKeys.session(profileId, session.id),
+        );
+        const merged = withLiveQueue(saved, latest);
         if (cacheGenerations.current.get(session.id) === generation) {
-          writeSessionCache(saved);
-        } else {
-          const latest = queryClient.getQueryData<AgentSession>(
-            daemonKeys.session(profileId, session.id),
-          );
-          if (latest) writeSessionCache(withDaemonCheckpoints(latest, saved));
+          writeSessionCache(merged);
+        } else if (latest) {
+          writeSessionCache(withDaemonCheckpoints(latest, merged));
         }
         return saved;
       });

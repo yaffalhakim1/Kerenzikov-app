@@ -157,6 +157,29 @@ export function providerPromptForSubmission(
   ].filter(Boolean).join(' ');
 }
 
+/**
+ * Take the queue from the live cache after a save replies.
+ *
+ * `saveTaskState` merges queues additively and can never express a removal
+ * (`merge_queued_messages` in `waku-core/src/daemon.rs`), so a reply describes
+ * the queue as it stood *before* the daemon drained a follow-up. The drain
+ * reaches this client as `promptSubmitted`, which drops the entry by its own
+ * id; writing the reply back whole would put the row back and leave a message
+ * that was already sent still showing as queued. The client is the only writer
+ * whose view of the queue is current, so it wins — the same treatment turn
+ * checkpoints get from the reply instead.
+ *
+ * `latest` is the cached session, which may be missing (a save that resolved
+ * after the session left the cache); `saved` is then kept as-is.
+ */
+export function withLiveQueue(
+  saved: AgentSession,
+  latest: AgentSession | undefined,
+): AgentSession {
+  if (latest?.queued_messages === undefined) return saved;
+  return { ...saved, queued_messages: latest.queued_messages };
+}
+
 /** The ids beginTurn gave the running turn and the user message that opened
  * it. They are sent with the prompt so the daemon can publish the same
  * identity to every other client attached to the runtime. */

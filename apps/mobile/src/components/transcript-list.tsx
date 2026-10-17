@@ -258,6 +258,8 @@ export function TranscriptList({
   const touchingRef = useRef(false);
   const touchMoved = useRef(false);
   const extending = useRef(false);
+  /** Pending release of `extending` after an extension step; see `evaluate`. */
+  const extendRelease = useRef<number | null>(null);
   const decelerating = useRef(false);
   /** Where the current gesture began: its offset and the content height,
    * so growth compensated under the finger can be told from the reader's
@@ -313,18 +315,31 @@ export function TranscriptList({
     if (!extending.current && shouldExtendTail(current, hasEarlier)) {
       extending.current = true;
       setWindowStart((value) => extendedWindowStart(value ?? start));
+      // `extending` is cleared by the `start` effect below, which only re-runs
+      // when the window actually moved. A step that resolves to the same `start`
+      // (a clamped window, or all-hidden rows) would otherwise latch this flag
+      // for the life of the list and stop history from ever extending again.
+      // Clearing it after a frame makes a no-op step self-healing.
+      if (extendRelease.current) cancelAnimationFrame(extendRelease.current);
+      extendRelease.current = requestAnimationFrame(() => {
+        extendRelease.current = null;
+        extending.current = false;
+      });
     }
   }, [hasEarlier, start]);
 
   // A window extension that changes nothing on screen (all-hidden rows) must
-  // not wedge the extender.
+  // not wedge the extender. `evaluate` releases `extending` itself now, so this
+  // only has to re-run the check once the new window has mounted: rows that
+  // still do not fill the viewport extend again, one frame at a time.
   useEffect(() => {
-    const frame = requestAnimationFrame(() => {
-      extending.current = false;
-      evaluate();
-    });
+    const frame = requestAnimationFrame(() => evaluate());
     return () => cancelAnimationFrame(frame);
   }, [evaluate, start]);
+
+  useEffect(() => () => {
+    if (extendRelease.current) cancelAnimationFrame(extendRelease.current);
+  }, []);
 
   function onScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
