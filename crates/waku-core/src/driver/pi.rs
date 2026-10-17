@@ -536,6 +536,13 @@ impl PiDriver {
                 // an RPC on the live session rather than a restart.
                 let mut current_model = model;
                 let mut current_effort = reasoning_effort;
+                // Steers this writer sent to Oh My Pi that may still be waiting
+                // in its steering queue. A plain `abort` requeues stranded
+                // steers and drains them into a fresh turn, so Stop has to
+                // withdraw them first — see `withdraw_pending_steers`. Cleared
+                // when a fresh turn supersedes the last one, so it holds only
+                // what the live turn can still be carrying.
+                let mut pending_steers: Vec<String> = Vec::new();
                 while let Ok(message) = command_rx.recv() {
                     match message {
                         CommandMessage::Prompt(prompt) => {
@@ -551,6 +558,14 @@ impl PiDriver {
                             } else {
                                 "prompt"
                             };
+                            // A fresh turn supersedes the last one, so any steer
+                            // the previous turn had queued has left Oh My Pi's
+                            // steering queue by now. Dropping them here keeps
+                            // this list bounded to one live turn. A `follow_up`
+                            // joins the running turn instead, so its steers stay.
+                            if verb == "prompt" {
+                                pending_steers.clear();
+                            }
                             let result = send_prompt(
                                 &mut stdin,
                                 &writer_pending,
@@ -607,6 +622,10 @@ impl PiDriver {
                             );
                             match result {
                                 Ok(_) => {
+                                    // Remember it so a later Stop can withdraw
+                                    // it: a plain `abort` would otherwise drain
+                                    // this message into a fresh turn.
+                                    pending_steers.push(prompt.clone());
                                     let _ = writer_events
                                         .send(DriverEvent::SteerAccepted { message: prompt });
                                 }
@@ -619,6 +638,10 @@ impl PiDriver {
                             }
                         }
                         CommandMessage::Cancel => {
+                            // Oh My Pi: `abort` alone requeues stranded steers
+                            // and drains them into a fresh turn, so Stop must
+                            // withdraw them first. See `withdraw_pending_steers`.
+                            withdraw_pending_steers(&mut stdin, &mut pending_steers, flavor);
                             if let Err(error) = send_request(
                                 &mut stdin,
                                 &writer_pending,
@@ -965,6 +988,43 @@ fn write_json_line(writer: &mut impl Write, value: &Value) -> std::io::Result<()
     serde_json::to_writer(&mut *writer, value)?;
     writer.write_all(b"\n")?;
     writer.flush()
+}
+
+/// Withdraw Oh My Pi's still-queued steers before aborting it.
+///
+/// A plain `abort` requeues stranded steers and drains them into a fresh turn
+/// (upstream `docs/rpc.md`), so Stop would re-run exactly the work the user
+/// asked to halt. Removing them first is what the newer
+/// `abort_and_restore_queue` verb does atomically; that verb is absent from the
+/// installed CLI (18.4.5 answers `Unknown command`), so the two-step form is
+/// the only one available.
+///
+/// Fire-and-forget on purpose. Oh My Pi serializes commands on its own read
+/// loop, so a removal written before the `abort` is always processed before it;
+/// waiting for the removal's reply would only add latency to Stop (up to
+/// [`RPC_TIMEOUT`] per steer) without changing the outcome. Best-effort by
+/// design: a steer the running turn already claimed cannot be withdrawn, and
+/// that must never block the abort.
+fn withdraw_pending_steers(
+    stdin: &mut impl Write,
+    pending_steers: &mut Vec<String>,
+    flavor: PiFlavor,
+) {
+    // Only Oh My Pi requeues stranded steers on abort, and only it is verified
+    // to answer `remove_queued_message`. Pi keeps its own queue semantics.
+    if !matches!(flavor, PiFlavor::OhMyPi) {
+        return;
+    }
+    for message in std::mem::take(pending_steers) {
+        let _ = write_json_line(
+            stdin,
+            &json!({
+                "type": "remove_queued_message",
+                "message": message,
+                "queue": "steering"
+            }),
+        );
+    }
 }
 
 fn fail_pending(pending: &PendingResponses, message: &str) {
@@ -1845,6 +1905,71 @@ mod tests {
         }
     }
 
+    /// Oh My Pi drains a stranded steer into a fresh turn on a plain `abort`
+    /// (upstream `docs/rpc.md`), so Stop must withdraw the steers it sent first.
+    /// The wire order is what makes it work: Oh My Pi serializes commands on its
+    /// read loop, so a removal written before the `abort` is always handled
+    /// first.
+    #[test]
+    fn ohmypi_stop_withdraws_pending_steers_before_aborting() {
+        let mut wire = Vec::new();
+        let mut steers = vec!["keep going".to_owned()];
+
+        withdraw_pending_steers(&mut wire, &mut steers, PiFlavor::OhMyPi);
+
+        let lines = written_lines(&wire);
+        assert_eq!(
+            lines,
+            [json!({
+                "type": "remove_queued_message",
+                "message": "keep going",
+                "queue": "steering"
+            })]
+        );
+        assert!(
+            steers.is_empty(),
+            "withdrawn steers must not be sent again on the next Stop"
+        );
+    }
+
+    /// Pi does not requeue stranded steers on abort, so it must not be sent a
+    /// command it never had.
+    #[test]
+    fn pi_stop_does_not_withdraw_steers() {
+        let mut wire = Vec::new();
+        let mut steers = vec!["keep going".to_owned()];
+
+        withdraw_pending_steers(&mut wire, &mut steers, PiFlavor::Pi);
+
+        assert!(written_lines(&wire).is_empty(), "Pi has no such queue");
+        assert_eq!(steers.len(), 1, "a flavor that is skipped keeps its state");
+    }
+
+    /// Every steer the writer sent is withdrawn, not just the newest: Oh My Pi
+    /// queues all of them, and each one would otherwise start its own turn.
+    #[test]
+    fn ohmypi_stop_withdraws_every_pending_steer() {
+        let mut wire = Vec::new();
+        let mut steers = vec!["first".to_owned(), "second".to_owned()];
+
+        withdraw_pending_steers(&mut wire, &mut steers, PiFlavor::OhMyPi);
+
+        let messages = written_lines(&wire)
+            .into_iter()
+            .map(|line| line["message"].as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(messages, ["first", "second"]);
+        assert!(steers.is_empty());
+    }
+
+    fn written_lines(wire: &[u8]) -> Vec<Value> {
+        String::from_utf8_lossy(wire)
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("the driver writes JSON lines"))
+            .collect()
+    }
+
     /// Pi has no busy refusal, so a failed prompt stays a failure there.
     #[test]
     fn pi_prompt_failures_are_not_replayed() {
@@ -2362,6 +2487,94 @@ mod tests {
         assert!(finished, "Oh My Pi never settled the probe turn");
         assert!(context_tokens.is_some_and(|tokens| tokens > 0));
         assert!(context_window.is_some_and(|window| window > 0));
+    }
+
+    /// The regression this fix exists for, against the real CLI: a steered turn
+    /// must actually stop when the driver is cancelled.
+    ///
+    /// Without the steer withdrawal, Oh My Pi answers `abort` with `success`,
+    /// then drains the stranded steer into a fresh turn and keeps streaming —
+    /// measured at 2.1k–2.8k further deltas over ~16s, three runs out of three.
+    /// With it, the run stops cleanly. Ignored by default: it needs the CLI,
+    /// credentials, network, and about a minute of wall clock.
+    #[test]
+    #[ignore = "requires an installed, authenticated omp"]
+    fn ohmypi_stop_ends_a_steered_turn_against_the_real_rpc() {
+        let binary = crate::command_env::find_executable("omp").expect("omp is not installed");
+        let (events, event_rx) = crate::driver::test_event_channel();
+        let driver = PiDriver::start(
+            PiFlavor::OhMyPi,
+            DriverStartOptions {
+                binary,
+                cwd: std::env::temp_dir(),
+                mode: RuntimeMode::FullAccess,
+                model: None,
+                reasoning_effort: None,
+                service_tier: None,
+                context_window: None,
+                agent_preset: None,
+                computer_use_enabled: false,
+                provider_cursor: None,
+            },
+            events,
+        )
+        .expect("the Oh My Pi RPC session should start");
+
+        while let Ok(event) = event_rx.recv_timeout(Duration::from_secs(60)) {
+            match event {
+                DriverEvent::Connected { .. } => break,
+                DriverEvent::Error(error) => panic!("Oh My Pi failed to initialize: {error}"),
+                _ => {}
+            }
+        }
+
+        // A long turn to steer into, then a steer that Oh My Pi queues.
+        driver.prompt(
+            "Count from 1 to 400, one number per line, each with a detailed paragraph.".into(),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while std::time::Instant::now() < deadline {
+            match event_rx.recv_timeout(Duration::from_secs(30)) {
+                Ok(DriverEvent::TurnStarted) => break,
+                Ok(DriverEvent::Error(error)) => panic!("Oh My Pi reported: {error}"),
+                Ok(_) => {}
+                Err(error) => panic!("Oh My Pi never started the turn: {error}"),
+            }
+        }
+        driver.steer("Then write a 500-word essay about the number 7.".into());
+        // Let the steer reach Oh My Pi's queue before stopping.
+        std::thread::sleep(Duration::from_secs(3));
+
+        driver.cancel();
+
+        // Drain until the turn settles, then watch a window for the stray turn
+        // a plain `abort` would have started.
+        let settle_deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut settled = false;
+        while std::time::Instant::now() < settle_deadline {
+            match event_rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(DriverEvent::TurnFinished { .. }) => {
+                    settled = true;
+                    break;
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        assert!(settled, "the cancelled turn never settled");
+
+        let watch_until = std::time::Instant::now() + Duration::from_secs(15);
+        while std::time::Instant::now() < watch_until {
+            match event_rx.recv_timeout(Duration::from_secs(2)) {
+                Ok(DriverEvent::TurnStarted) => {
+                    panic!("Stop started a fresh turn: the pending steer was not withdrawn")
+                }
+                Ok(DriverEvent::TextDelta(_) | DriverEvent::ReasoningDelta(_)) => {
+                    panic!("Stop left the steered turn streaming")
+                }
+                Ok(_) | Err(_) => {}
+            }
+        }
     }
 
     #[test]
