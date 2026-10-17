@@ -12,6 +12,22 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.79]
+
+### Desktop, web and Android
+
+- **Fixed: adding a project failed for every folder on Windows.** Browsing to a
+  directory and tapping Add answered "Enter an absolute path on the daemon
+  host", whatever folder you were in, so a project could not be added at all
+  this way. The path the app was given is the one it now accepts.
+
+### Android
+
+- **Fixed: a message you queued came back after it had already been sent.**
+  Send a follow-up while the agent was working, let the task finish, and the
+  message went out correctly — then stayed in the queue above the composer as
+  though it had never left. The row is now gone the moment it is sent.
+
 ## [0.1.78]
 
 ### Desktop
