@@ -313,6 +313,31 @@ trusts only this fork's key and feed.
   `appcast-windows-*.xml` and `latest-windows.txt` change per release →
   `max-age=300, must-revalidate`.
 
+### Don't chase updater feed failures from this network
+
+Indonesian ISPs filter `r2.dev` at DNS, so verifying the live feed from here
+looks broken when it is not: `pub-a8392f3fe55a424497fe5174b0179915.r2.dev`
+resolves to `internetbaik.telkomsel.com` → `aduankonten.id` →
+`internetpositif.id` (TrustPositif), and the TLS handshake fails with
+`SEC_E_WRONG_PRINCIPAL` because the certificate belongs to the block page. This
+happens even when querying `1.1.1.1`, since the interception is upstream of the
+resolver.
+
+This machine has Cloudflare `1.1.1.1` installed, which is what makes the
+updater work for the maintainer; the failures above were seen from a shell whose
+queries were still intercepted, not from the app. Treat a feed fetch failure
+here as **local filtering, not a release defect**, and confirm the release
+itself from GitHub instead:
+
+```sh
+gh release view v<version> --json assets -q '.assets[].name'
+```
+
+The appcast, `latest-windows.txt` and the installers are all attached to the
+release, and CI generated and uploaded them before publishing. Do not
+re-dispatch the workflow or hand-edit the bucket to "fix" a feed you cannot
+reach — see the recovery note above for what a *real* failure looks like.
+
 ### Signing
 
 Two independent signatures exist; do not confuse them:
