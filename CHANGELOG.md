@@ -12,6 +12,14 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.80]
+
+### Android
+
+- **This build carries no app changes.** It republishes 0.1.79 so the phone
+  update manifest and the APK are generated from the current tree. Keep 0.1.79's
+  notes in mind — the queued message and project-path fixes are what changed.
+
 ## [0.1.79]
 
 ### Desktop, web and Android
