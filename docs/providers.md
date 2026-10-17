@@ -405,8 +405,23 @@ requests to a `Permission` event.
 
 **Cancel** — `{"type": "abort"}`.
 
+Oh My Pi needs one step first. A plain `abort` requeues stranded steers and
+drains them into a fresh turn (upstream `docs/rpc.md`), so cancelling a turn
+that has a `steer` queued used to restart the work the user asked to stop:
+`abort` answered `success`, then ~2.1k–2.8k further deltas streamed. Stop now
+withdraws the steers it sent (`remove_queued_message {message, queue:
+"steering"}`) before the `abort`, which is the two-step form of the newer
+`abort_and_restore_queue` verb — absent from the installed CLI, which answers
+`Unknown command`. Removals are fire-and-forget: Oh My Pi serializes commands
+on its own read loop, so a removal written first is always handled first, and
+waiting on each reply would only add latency to Stop. See
+`withdraw_pending_steers`
+([pi.rs](../crates/waku-core/src/driver/pi.rs#L1008)).
+
 **Steer** — `{"type": "steer", "message": …}`; the request acknowledgment
-resolves to `SteerAccepted` or `SteerRejected`.
+resolves to `SteerAccepted` or `SteerRejected`. Oh My Pi keeps the message in
+its steering queue until the running turn claims it, which is why Cancel has to
+withdraw it — see above.
 
 **Rewind and branch** — both go through `get_fork_messages` → `fork {entryId}`
 (`get_branch_messages` → `branch` on Oh My Pi), or `clone` when nothing is
