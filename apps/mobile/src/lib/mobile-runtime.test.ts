@@ -20,6 +20,7 @@ import {
   sessionIsRunning,
   sessionListSummary,
   shouldApplyRuntimeEvent,
+  withLiveQueue,
 } from './mobile-runtime';
 
 describe('mobile runtime projection', () => {
@@ -159,6 +160,45 @@ describe('mobile runtime projection', () => {
     }]);
     expect(queued.updated_at).toBe(99);
     expect(busy.queued_messages ?? []).toEqual([]);
+  });
+
+  /**
+   * The regression: the daemon drains a follow-up and tells us through
+   * `promptSubmitted`, but a `saveTaskState` already in flight resolves with
+   * the queue as it stood *before* the drain. Writing that reply back whole
+   * resurrects the row, so a message that was sent kept showing as queued.
+   */
+  test('a save reply never resurrects a queue entry the drain removed', () => {
+    const queued = session({
+      queued_messages: [{
+        id: 'queued-1',
+        content: 'follow up',
+        display_content: null,
+        attachments: [],
+        created_at: 99,
+      }],
+    });
+    // The reply predates the drain and still holds the entry.
+    const savedFromDaemon = queued;
+    // The live cache is newer: `promptSubmitted` dropped it by id.
+    const drained = { ...queued, queued_messages: [] };
+
+    expect(withLiveQueue(savedFromDaemon, drained).queued_messages).toEqual([]);
+    // The slots the daemon owns still come from its reply.
+    expect(withLiveQueue(savedFromDaemon, drained).id).toBe(queued.id);
+  });
+
+  test('keeps the reply queue when the session has left the cache', () => {
+    const saved = session({
+      queued_messages: [{
+        id: 'queued-1',
+        content: 'follow up',
+        display_content: null,
+        attachments: [],
+        created_at: 99,
+      }],
+    });
+    expect(withLiveQueue(saved, undefined).queued_messages).toEqual(saved.queued_messages);
   });
 
   test('uses a hydrated turn to correct a lagging running status', () => {
