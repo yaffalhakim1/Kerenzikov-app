@@ -12,6 +12,16 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.78]
+
+### Desktop
+
+- **Fixed: Stop did not stop an Oh My Pi task that you had nudged mid-turn.**
+  If you sent a message while the agent was working and then pressed Stop, the
+  task marked itself interrupted and the agent carried on anyway — finishing the
+  work you had just cancelled, and paying for it twice. Stop now withdraws the
+  message it had queued before halting, so the task actually stops.
+
 ## [0.1.77]
 
 ### Android
