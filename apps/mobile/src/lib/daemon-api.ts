@@ -346,17 +346,36 @@ export async function browseDaemonDirectory(
   return response.result;
 }
 
+/**
+ * Windows verbatim ("long path") prefix. `std::fs::canonicalize` returns paths
+ * in this form, and `browseDirectory` hands those straight back to the picker,
+ * so every folder the reader walks into carries it.
+ */
+const WINDOWS_VERBATIM_PREFIX = /^\\\\\?\\/;
+
 export function createProject(
   rawPath: string,
   id: string,
   createdAt = Math.floor(Date.now() / 1_000),
 ): Project {
   const input = rawPath.trim();
-  if (!input.startsWith('/') && !/^[a-z]:[\\/]/i.test(input)) {
+  // The prefix is kept in the stored path — a verbatim path is not
+  // interchangeable with its plain form (it disables `..` resolution and the
+  // MAX_PATH limit), and it is what the daemon handed us. It only has to be
+  // peeled off to *validate* and to find the name.
+  const absolute = input.replace(WINDOWS_VERBATIM_PREFIX, '');
+  if (!absolute.startsWith('/') && !/^[a-z]:[\\/]/i.test(absolute)) {
     throw new Error('Enter an absolute path on the daemon host');
   }
-  const path = input === '/' ? input : input.replace(/[\\/]+$/, '');
-  const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Project';
+  // Trailing separators are dropped for the stored path, but never from a bare
+  // root: `/` and `C:\` must keep theirs.
+  const trailing = /[\\/]+$/.exec(input)?.[0] ?? '';
+  const trimmed = input.slice(0, input.length - trailing.length);
+  const isDriveRoot = /^[a-z]:$/i.test(trimmed) || /^\\\\\?\\[a-z]:$/i.test(trimmed);
+  const path = !trimmed ? '/' : isDriveRoot ? `${trimmed}\\` : trimmed;
+  // The name is the last segment. Splitting the verbatim form directly would
+  // yield `?` from `\\?\C:\`, so it is split after the prefix is removed.
+  const name = absolute.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Project';
   return { id, name, path, created_at: createdAt };
 }
 
