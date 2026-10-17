@@ -54,6 +54,21 @@ describe('mobile daemon API', () => {
     expect(() => createProject('dev/waku', 'three')).toThrow('absolute path');
   });
 
+  /**
+   * `browseDirectory` answers with `std::fs::canonicalize` output, which on
+   * Windows is the verbatim `\\?\` form. The picker feeds those straight back
+   * in, so rejecting the prefix made every folder tapped in the picker fail.
+   */
+  test('accepts the verbatim Windows paths the daemon itself returns', () => {
+    const project = createProject('\\\\?\\Y:\\Learn\\Go\\opencode-gui', 'four', 10);
+    expect(project.path).toBe('\\\\?\\Y:\\Learn\\Go\\opencode-gui');
+    // Splitting the verbatim form directly would name this project `?`.
+    expect(project.name).toBe('opencode-gui');
+    expect(createProject('\\\\?\\C:\\dev\\waku\\', 'five', 10).name).toBe('waku');
+    // A verbatim drive root keeps its separator and still names itself.
+    expect(createProject('\\\\?\\C:\\', 'six', 10).path).toBe('\\\\?\\C:\\');
+  });
+
   test('persists a project without replacing sessions', async () => {
     const commands: unknown[] = [];
     const client = {

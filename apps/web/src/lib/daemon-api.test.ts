@@ -240,6 +240,21 @@ describe('createProject', () => {
   test('rejects paths that depend on the browser process cwd', () => {
     expect(() => createProject('relative/project')).toThrow('absolute path')
   })
+
+  /**
+   * `browseDirectory` answers with `std::fs::canonicalize` output, which on
+   * Windows is the verbatim `\\?\` form. The picker feeds those straight back
+   * in, so rejecting the prefix made every folder tapped in the picker fail.
+   */
+  test('accepts the verbatim Windows paths the daemon itself returns', () => {
+    const project = createProject('\\\\?\\Y:\\Learn\\Go\\opencode-gui')
+    expect(project.path).toBe('\\\\?\\Y:\\Learn\\Go\\opencode-gui')
+    // Splitting the verbatim form directly would name this project `?`.
+    expect(project.name).toBe('opencode-gui')
+    expect(createProject('\\\\?\\C:\\dev\\waku\\').name).toBe('waku')
+    // A verbatim drive root keeps its separator.
+    expect(createProject('\\\\?\\C:\\').path).toBe('\\\\?\\C:\\')
+  })
 })
 
 describe('persistProject', () => {
