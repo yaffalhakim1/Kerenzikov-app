@@ -18,6 +18,7 @@ import { daemonKeys, registerPushToken } from "./daemon-api";
 import { flushNow, recordBreadcrumb } from "./error-log";
 import { hydratePersistentStorage } from "./composer-preferences-store";
 import { DaemonLink, type DaemonOutage } from "./daemon-link";
+import { followedSessionIds } from "./followed-sessions";
 import { androidChannelId, cachedPushToken } from "./push-notifications";
 import {
   normalizeDaemonProfile,
@@ -164,11 +165,16 @@ export function DaemonProvider({ children }: { children: ReactNode }) {
       if (connections > 1) {
         // Task-state and session change notifications sent while the link
         // was down are gone, so refetch what screens are showing. Followed
-        // runtimes replay their missed events on their own.
+        // runtimes replay their missed events on their own — refetching a
+        // session that has a live runtime would parse its whole transcript a
+        // second time, on top of the replay that is already draining.
+        const followed = followedSessionIds();
         void queryClient.invalidateQueries({
           queryKey: ["daemon", profileId],
           predicate: (query) =>
-            query.queryKey[2] === "task-state" || query.queryKey[2] === "session",
+            query.queryKey[2] === "task-state" ||
+            (query.queryKey[2] === "session" &&
+              !followed.has(String(query.queryKey[3]))),
         });
       }
     },

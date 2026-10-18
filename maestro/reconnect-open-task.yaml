@@ -1,0 +1,57 @@
+# Reconnect, then open the running task: the failure this branch fixes.
+#
+# The bug: after the app was away long enough for the daemon to accumulate a
+# replay backlog, tapping a task made the app exit. The replay was folded one
+# event at a time, each folding deep-cloned the whole transcript, and the tap
+# stacked a full hydrate on top of that — enough JS work to be killed or to
+# trip an ANR.
+#
+# This flow reproduces the shape of that report without needing a multi-hour
+# task: it reconnects (background → foreground, which is the same probe-then-
+# replay path as a socket that dropped), then opens a task immediately and
+# asserts the session screen and composer are alive.
+#
+# Run against the RELEASE build: a debug build hides exactly this class of
+# failure behind Metro, dev-mode overhead and an attached inspector.
+#
+#   adb uninstall sh.waku.mobile
+#   bun --filter @waku/mobile run android --variant release
+#   maestro test maestro/reconnect-open-task.yaml
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+
+# The app is ready once the composer is up (no daemon saved → onboarding, which
+# is not what this flow tests, so a missing composer fails loudly).
+- extendedWaitUntil:
+    visible: "Add attachment"
+    timeout: 60000
+
+# Backgrounding and returning is the cheapest reproducible outage: the link
+# pauses, then probes on return and rebuilds the socket if it went quiet.
+- pressKey: Home
+- waitForAnimationToEnd
+- launchApp
+
+# "Catching up…" only exists while a replay backlog is draining, so it is
+# optional: a short outage drains before this assertion runs.
+- extendedWaitUntil:
+    visible: "Catching up…"
+    timeout: 10000
+    optional: true
+
+# Open the most recent task immediately — this is the tap that used to end the
+# process.
+- tapOn:
+    text: ".*"
+    index: 0
+
+# The session screen is alive if its composer is. A crash reports "App crashed"
+# here instead, and a frozen main thread times out.
+- extendedWaitUntil:
+    visible: "Add attachment"
+    timeout: 20000
+
+- takeScreenshot: reconnect-open-task

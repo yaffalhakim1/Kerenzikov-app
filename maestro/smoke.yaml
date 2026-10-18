@@ -1,0 +1,19 @@
+# Release-build smoke test.
+#
+# Proves a fresh release install boots to a usable first screen. With no daemon
+# saved the app lands on onboarding; with one saved it lands on the composer.
+# Both are a pass — what this flow rejects is a build that shows neither, which
+# is how a release that cannot boot looks.
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+
+- extendedWaitUntil:
+    visible: "Add a daemon|Add attachment"
+    timeout: 60000
+
+- assertVisible: "Add a daemon|Add attachment"
+
+- takeScreenshot: smoke

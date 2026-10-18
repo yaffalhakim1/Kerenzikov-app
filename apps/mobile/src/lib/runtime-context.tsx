@@ -12,7 +12,7 @@ import type {
   SequencedEvent,
   UserInputAnswer,
 } from '@waku/client';
-import { reduceRuntimeEvent } from '@waku/client/event-reducer';
+import { reduceRuntimeEvent, reduceRuntimeEventInPlace, cloneSession } from '@waku/client/event-reducer';
 import type { RuntimeEventResult } from '@waku/client/event-reducer';
 import { writeProviderProbeCache } from '@waku/client/provider-probe-cache';
 import * as Crypto from 'expo-crypto';
@@ -79,12 +79,20 @@ import {
   clearDaemonDisconnectErrors,
   isDaemonDisconnectError,
 } from './runtime-errors';
+import {
+  clearFollowedSessions,
+  markSessionFollowed,
+  markSessionUnfollowed,
+} from './followed-sessions';
 
 export interface MobileRuntime {
   runtimeId: string;
   supportsSteer: boolean;
   starting: boolean;
   running: boolean;
+  /** True while a reconnect backlog is still being folded into the transcript.
+   *  The screen stays interactive; this only drives a subtle indicator. */
+  catchingUp: boolean;
 }
 
 interface RuntimeEntry extends MobileRuntime {
@@ -94,6 +102,11 @@ interface RuntimeEntry extends MobileRuntime {
   pending: SequencedEvent[];
   flushTimer: ReturnType<typeof setTimeout> | null;
   lastFlushAt: number;
+  /** True while a reconnect backlog is draining in bounded chunks. */
+  catchingUp: boolean;
+  /** Set when a chunked drain deferred the persist that would otherwise have
+   *  followed each chunk, so the final chunk writes exactly once. */
+  persistAfterCatchUp: boolean;
 }
 
 interface PendingSubmission {
@@ -106,6 +119,17 @@ interface PendingSubmission {
  * transcript re-renders per commit, not per provider chunk. Interactive
  * events (permissions, turn lifecycle) flush the buffer immediately. */
 const STREAM_COMMIT_MS = 120;
+
+/** A reconnect replay can hand this client thousands of journaled events at
+ * once. Folding them in one task blocks the JS thread for seconds and, on
+ * Android, ends the process; each commit therefore takes at most this many
+ * events and yields, so the transcript converges over a few frames instead. */
+const CATCH_UP_CHUNK_EVENTS = 200;
+/** Wall-clock budget per chunk. Whichever limit is reached first ends it. */
+const CATCH_UP_CHUNK_MS = 8;
+/** A backlog this large is a replay, not live streaming. Below it, a flush is
+ * one commit and no chunking is needed. */
+const CATCH_UP_BACKLOG = CATCH_UP_CHUNK_EVENTS;
 
 /** How many attach attempts must find no runtime before a busy task is treated
  *  as orphaned, and how long to wait between them. Mirrors the desktop's
@@ -239,6 +263,10 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       providerPromptOverride?: string,
     ) => Promise<AgentSession>) | null
   >(null);
+  /** Set after `reloadSession` is defined. `attachSession` needs it for the
+   *  overflow recovery, and the two cannot reference each other directly
+   *  without a declaration cycle. */
+  const reloadSessionRef = useRef<((sessionId: string) => Promise<void>) | null>(null);
 
   /** Writes a session into the query cache without advancing its
    * generation: the daemon's echo of a snapshot this client already holds.
@@ -283,6 +311,27 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     }
     writeSessionCache(session);
   }, [writeSessionCache]);
+
+  /** Publish a runtime's chrome (running, catching up) without touching the
+   *  session cache. A no-op when nothing the UI reads changed, so a long drain
+   *  cannot re-render the screen once per chunk. */
+  const publishRuntime = useCallback((sessionId: string, entry: RuntimeEntry) => {
+    setRuntimes((current) => {
+      const previous = current[sessionId];
+      const next = publicRuntime(entry);
+      if (
+        previous
+        && previous.runtimeId === next.runtimeId
+        && previous.supportsSteer === next.supportsSteer
+        && previous.starting === next.starting
+        && previous.running === next.running
+        && previous.catchingUp === next.catchingUp
+      ) {
+        return current;
+      }
+      return { ...current, [sessionId]: next };
+    });
+  }, []);
 
   /** Full session from the query cache, hydrating from the daemon when only
    * the list skeleton is known. A skeleton must never be persisted back — it
@@ -403,6 +452,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     entry?.unsubscribe();
     entries.current.delete(sessionId);
     pendingSteers.current.delete(sessionId);
+    markSessionUnfollowed(sessionId);
+    // A pending chunk timer would otherwise fire after the entry is gone.
+    if (entry?.flushTimer) clearTimeout(entry.flushTimer);
     setRuntimes((current) => removeKey(current, sessionId));
   }, []);
 
@@ -432,8 +484,11 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       pending: [],
       flushTimer: null,
       lastFlushAt: 0,
+      catchingUp: false,
+      persistAfterCatchUp: false,
     };
     entries.current.set(session.id, entry);
+    markSessionFollowed(session.id);
     cacheSession(session);
     setRuntimes((current) => ({ ...current, [session.id]: publicRuntime(entry) }));
 
@@ -495,7 +550,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
           }));
         }
       }
-      const result = reduceRuntimeEvent(state.current, event, clock, entry.lastDriverError);
+      const result = reduceRuntimeEventInPlace(state.current, event, clock, entry.lastDriverError);
       state.current = result.session;
       state.mutated = true;
       if (result.permission !== undefined) {
@@ -518,19 +573,28 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
 
     /** Drain the buffer as one commit. Adjacent same-kind stream deltas
      * coalesce into a single reduce (the desktop's `pop_stream_batch`), with
-     * per-event dedupe gates so a replay straddling the cursor stays exact. */
+     * per-event dedupe gates so a replay straddling the cursor stays exact.
+     *
+     * The session is copied **once per commit**, not once per event: a
+     * reconnect can replay thousands of events, and cloning the transcript for
+     * each one is quadratic in its size — the work that used to freeze the app
+     * for minutes after reconnecting. A backlog larger than one chunk is
+     * drained over several ticks so no single task blocks the JS thread. */
     const flush = () => {
       entry.flushTimer = null;
       entry.lastFlushAt = Date.now();
       if (entries.current.get(session.id) !== entry) {
         entry.pending.length = 0;
+        entry.catchingUp = false;
         return;
       }
-      const batch = entry.pending.splice(0);
+      const batch = entry.pending.splice(0, CATCH_UP_CHUNK_EVENTS);
       if (!batch.length) return;
       const key = daemonKeys.session(profileId, session.id);
       const state: FlushState = {
-        current: queryClient.getQueryData<AgentSession>(key) ?? session,
+        // Owned copy: consumers memoize on the cached object's identity, so a
+        // batch must never fold into the object the cache handed back.
+        current: cloneSession(queryClient.getQueryData<AgentSession>(key) ?? session),
         mutated: false,
         settled: false,
         removeRuntime: false,
@@ -541,7 +605,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         reduceOne(state, { ...run.envelope, event: { kind: run.kind, payload: run.text } });
         run = null;
       };
-      for (const event of batch) {
+      const chunkStartedAt = Date.now();
+      let index = 0;
+      for (; index < batch.length; index += 1) {
+        // Yield mid-chunk too: one event can be a megabyte of output, and the
+        // time budget is what keeps a chunk inside a frame on a slow phone.
+        if (index > 0 && Date.now() - chunkStartedAt >= CATCH_UP_CHUNK_MS) break;
+        const event = batch[index]!;
         if (!shouldApplyRuntimeEvent(state.current, event)) continue;
         // Conversation meta this app never projects (background work, todos,
         // plan usage). Reducing it would deep-clone the whole session — 4ms on
@@ -570,8 +640,24 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         reduceOne(state, event);
       }
       flushRun();
-      if (!state.mutated) return;
-      cacheSession(state.current);
+      // Whatever the budget did not reach goes back to the head of the buffer,
+      // in order, for the next tick.
+      if (index < batch.length) entry.pending.unshift(...batch.slice(index));
+      const backlog = entry.pending.length > 0;
+      const catchingUpChanged = entry.catchingUp !== backlog;
+      entry.catchingUp = backlog;
+      if (state.mutated) cacheSession(state.current);
+      if (catchingUpChanged) publishRuntime(session.id, entry);
+      if (backlog) {
+        // A replay is draining: committing and persisting per chunk would send
+        // the whole transcript to the daemon over and over. One write at the
+        // end is enough, and the transcript is already correct in memory.
+        if (state.mutated || state.settled) entry.persistAfterCatchUp = true;
+        entry.flushTimer = setTimeout(flush, 0);
+        return;
+      }
+      const persistDeferred = entry.persistAfterCatchUp;
+      entry.persistAfterCatchUp = false;
       if (state.settled) {
         const timer = persistTimers.current.get(session.id);
         if (timer) clearTimeout(timer);
@@ -582,7 +668,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         void persistOrdered(state.current).catch((cause) => {
           setErrors((values) => ({ ...values, [session.id]: errorMessage(cause) }));
         });
-      } else {
+      } else if (state.mutated || persistDeferred) {
         schedulePersist(session.id);
       }
       if (state.removeRuntime) removeRuntime(session.id);
@@ -591,6 +677,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     const unsubscribe = client.subscribe(session.id, runtimeId, (event) => {
       if (entries.current.get(session.id) !== entry) return;
       entry.pending.push(event);
+      // A backlog means a replay is arriving, not live streaming: let the
+      // chunked drain own the cadence, and never flush synchronously into a
+      // queue that is already thousands of events deep.
+      if (entry.catchingUp || entry.pending.length > CATCH_UP_BACKLOG) {
+        if (!entry.flushTimer) entry.flushTimer = setTimeout(flush, 0);
+        return;
+      }
       if (!runtimeEventIsDeferrable(event)) {
         if (entry.flushTimer) {
           clearTimeout(entry.flushTimer);
@@ -609,12 +702,14 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         entry.flushTimer = null;
       }
       entry.pending.length = 0;
+      entry.catchingUp = false;
+      entry.persistAfterCatchUp = false;
       unsubscribe();
     };
     if (entries.current.get(session.id) === entry) entry.unsubscribe = teardown;
     else teardown();
     return entry;
-  }, [applyBackgroundWork, cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, queryClient, removeRuntime, schedulePersist]);
+  }, [applyBackgroundWork, cacheSession, daemon.activeProfile?.id, daemon.client, persistOrdered, publishRuntime, queryClient, removeRuntime, schedulePersist]);
 
 
   /**
@@ -706,6 +801,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             daemonKeys.session(profileId, session.id),
           ) ?? session;
           subscribe(current, attached.runtimeId, attached.supportsSteer, false);
+          // A buffer that overflowed while this session had no listener lost
+          // events the cursor already moved past, so the replayed stream has a
+          // hole. Re-read the transcript from the daemon instead of trusting a
+          // resume that cannot fill it.
+          if (client.takeOverflowedRuntime(attached.runtimeId)) {
+            void reloadSessionRef.current?.(session.id).catch(() => {});
+          }
           return true;
         }
         if (!reconcileMissingRuntime(session.id)) return false;
@@ -771,6 +873,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     ensureRuntime,
     queryClient,
   ]);
+  useEffect(() => {
+    reloadSessionRef.current = reloadSession;
+  }, [reloadSession]);
   const sendPrompt = useCallback(async (
     inputSession: AgentSession,
     rawPrompt: string,
@@ -1295,7 +1400,15 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     for (const [sessionId, entry] of entries.current) {
       void attachDaemonSession(client, sessionId).then((attached) => {
         if (entries.current.get(sessionId) !== entry) return;
-        if (attached?.runtimeId === entry.runtimeId) return;
+        // The runtime is the same one we were following: its replay resumed
+        // from our cursor, so there is nothing to refetch. Reading it back
+        // here would parse the whole transcript while the replay drains.
+        if (attached?.runtimeId === entry.runtimeId) {
+          if (client.takeOverflowedRuntime(entry.runtimeId)) {
+            void reloadSessionRef.current?.(sessionId).catch(() => {});
+          }
+          return;
+        }
         removeRuntime(sessionId);
         if (attached) {
           const current = queryClient.getQueryData<AgentSession>(
@@ -1351,6 +1464,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       persistTails.current.clear();
       pendingSteers.current.clear();
       runtimeAttachMisses.current.clear();
+      clearFollowedSessions();
       for (const timer of persistTimers.current.values()) clearTimeout(timer);
       persistTimers.current.clear();
     };
@@ -1437,6 +1551,7 @@ function publicRuntime(entry: RuntimeEntry): MobileRuntime {
     supportsSteer: entry.supportsSteer,
     starting: entry.starting,
     running: entry.running,
+    catchingUp: entry.catchingUp,
   };
 }
 

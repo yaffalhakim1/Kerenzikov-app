@@ -86,6 +86,42 @@ async function connect(client: WakuClient, sockets: FakeSocket[]): Promise<FakeS
 }
 
 describe("WakuClient", () => {
+  test("an overflowed runtime is reported instead of silently gapped", async () => {
+    const { client, sockets } = fixture();
+    const socket = await connect(client, sockets);
+    // No listener for this runtime, so its events are buffered. Push past the
+    // cap: the oldest are dropped while the resume cursor moves past them, so
+    // a resume would skip the hole silently.
+    const runtimeId = "runtime";
+    for (let sequence = 1; sequence <= 4_100; sequence += 1) {
+      socket.receive({
+        type: "event",
+        sessionId: "session",
+        runtimeId,
+        epoch: "epoch",
+        sequence,
+        event: { kind: "textDelta", payload: "x" },
+      });
+    }
+    expect(client.takeOverflowedRuntime(runtimeId)).toBe(true);
+    // Consumed: the caller hydrates once, not on every later attach.
+    expect(client.takeOverflowedRuntime(runtimeId)).toBe(false);
+  });
+
+  test("a runtime that never overflowed is not reported", async () => {
+    const { client, sockets } = fixture();
+    const socket = await connect(client, sockets);
+    socket.receive({
+      type: "event",
+      sessionId: "session",
+      runtimeId: "runtime",
+      epoch: "epoch",
+      sequence: 1,
+      event: { kind: "textDelta", payload: "x" },
+    });
+    expect(client.takeOverflowedRuntime("runtime")).toBe(false);
+  });
+
   test("reports connection state changes, including remote closure", async () => {
     const { client, sockets } = fixture();
     const states: string[] = [];

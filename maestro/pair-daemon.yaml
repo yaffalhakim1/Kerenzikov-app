@@ -1,0 +1,44 @@
+# One-time device setup: pair the emulator with the daemon on this machine.
+#
+# Not a test — it writes a daemon profile so the reconnect flow has something to
+# reconnect to. The pairing link carries the token, so it is passed in rather
+# than committed:
+#
+#   maestro test maestro/pair-daemon.yaml \
+#     -e WAKU_PAIRING_LINK="waku://<token>@127.0.0.1:34123/pair?transport=ws"
+#
+# Requires `adb reverse tcp:34123 tcp:34123` so the emulator's loopback reaches
+# the host daemon (see RELEASING.md).
+
+appId: sh.waku.mobile
+env:
+  WAKU_PAIRING_LINK: ""
+---
+- launchApp:
+    clearState: false
+
+# Onboarding on a fresh install, or the composer when a profile already exists.
+- extendedWaitUntil:
+    visible: "Add a daemon|Add attachment"
+    timeout: 60000
+
+- runFlow:
+    when:
+      visible: "Add a daemon"
+    commands:
+      - tapOn: "Add a daemon"
+      - extendedWaitUntil:
+          visible: "Daemon WebSocket address"
+          timeout: 15000
+      # Pasting a pairing link fills the address and the token at once.
+      - tapOn: "Daemon WebSocket address"
+      - inputText: "${WAKU_PAIRING_LINK}"
+      - hideKeyboard
+      - tapOn:
+          text: "Save|Add|Connect"
+          optional: true
+      - extendedWaitUntil:
+          visible: "Add attachment"
+          timeout: 30000
+
+- assertVisible: "Add attachment"

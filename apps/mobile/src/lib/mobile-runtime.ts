@@ -6,7 +6,7 @@ import type {
   RuntimeMode,
   SequencedEvent,
 } from '@waku/client';
-import { reduceRuntimeEvent } from '@waku/client/event-reducer';
+import { reduceRuntimeEventInPlace, cloneSession } from '@waku/client/event-reducer';
 
 export interface MobileRuntimeClock {
   nowSeconds: () => number;
@@ -424,10 +424,15 @@ export function foldRuntimeEvents(
       || cursor.sequence < event.sequence;
   });
   if (!applicable.length) return stored;
-  return applicable.reduce(
-    (session, event) => reduceRuntimeEvent(session, event).session,
-    stored,
-  );
+  // One copy for the whole run: a replay is thousands of events, and cloning
+  // the transcript per event is quadratic in its size (see
+  // `reduceRuntimeEventInPlace`). `stored` may be a cached object, so it must
+  // not be the one mutated.
+  let session = cloneSession(stored);
+  for (const event of applicable) {
+    session = reduceRuntimeEventInPlace(session, event).session;
+  }
+  return session;
 }
 
 /**
