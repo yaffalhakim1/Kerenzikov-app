@@ -12,6 +12,27 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [Unreleased]
+
+### Android
+
+- **Fixed: the app closed when you opened a task right after reconnecting.** Come
+  back to a task that had been running for a while and the app exited instead of
+  showing it — reliably within the first minute or two, never after waiting.
+  Reconnecting asks the daemon for everything the task produced while the phone
+  was away, and the app was rebuilding its entire transcript once per message to
+  catch up. On a long task that was minutes of hidden work, and opening the task
+  on top of it was enough for Android to end the app. The catch-up now rebuilds
+  the transcript once and spreads the work over a few frames, so opening the task
+  straight away is safe; the header reads **Catching up…** while the backlog
+  drains.
+
+- **Fixed: a long catch-up could silently lose part of the transcript.** If a
+  task produced more messages than the phone had buffered, the oldest were
+  dropped while the app still believed it had seen them, so the transcript
+  stayed incomplete with no sign anything was missing. A task that loses
+  messages this way now reloads its transcript instead.
+
 ## [0.1.80]
 
 ### Android

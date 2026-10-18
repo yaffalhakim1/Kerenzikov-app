@@ -119,6 +119,11 @@ export class WakuClient {
   private pending = new Map<string, PendingRequest>();
   private subscriptions = new Map<string, Set<EventListener>>();
   private pendingEvents = new Map<string, SequencedEvent[]>();
+  /** Runtimes whose buffered events were dropped by the overflow cap. The
+   *  journal cursor has already moved past them, so nothing will ever replay
+   *  the gap: the runtime must be hydrated from the daemon instead of resumed
+   *  from a cursor that pretends to be complete. */
+  private overflowedRuntimes = new Set<string>();
   private taskStateListeners = new Set<(revision: number) => void>();
   private connectionStateListeners = new Set<ConnectionStateListener>();
   private sequences = new Map<string, LastSequence>();
@@ -398,6 +403,13 @@ export class WakuClient {
     };
   }
 
+  /** Whether this runtime lost buffered events to the overflow cap, so its
+   *  transcript has a gap a resume cannot close. The flag is consumed: the
+   *  caller is expected to hydrate and then continue from a fresh cursor. */
+  takeOverflowedRuntime(runtimeId: string): boolean {
+    return this.overflowedRuntimes.delete(runtimeId);
+  }
+
   subscribeTaskState(listener: (revision: number) => void): () => void {
     this.taskStateListeners.add(listener);
     return () => this.taskStateListeners.delete(listener);
@@ -472,6 +484,10 @@ export class WakuClient {
         buffered.push(message);
         if (buffered.length > MAX_BUFFERED_EVENTS_PER_RUNTIME) {
           buffered.splice(0, buffered.length - MAX_BUFFERED_EVENTS_PER_RUNTIME);
+          // The oldest events are gone but the cursor above already moved past
+          // them, so a resume would skip the hole silently. Record it so the
+          // caller hydrates this runtime instead of trusting the cursor.
+          this.overflowedRuntimes.add(message.runtimeId);
         }
         this.pendingEvents.set(key, buffered);
       }

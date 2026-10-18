@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { reduceRuntimeEvent } from './event-reducer'
+import { cloneSession, reduceRuntimeEvent, reduceRuntimeEventInPlace } from './event-reducer'
 import type {
   AgentSession,
   BackgroundWorkItem,
@@ -145,6 +145,63 @@ describe('promptSubmitted', () => {
 
     expect(result.session.queued_messages).toEqual([])
     expect(result.session.turns.at(-1)?.id).toBe(queuedId)
+  })
+})
+
+describe('batch reduction', () => {
+  /** A clock whose ids restart, so two runs of the same events are comparable. */
+  function freshClock() {
+    let id = 0
+    return {
+      nowSeconds: () => 200,
+      nowMillis: () => 200_000,
+      randomUUID: () =>
+        `00000000-0000-4000-8000-${String(++id).padStart(12, '0')}`,
+    }
+  }
+
+  test('the in-place entry point folds into the session it is given', () => {
+    const session = cloneSession(runningSession())
+    const result = reduceRuntimeEventInPlace(
+      session,
+      event('textDelta', 'hi'),
+      freshClock(),
+    )
+    // Same object: the caller already owns this copy.
+    expect(result.session).toBe(session)
+    expect(session.messages.at(-1)?.content).toContain('hi')
+  })
+
+  test('a cloned batch and a per-event batch reach the same session', () => {
+    // The cloning entry point stays the reference implementation: a batch must
+    // not change what any single event means.
+    const kinds: Array<[string, unknown]> = [
+      ['turnStarted', null],
+      ['textDelta', 'hello '],
+      ['textDelta', 'world'],
+      ['reasoningDelta', 'thinking'],
+      ['activity', { id: 'a1', kind: 'command', title: 'Run tests', complete: false }],
+      ['usageUpdated', { contextTokens: 12, contextWindow: 100 }],
+      ['todoUpdated', [{ id: 't', title: 'step', status: 'pending' }]],
+      ['turnFinished', { success: true, summary: null }],
+    ]
+    const reference = kinds.reduce(
+      (current, [kind, payload]) =>
+        reduceRuntimeEvent(current, event(kind, payload), freshClock()).session,
+      runningSession(),
+    )
+    let batched = cloneSession(runningSession())
+    for (const [kind, payload] of kinds) {
+      batched = reduceRuntimeEventInPlace(batched, event(kind, payload), freshClock()).session
+    }
+    expect(batched).toEqual(reference)
+  })
+
+  test('the cloning entry point leaves its input untouched', () => {
+    const session = runningSession()
+    const before = JSON.stringify(session)
+    reduceRuntimeEvent(session, event('textDelta', 'mutated'), freshClock())
+    expect(JSON.stringify(session)).toBe(before)
   })
 })
 

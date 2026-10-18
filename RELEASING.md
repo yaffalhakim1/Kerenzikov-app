@@ -67,6 +67,60 @@ checks at all. `Actions → Tests → Run workflow` runs the full matrix against
 ref on demand; with no pull request to diff, every path filter falls through to
 "run everything".
 
+## Testing the Android build before a release
+
+The phone app is validated on the **release variant**, not debug. A debug build
+runs with Metro attached, the JS inspector and dev-mode overhead, which hides
+exactly the failures worth catching before a release: JS-thread saturation, GC
+pressure, and the per-app memory ceiling. Release is also what Hermes compiles
+and bundles, so it is the only build whose timing resembles a user's.
+
+```powershell
+# Release APK. Its signature differs from debug's, so a debug install must go
+# first or the install fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+adb uninstall sh.waku.mobile
+bun --filter @waku/mobile run android --variant release
+```
+
+Building all four ABIs needs long CMake paths under `apps/mobile/android/app/.cxx`,
+which exceed the Windows 260-character limit at this worktree depth (the build
+dies in `ninja` with `mkdir(...): No such file or directory`). Restrict the build
+to the ABI under test:
+
+```powershell
+cd apps/mobile/android
+.\gradlew :app:assembleRelease -PreactNativeArchitectures=x86_64 --no-daemon
+```
+
+Use `x86_64` for the emulator and `arm64-v8a` for a physical phone. A release APK
+for the store still builds all four, which CI does on Linux where the path limit
+does not apply.
+
+### Maestro flows
+
+`maestro/` holds the device flows. Maestro is installed at
+`C:\Users\yafit\maestro\maestro\bin\maestro.bat` (not on `PATH`).
+
+```powershell
+$maestro = "C:\Users\yafit\maestro\maestro\bin\maestro.bat"
+
+& $maestro test maestro/                       # every flow
+& $maestro test maestro/reconnect-open-task.yaml  # the reconnect regression
+& $maestro studio                              # inspect the live hierarchy
+& $maestro hierarchy                           # dump selectors
+& $maestro test --format junit --output report.xml maestro/
+```
+
+`maestro/reconnect-open-task.yaml` is the regression for the app exiting when a
+task is opened right after reconnecting: it backgrounds and returns the app,
+then opens a task immediately. It only passes on a build where the reconnect
+catch-up no longer blocks the JS thread. `maestro/smoke.yaml` proves a fresh
+release install boots to a usable composer.
+
+Both flows need a reachable daemon and a saved profile on the device; they do not
+create one, because pairing is a user action. Run them against a build whose
+`versionCode` matches `Cargo.toml` (`bun run version:bump --check`).
+
 ## The loop
 
 Every change follows the same five steps. Do not skip one because it looks

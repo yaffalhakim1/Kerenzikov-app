@@ -69,13 +69,51 @@ const defaultClock: ReducerClock = {
   randomUUID: () => crypto.randomUUID(),
 }
 
+/**
+ * Fold one event into a copy of `current`.
+ *
+ * This is the single-event entry point: it pays one full session clone, which
+ * is the right trade for a control path that reduces one event. Callers
+ * draining a batch must use [`reduceRuntimeEventInPlace`] with one
+ * [`cloneSession`] for the whole batch — a replay can be thousands of events,
+ * and cloning the transcript per event is quadratic in its size.
+ */
 export function reduceRuntimeEvent(
   current: AgentSession,
   wire: SequencedEvent,
   clock: ReducerClock = defaultClock,
   processExitError: string | null = null,
 ): RuntimeEventResult {
-  const session = clone(current)
+  return reduceRuntimeEventInto(clone(current), wire, clock, processExitError)
+}
+
+/** The only copy of a session a batch reducer is allowed to mutate. */
+export function cloneSession(session: AgentSession): AgentSession {
+  return clone(session)
+}
+
+/**
+ * Fold one event into `session` itself, without copying it first.
+ *
+ * The caller owns `session` — see [`cloneSession`] — and must not hand it the
+ * object a cache returned, because consumers memoize on identity. Everything
+ * the cloned entry point does, this does, minus the clone.
+ */
+export function reduceRuntimeEventInPlace(
+  session: AgentSession,
+  wire: SequencedEvent,
+  clock: ReducerClock = defaultClock,
+  processExitError: string | null = null,
+): RuntimeEventResult {
+  return reduceRuntimeEventInto(session, wire, clock, processExitError)
+}
+
+function reduceRuntimeEventInto(
+  session: AgentSession,
+  wire: SequencedEvent,
+  clock: ReducerClock,
+  processExitError: string | null,
+): RuntimeEventResult {
   const { kind, payload } = wire.event
   const result: RuntimeEventResult = {
     session,

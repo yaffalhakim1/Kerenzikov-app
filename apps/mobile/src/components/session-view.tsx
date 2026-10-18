@@ -402,11 +402,19 @@ export function SessionView({
   const title = session ? displaySessionTitle(session) : 'Task';
   // The bar's subtitle doubles as the quiet link indicator, the way messaging
   // apps do it; the banner below only steps in when the outage persists.
+  const catchingUp = session
+    ? runtime.runtimes[session.id]?.catchingUp === true
+    : false;
   const linkSubtitle = daemon.phase === 'reconnecting'
     ? daemon.outage?.interrupted ? 'Reconnecting…' : 'Connecting…'
     : daemon.phase === 'connecting' || daemon.phase === 'booting'
       ? 'Connecting…'
-      : daemon.phase === 'error' ? 'Not connected' : null;
+      : daemon.phase === 'error'
+        ? 'Not connected'
+        // A reconnect replays the events this client missed. That drains over a
+        // few frames instead of freezing the app, and the transcript is behind
+        // until it finishes, so the header says so rather than looking idle.
+        : catchingUp ? 'Catching up…' : null;
   const subtitle = linkSubtitle ?? (subtitleParts.length ? subtitleParts.join(' · ') : null);
   const hasSession = Boolean(session);
   const transcriptMounted = Boolean(
@@ -527,6 +535,7 @@ export function SessionView({
     // context window fill changes.
     session?.context_usage?.tokens,
     session?.context_usage?.window,
+    catchingUp,
     handleTaskMenuCommand,
     hasSession,
     openTaskDrawer,

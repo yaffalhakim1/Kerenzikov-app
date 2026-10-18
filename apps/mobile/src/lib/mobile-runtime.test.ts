@@ -546,6 +546,39 @@ describe('reload reconstruction', () => {
     const stored = session({ status: 'idle' });
     expect(foldRuntimeEvents(stored, [])).toBe(stored);
   });
+
+  test('a fold copies the snapshot once, not once per event', () => {
+    // A reconnect can replay thousands of journaled events. Cloning the
+    // transcript per event is quadratic in its size and is what froze the app
+    // for minutes after reconnecting, so the whole run must share one copy.
+    const stored = session({
+      status: 'working',
+      messages: [
+        { id: 'u1', turn_id: 't1', role: 'user', content: 'hi', created_at: 1, streaming: false },
+        { id: 'a1', turn_id: 't1', role: 'assistant', content: '', created_at: 2, streaming: true },
+      ],
+      turns: [{
+        id: 't1', turn_count: 1, status: 'running', provider_turn_started: true,
+        provider_resume_at: null, started_at: 1, completed_at: null, checkpoint: null,
+      }],
+      runtime_event_cursor: { runtime_id: 'runtime', epoch: 'epoch', sequence: 0 },
+    });
+    const messagesBefore = stored.messages;
+    const events = Array.from({ length: 50 }, (_, index) =>
+      event('textDelta', index + 1, `${index}`),
+    );
+    const replayed = foldRuntimeEvents(stored, events);
+    // One new object for the whole run...
+    expect(replayed).not.toBe(stored);
+    // ...and the stored snapshot is untouched, because it may be the cached
+    // object consumers memoize on.
+    expect(stored.messages).toBe(messagesBefore);
+    expect(messagesBefore.at(-1)?.content).toBe('');
+    expect(replayed.messages.at(-1)?.content).toBe(
+      Array.from({ length: 50 }, (_, index) => `${index}`).join(''),
+    );
+    expect(replayed.runtime_event_cursor?.sequence).toBe(50);
+  });
 });
 describe('reload snapshot choice', () => {
   const cursor = (sequence: number, epoch = 'epoch') => ({
