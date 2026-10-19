@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { ProviderModel } from '@waku/client';
 
 import {
-  modelHasConfigurableTraits,
+  composerOptionSummary,
   modelTraitSummary,
   resolveModelTraitSelection,
 } from './model-traits';
@@ -53,12 +53,17 @@ describe('mobile model traits', () => {
     });
   });
 
-  test('hides the control for models without configurable traits', () => {
-    expect(modelHasConfigurableTraits({
+  test('summarises the option button from access plus the traits on offer', () => {
+    const unset = { reasoningEffort: null, serviceTier: null, contextWindow: null };
+    expect(composerOptionSummary(model, unset, 'Auto')).toBe('Auto · High · Standard · 200K');
+    // A model with nothing to configure leaves the access mode standing alone.
+    expect(composerOptionSummary({
       ...model,
       reasoning_efforts: [],
       service_tiers: [],
       context_windows: [],
-    })).toBe(false);
+    }, unset, 'Auto')).toBe('Auto');
+    // No model resolved yet: the access mode is all there is to say.
+    expect(composerOptionSummary(undefined, unset, 'Plan')).toBe('Plan');
   });
 });

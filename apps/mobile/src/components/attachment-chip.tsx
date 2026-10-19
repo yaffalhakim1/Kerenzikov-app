@@ -76,9 +76,9 @@ export function AttachmentChip({ attachment }: { attachment: MessageAttachment }
   if (source) {
     return (
       <>
-        // Not a PanelUI control: this is a bare tappable image with no chrome
-        // of its own. Every PanelUI pressable draws a surface, which would put
-        // a card behind the picture.
+        {/* Not a PanelUI control: this is a bare tappable image with no chrome
+            of its own. Every PanelUI pressable draws a surface, which would put
+            a card behind the picture. */}
         <AppPressable
           accessibilityLabel={`Preview ${attachment.name}`}
           accessibilityRole="button"

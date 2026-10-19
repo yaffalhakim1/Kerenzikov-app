@@ -56,9 +56,14 @@ export function ReasoningSheet({
         `Task` provider would put `onPress` on a plain `View` and the row would
         stop opening. Same nesting `StepGroup` uses for a step group.
       */}
-      <Task onOpenChange={setOpen} open={open} status={running ? 'running' : 'complete'}>
+      <Task
+        className="px-3"
+        onOpenChange={setOpen}
+        open={open}
+        status={running ? 'running' : 'complete'}>
         <BottomSheet.Trigger>
           <Task.Trigger
+            className="py-2"
             icon={
               <AppSymbol
                 name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}

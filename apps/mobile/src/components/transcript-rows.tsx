@@ -56,8 +56,9 @@ export const TranscriptRowView = memo(function TranscriptRowView({
   veils: VeilRegistry;
   seeded: boolean;
   markdownStyles: MarkdownStyles;
-  /** The session's model id, shown beside the copy control on the terminal
-   *  answer so a transcript records what actually produced it. */
+  /** The session's model id, drawn beside the copy control on the terminal
+   *  answer — and only there. `row.terminal` decides, so a transcript records
+   *  what produced it once instead of repeating the name under every reply. */
   model: string | null;
   onToggleFold: (turnId: string) => void;
 }) {
@@ -92,27 +93,11 @@ export const TranscriptRowView = memo(function TranscriptRowView({
               <MdBlockSettled node={row.node} source={row.source} styles={markdownStyles} />
             </MdRevealOnMount>
           )}
-          {(row.copyText != null || row.footerTimestamp != null) && (
-            <View style={styles.messageFooterRow}>
-              {row.copyText != null && row.copyText.trim() ? (
-                <>
-                  <CopyButton label="Copy response" text={row.copyText} />
-                  {model ? (
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.messageFooter, styles.messageFooterModel, { color: theme.textTertiary }]}>
-                      {model}
-                    </Text>
-                  ) : null}
-                </>
-              ) : null}
-              {row.footerTimestamp != null && (
-                <Text style={[styles.messageFooter, { color: theme.textTertiary }]}>
-                  {formatMessageTime(row.footerTimestamp)}
-                </Text>
-              )}
-            </View>
-          )}
+          <AnswerFooter
+            copyText={row.terminal ? row.copyText : null}
+            model={model}
+            timestamp={row.footerTimestamp}
+          />
         </>
       );
     case 'activities':
@@ -191,6 +176,52 @@ function FoldRow({
       </Item.Actions>
       <View style={[styles.foldLine, { backgroundColor: theme.border }]} />
     </Item>
+  );
+}
+
+/**
+ * The quiet line under an answer: copy, the model that produced it, and the
+ * time it landed.
+ *
+ * The copy control and the model id belong to the answer that ended the task,
+ * so callers pass `copyText` as null for every earlier one. The row is not
+ * rendered at all when it would be empty — an invisible `minHeight: 20` band
+ * under each earlier answer read as extra space above the next turn's card,
+ * which is what made the card look top-heavy in the transcript.
+ */
+function AnswerFooter({
+  copyText,
+  model,
+  timestamp,
+}: {
+  /** The whole answer, or null when this is not the terminal answer. */
+  copyText: string | null;
+  model: string | null;
+  timestamp: number | null;
+}) {
+  const theme = useTheme();
+  const copyable = Boolean(copyText && copyText.trim());
+  if (!copyable && timestamp == null) return null;
+  return (
+    <View style={styles.messageFooterRow}>
+      {copyable ? (
+        <>
+          <CopyButton label="Copy response" text={copyText!} />
+          {model ? (
+            <Text
+              numberOfLines={1}
+              style={[styles.messageFooter, styles.messageFooterModel, { color: theme.textTertiary }]}>
+              {model}
+            </Text>
+          ) : null}
+        </>
+      ) : null}
+      {timestamp != null && (
+        <Text style={[styles.messageFooter, { color: theme.textTertiary }]}>
+          {formatMessageTime(timestamp)}
+        </Text>
+      )}
+    </View>
   );
 }
 

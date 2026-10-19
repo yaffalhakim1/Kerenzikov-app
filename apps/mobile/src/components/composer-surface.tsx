@@ -308,7 +308,11 @@ const styles = StyleSheet.create({
   // insetting from it. 8pt is the gap the rest of the app uses between a
   // stacked row and the surface under it.
   aboveCard: { marginBottom: 8 },
-  field: { fontSize: 16, lineHeight: 22, minHeight: 64, paddingHorizontal: 6, paddingVertical: 12 },
+  // 8, not 6: the toolbar's `px-2` puts the attachment button's circle 8pt off
+  // the card edge, and the placeholder sitting 2pt to its left read as
+  // misaligned with the row of controls under it. The field and the toolbar now
+  // share the same left edge.
+  field: { fontSize: 16, lineHeight: 22, minHeight: 64, paddingHorizontal: 8, paddingVertical: 12 },
   // 16 is `rounded-2xl`, the todo panel's radius, so the two surfaces agree.
   card: { borderRadius: 16 },
   // Roughly six rows. The cap is what keeps the composer from growing to fill
