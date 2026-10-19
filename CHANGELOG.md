@@ -12,6 +12,36 @@ Write release notes for the final product users receive, not the development
 history. When a feature is still unreleased, fold its fixes and refinements into
 the original feature bullet instead of adding separate entries for them.
 
+## [0.1.82]
+
+### Android
+
+- **The transcript no longer repeats itself under every reply.** Copy and the
+  model name used to appear beneath every answer in a task, so a conversation
+  with a dozen turns ended in a dozen copy buttons and a dozen copies of the
+  same model name. Both now appear once, under the answer that ended the task —
+  which is the one you scroll to when you want to copy the result.
+
+- **A turn's thinking and its steps now read as one piece of work.** The
+  reasoning row and the tool rows under it were two separate blocks with a gap
+  between them, as though they were unrelated. They sit in one bordered card
+  now, with a divider between the thought and the steps it produced.
+
+- **The composer's settings are behind one button.** Agent access, reasoning
+  effort, service tier and context window each had their own icon, and those
+  icons told you a value was set without ever saying which — so the row spent
+  its width on glyphs you had to open to read. One square button now holds them
+  all, and its sheet names the current value of each. On the new-task screen the
+  agent picker moved in with them, which frees the top of the card.
+
+- **Fixed: an attached image could show an error instead of the picture.** Open
+  a task where you had sent an image and the app could report a text-rendering
+  error the moment the preview loaded.
+
+- **Small alignment fixes.** The message box now starts on the same left edge as
+  the button beneath it, and the daemon picker in the sidebar lines up with the
+  search field under it.
+
 ## [0.1.81]
 
 ### Android
