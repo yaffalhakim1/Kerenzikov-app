@@ -6,14 +6,6 @@ export interface ModelTraitSelection {
   contextWindow: string | null;
 }
 
-export function modelHasConfigurableTraits(model: ProviderModel): boolean {
-  return Boolean(
-    model.reasoning_efforts.length ||
-      model.service_tiers.length ||
-      model.context_windows.length,
-  );
-}
-
 /** Resolve unset or stale persisted values to what the model picker should
  * present as selected. The underlying null is still preserved until the user
  * makes a choice, so provider defaults remain provider-owned. */
@@ -51,6 +43,20 @@ export function modelTraitSummary(
     optionLabel(model.context_windows, resolved.contextWindow),
   ].filter((label): label is string => Boolean(label));
   return labels.join(' · ');
+}
+
+/** The one-line state of everything the options button holds: agent access
+ *  first, then the model traits that are actually on offer. A model with
+ *  nothing to configure leaves the access mode standing alone rather than
+ *  appending an empty tail. */
+export function composerOptionSummary(
+  model: ProviderModel | undefined,
+  selection: ModelTraitSelection,
+  accessLabel: string,
+): string {
+  if (!model) return accessLabel;
+  const traits = modelTraitSummary(model, selection);
+  return traits ? `${accessLabel} · ${traits}` : accessLabel;
 }
 
 function resolveServiceTier(model: ProviderModel, selected: string | null): string | null {

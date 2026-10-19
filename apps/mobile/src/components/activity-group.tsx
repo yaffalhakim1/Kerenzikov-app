@@ -7,9 +7,13 @@ import {
 import { BottomSheet } from 'panelui-native/components/bottom-sheet';
 import { Task } from 'panelui-native/components/task';
 import { memo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
 
 import { ActivityDetail } from './activity-detail';
 import { ReasoningSheet } from './reasoning-sheet';
+
+import { Radius } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 
 /**
  * A tool group in the transcript.
@@ -45,17 +49,43 @@ export const ActivityGroup = memo(function ActivityGroup({
   block: TranscriptBlock;
   live: boolean;
 }) {
+  const theme = useTheme();
   const activities = activitiesForBlock(block);
   if (!activities.length) return null;
 
   const reasoning = activities.filter((activity) => activity.reasoning);
   const steps = activities.filter((activity) => !activity.reasoning);
 
+  /*
+   * One card, not a stack of rows.
+   *
+   * A turn's trace and its steps belong to the same piece of work, so they are
+   * drawn inside a single hairline-bordered surface — a card that says "this is
+   * the work" rather than a run of independent rows that happen to sit next to
+   * each other. The border is the whole treatment: no shadow, matching the
+   * rest of the app's flat surfaces.
+   *
+   * The sheet bodies are not children of this view in any layout sense —
+   * `BottomSheet.Content` renders through a portal — so the card's padding only
+   * ever applies to the rows.
+   */
   return (
-    <>
+    <View
+      style={[
+        styles.groupCard,
+        { backgroundColor: theme.raised, borderColor: theme.border },
+      ]}>
       {reasoning.length > 0 && <ReasoningSheet live={live} reasoning={reasoning} />}
-      {steps.length > 0 && <StepGroup activities={steps} live={live} />}
-    </>
+      {steps.length > 0 && (
+        // A hairline only when the trace sits above it: one row needs no
+        // divider, and a rule under nothing reads as a clipped edge.
+        <View style={reasoning.length > 0
+          ? { borderTopColor: theme.border, borderTopWidth: StyleSheet.hairlineWidth }
+          : undefined}>
+          <StepGroup activities={steps} live={live} />
+        </View>
+      )}
+    </View>
   );
 });
 
@@ -123,6 +153,7 @@ function StepGroup({ activities, live }: { activities: ActivityItem[]; live: boo
         would stay rotated after the sheet closed.
       */}
       <Task
+        className="px-3"
         onOpenChange={setOpen}
         open={open}
         status={
@@ -135,7 +166,7 @@ function StepGroup({ activities, live }: { activities: ActivityItem[]; live: boo
         }
       >
         <BottomSheet.Trigger>
-          <Task.Trigger title={rowTitle} />
+          <Task.Trigger className="py-2" title={rowTitle} />
         </BottomSheet.Trigger>
       </Task>
       <BottomSheet.Content
@@ -179,3 +210,14 @@ function summaryLine(activities: readonly ActivityItem[]): string {
 
   return parts.join(' · ');
 }
+
+const styles = StyleSheet.create({
+  // The turn's work, as one surface. A hairline border and nothing else: the
+  // app's surfaces are flat, and the card's job is to group the trace with the
+  // steps that followed it rather than to lift them off the page.
+  groupCard: {
+    borderRadius: Radius.medium,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+});

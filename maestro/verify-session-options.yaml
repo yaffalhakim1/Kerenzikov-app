@@ -1,0 +1,51 @@
+# Visual check for the session page's three option changes.
+#
+# 1. The model name appears once, under the newest answer, not under every
+#    turn's reply.
+# 2. Reasoning and the step group share one bordered card.
+# 3. The composer's agent access and reasoning effort live behind one
+#    four-square option button instead of two separate icon slots.
+#
+# The composer assertions are the ones that can run without a specific
+# transcript: the option button is labelled with the state it holds, so its
+# presence proves the consolidation, and the old per-setting controls are
+# asserted gone by their own labels.
+#
+# Run from the repo root:
+#   cmd /c "C:\Users\yafit\maestro\maestro\bin\maestro.bat test maestro\verify-session-options.yaml"
+
+appId: sh.waku.mobile
+---
+- launchApp:
+    clearState: false
+
+- extendedWaitUntil:
+    visible: "New Task"
+    timeout: 40000
+
+- openLink: "waku://session/277e4655-f884-4cfb-bc6b-e44d3e00d372"
+
+- extendedWaitUntil:
+    visible: "Message agent"
+    timeout: 60000
+
+# The option button carries its own state in the accessibility label, so this
+# asserts both that it exists and that agent access is inside it.
+- assertVisible: "Options, .*"
+
+# The two controls it replaced must be gone: a regression that reinstates
+# either shows up here rather than in a screenshot nobody re-reads.
+- assertNotVisible: "Agent access, .*"
+- assertNotVisible: "Reasoning and model options"
+
+# Open the sheet and walk one level in, then back out.
+- tapOn: "Options, .*"
+- extendedWaitUntil:
+    visible: "Agent access"
+    timeout: 20000
+- assertVisible: "Reasoning effort"
+- tapOn: "Agent access"
+- extendedWaitUntil:
+    visible: "Full access"
+    timeout: 20000
+- assertVisible: "Plan"

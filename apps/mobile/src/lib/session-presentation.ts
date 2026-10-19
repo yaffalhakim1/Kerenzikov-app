@@ -103,6 +103,10 @@ export type TranscriptRow =
        *  copies the answer rather than the paragraph it was rendered from.
        *  Null on every preceding block. */
       copyText: string | null;
+      /** True only for the session's newest answer — the message that ended the
+       *  task. The footer's per-answer controls (copy, model id) hang off this,
+       *  so a transcript offers them once instead of under every turn's reply. */
+      terminal: boolean;
       topGap: number;
     }
   | {
@@ -636,8 +640,13 @@ export function expandTranscriptRows(
   const from = Math.max(0, Math.min(start, pipeline.length));
   const out: TranscriptRow[] = [];
   const liveIds = new Set<string>();
+  // The one message allowed to carry the model name. Scanned from the end so a
+  // long session costs one comparison in the common case, and resolved from the
+  // pipeline rather than the window so a windowed tail still knows which answer
+  // is the newest.
+  const finalAnswerId = lastAnswerMessageId(pipeline);
   for (let ix = from; ix < pipeline.length; ix += 1) {
-    expandPipelineRow(pipeline[ix]!, md, liveIds, out);
+    expandPipelineRow(pipeline[ix]!, md, liveIds, out, finalAnswerId);
   }
 
   // The nearest earlier row sets the first gap (an assistant message with
@@ -645,7 +654,7 @@ export function expandTranscriptRows(
   let previous: TranscriptRow | undefined;
   for (let ix = from - 1; ix >= 0 && !previous; ix -= 1) {
     const expanded: TranscriptRow[] = [];
-    expandPipelineRow(pipeline[ix]!, md, liveIds, expanded);
+    expandPipelineRow(pipeline[ix]!, md, liveIds, expanded, finalAnswerId);
     previous = expanded[expanded.length - 1];
   }
   md.prune(liveIds);
@@ -657,11 +666,26 @@ export function expandTranscriptRows(
   return out;
 }
 
+/** The session's newest answer that actually has text — the row that ends the
+ *  task. It is the only row that draws the per-answer footer controls (copy and
+ *  the model id), so a long transcript does not repeat them under every reply. */
+function lastAnswerMessageId(pipeline: readonly TranscriptPipelineRow[]): string | null {
+  for (let ix = pipeline.length - 1; ix >= 0; ix -= 1) {
+    const row = pipeline[ix]!;
+    if (row.kind !== 'message') continue;
+    if (row.message.role !== 'assistant') continue;
+    if (!row.message.content.trim()) continue;
+    return row.message.id;
+  }
+  return null;
+}
+
 function expandPipelineRow(
   row: TranscriptPipelineRow,
   md: TranscriptMarkdownCache,
   liveIds: Set<string>,
   out: TranscriptRow[],
+  finalAnswerId: string | null,
 ) {
   if (row.kind !== 'message') {
     out.push({ ...row, topGap: 0 });
@@ -678,6 +702,7 @@ function expandPipelineRow(
   }
   liveIds.add(message.id);
   const streaming = message.streaming === true;
+  const isTerminal = message.id === finalAnswerId;
   const blocks = md.blocksFor(message.id, message.content, streaming);
   for (let ix = 0; ix < blocks.length; ix += 1) {
     const block = blocks[ix]!;
@@ -694,6 +719,7 @@ function expandPipelineRow(
       streaming,
       footerTimestamp: last ? row.footerTimestamp : null,
       copyText: last ? message.content : null,
+      terminal: isTerminal && last,
       topGap: 0,
     });
   }

@@ -27,22 +27,19 @@ import { AIInput } from 'panelui-native/components/ai-input';
 import { Item } from 'panelui-native/components/item';
 import { AppSymbol } from '@/components/app-symbol';
 import { ConnectionBanner } from '@/components/connection-banner';
-import { AgentPresetMenu } from '@/components/agent-preset-menu';
-import { ComposerAccessMenu } from '@/components/composer-access-menu';
 import {
   ComposerAttachmentMenu,
   type ComposerAttachmentSource,
 } from '@/components/composer-attachment-menu';
+import { ComposerOptionsMenu } from '@/components/composer-options-menu';
 import { DaemonPickerSheet } from '@/components/daemon-picker-sheet';
 import { SendButton } from '@/components/mobile-composer';
 import { ComposerModelPill, ComposerSurface } from '@/components/composer-surface';
-import { ProviderIcon } from '@/components/provider-icon';
 import { RemoteProjectPicker } from '@/components/remote-project-picker';
 import { ResumeSessionSheet } from '@/components/session-option-sheets';
 import { useScreenHeaderInset } from '@/components/screen-header';
 import {
   ModelPickerSheet,
-  ModelTraitsSheet,
   type ProviderModelSelection,
 } from '@/components/session-option-sheets';
 import { Sheet, SheetRow } from '@/components/sheet';
@@ -80,10 +77,7 @@ import {
 } from '@/lib/composer-preferences-store';
 import { useDaemon } from '@/lib/daemon-context';
 import { tapHaptic } from '@/lib/haptics';
-import {
-  modelHasConfigurableTraits,
-  type ModelTraitSelection,
-} from '@/lib/model-traits';
+import { type ModelTraitSelection } from '@/lib/model-traits';
 import { useRuntime } from '@/lib/runtime-context';
 import { isDaemonDisconnectError } from '@/lib/runtime-errors';
 import { providerLabel } from '@/lib/session-presentation';
@@ -100,7 +94,6 @@ type SheetKind =
   | 'daemon'
   | 'project'
   | 'model'
-  | 'traits'
   | 'workspace'
   | 'branch';
 
@@ -681,24 +674,6 @@ export default function NewTaskScreen() {
             </Alert.Content>
           </Alert>
         ) : null}
-        header={provider && supportsAgentPreset && agentPresets.length > 0 && !submitting ? (
-          // The agent preset is the one control the session composer has no
-          // equivalent for — it is chosen here, and fixed for the session's
-          // life. It sits at the card's top-left as a round action, matching
-          // the toolbar's other controls, so the header costs one row of
-          // nothing else.
-          <View className="flex-row items-center px-1 pb-1 pt-1.5" style={styles.agentPicker}>
-            <AgentPresetMenu
-              agentPreset={agentPreset}
-              onApply={(selection) => {
-                tapHaptic();
-                setAgentPreset(selection.agentPreset);
-              }}
-              provider={provider}
-              variant="icon"
-            />
-          </View>
-        ) : undefined}
         files={fileSuggestions}
         onPickCommand={(name) => {
           tapHaptic();
@@ -728,22 +703,25 @@ export default function NewTaskScreen() {
               disabled={disconnected || submitting || importingAttachments}
               onChoose={(source) => void chooseAttachment(source)}
             />
-            <ComposerAccessMenu
+            <ComposerOptionsMenu
+              agentPreset={agentPreset}
+              agentPresets={supportsAgentPreset ? agentPresets : undefined}
+              disabled={disconnected}
               mode={runtimeMode}
-              onApply={setRuntimeMode}
+              model={activeModel}
+              onApplyAgentPreset={(next) => {
+                tapHaptic();
+                setAgentPreset(next);
+              }}
+              onApplyMode={setRuntimeMode}
+              onApplyTraits={applyModelTraits}
+              selection={{ reasoningEffort, serviceTier, contextWindow }}
             />
             <ComposerModelPill
               accessibilityLabel={`Model, ${modelLabel}`}
               label={modelLabel}
               onPress={() => setOpenSheet('model')}
             />
-            {activeModel && modelHasConfigurableTraits(activeModel) && (
-              <AIInput.Action
-                icon={<ProviderIcon provider={provider!} size={15} />}
-                label="Reasoning and model options"
-                onPress={() => setOpenSheet('traits')}
-              />
-            )}
             <AIInput.Spacer />
             <SendButton
               busy={submitting}
@@ -796,16 +774,6 @@ export default function NewTaskScreen() {
         providers={installedProviders}
         visible={openSheet === 'model'}
       />
-
-      {activeModel && (
-        <ModelTraitsSheet
-          model={activeModel}
-          onApply={applyModelTraits}
-          onDismiss={() => setOpenSheet(null)}
-          selection={{ reasoningEffort, serviceTier, contextWindow }}
-          visible={openSheet === 'traits'}
-        />
-      )}
 
       <Sheet onDismiss={() => setOpenSheet(null)} title="Workspace" visible={openSheet === 'workspace'}>
         <SheetRow
@@ -934,9 +902,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   rows: { gap: 2, paddingBottom: 8, paddingHorizontal: Spacing.three },
-  // A nudge in from the card's corner: the round action sits on the field's
-  // own inset, which is tighter than a circle wants against the edge.
-  agentPicker: { marginLeft: 2, marginTop: 2 },
   sheetLoading: { alignItems: 'center', paddingVertical: 14 },
   sheetSection: {
     fontSize: 11,

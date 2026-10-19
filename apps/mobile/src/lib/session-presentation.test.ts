@@ -380,6 +380,54 @@ describe('mobile session presentation', () => {
     ))).toEqual(['user', 'fold', 'md:part1', 'activities', 'md:part2']);
   });
 
+  test('draws the answer footer controls once, under the newest answer', () => {
+    const current = session({
+      turns: [
+        turn({ id: 'turn-1', status: 'completed', started_at: 10, completed_at: 20 }),
+        turn({ id: 'turn-2', status: 'completed', started_at: 30, completed_at: 40 }),
+      ],
+      messages: [
+        { id: 'u1', turn_id: 'turn-1', role: 'user', content: 'first', created_at: 1, streaming: false },
+        { id: 'a1', turn_id: 'turn-1', role: 'assistant', content: 'First answer.', created_at: 2, streaming: false },
+        { id: 'u2', turn_id: 'turn-2', role: 'user', content: 'second', created_at: 3, streaming: false },
+        { id: 'a2', turn_id: 'turn-2', role: 'assistant', content: 'Second answer.', created_at: 4, streaming: false },
+      ],
+      transcript_blocks: [],
+    });
+    const rows = buildTranscriptRows(current).filter((row) => row.kind === 'md');
+    const terminal = rows.filter((row) => row.kind === 'md' && row.terminal);
+    // One footer — copy control and model id together — on the message that
+    // ended the task, not one under every turn's reply.
+    expect(terminal.length).toBe(1);
+    expect(terminal[0]).toMatchObject({ messageId: 'a2', copyText: 'Second answer.' });
+    // The earlier answer keeps its text and its copy payload but is not the
+    // row the footer hangs off.
+    const earlier = rows.find((row) => row.kind === 'md' && row.messageId === 'a1');
+    expect(earlier).toMatchObject({ terminal: false, copyText: 'First answer.' });
+  });
+
+  test('a windowed tail still knows which answer is the newest', () => {
+    const current = session({
+      turns: [
+        turn({ id: 'turn-1', status: 'completed', started_at: 10, completed_at: 20 }),
+        turn({ id: 'turn-2', status: 'completed', started_at: 30, completed_at: 40 }),
+      ],
+      messages: [
+        { id: 'u1', turn_id: 'turn-1', role: 'user', content: 'first', created_at: 1, streaming: false },
+        { id: 'a1', turn_id: 'turn-1', role: 'assistant', content: 'First answer.', created_at: 2, streaming: false },
+        { id: 'u2', turn_id: 'turn-2', role: 'user', content: 'second', created_at: 3, streaming: false },
+        { id: 'a2', turn_id: 'turn-2', role: 'assistant', content: 'Second answer.', created_at: 4, streaming: false },
+      ],
+      transcript_blocks: [],
+    });
+    const pipeline = buildTranscriptPipeline(current);
+    const start = pipeline.findIndex((row) => row.kind === 'message' && row.message.id === 'u2');
+    const tail = expandTranscriptRows(pipeline, new TranscriptMarkdownCache(), start);
+    const terminal = tail.filter((row) => row.kind === 'md' && row.terminal);
+    expect(terminal.length).toBe(1);
+    expect(terminal[0]).toMatchObject({ messageId: 'a2' });
+  });
+
   test('offers copy text only on the last block of an assistant message', () => {
     const current = session({
       turns: [turn({ id: 'turn', status: 'completed', started_at: 10, completed_at: 40 })],

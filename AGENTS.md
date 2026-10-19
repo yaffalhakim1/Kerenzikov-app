@@ -11,9 +11,29 @@
 - After an edit, wait for the watcher to finish its successful rebuild and
   validate the freshly relaunched debug app. Only start or recover the watcher
   manually when it is confirmed unavailable.
-- No visual test unless requested.
 
-### Never kill a `waku` process
+## Do not verify the UI yourself
+
+- **Focus on code. Leave visual judgement to the human.** Do not screenshot the
+  emulator, do not capture the app window, do not "just check it renders" after
+  a UI change. Unless the user explicitly asks for it in the current turn, the
+  visual check is theirs.
+- You do not have eyes or taste. A screenshot read back through a model is not
+  the same act as looking at the screen: it misses motion, density, weight,
+  optical alignment, and everything that makes an interface feel right. Reporting
+  "looks good" from one is a false claim, and chasing a pixel you cannot really
+  see wastes the user's time and yours.
+- Measuring is not verifying. Reading pixel offsets out of an image to settle a
+  spacing question is a debugging technique, not a substitute for the user
+  looking at the result — and it is not a licence to run the capture loop either.
+- The code-side checks are yours and are not optional: `tsc --noEmit`, the unit
+  tests, and a clean bundle. State what you changed and what you checked, and
+  say plainly that the visual confirmation is the user's.
+- The only exception is a request that names it — "take a screenshot", "check
+  what it looks like", "confirm it renders". A standing request to run the app
+  is not that: launching the app is not permission to judge its appearance.
+
+## Never kill a `waku` process
 
 - **The coding agent is often a child of the app it is working on.** A
   supervised agent session can run as `waku.exe` → `waku-daemon.exe` →

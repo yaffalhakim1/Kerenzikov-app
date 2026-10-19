@@ -33,17 +33,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AgentPresetMenu } from './agent-preset-menu';
 import { AppSymbol } from './app-symbol';
 import { AttachmentChip, UploadRing } from './attachment-chip';
-import { ComposerAccessMenu } from './composer-access-menu';
 import {
   ComposerAttachmentMenu,
   type ComposerAttachmentSource,
 } from './composer-attachment-menu';
+import { ComposerOptionsMenu } from './composer-options-menu';
 import { ComposerTextInput } from './composer-text-input';
 import type { ComposerTextInputProps } from './composer-text-input.types';
 import { ProviderIcon } from './provider-icon';
 import { QueuedMessageRow } from './queued-message-row';
 import { PermissionPanel, UserInputPanel } from './request-panels';
-import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
+import { ModelSheet, modelDisplayName } from './session-option-sheets';
 import { NativeTint, Radius } from '@/constants/theme';
 import { useSyncedComposerDraft } from '@/hooks/use-synced-composer-draft';
 import { useComposerCommands, useProjectFiles, useProviderModels, useTaskState } from '@/hooks/use-daemon-data';
@@ -65,7 +65,6 @@ import {
 import { useDaemon } from '@/lib/daemon-context';
 import { confirmHaptic, tapHaptic } from '@/lib/haptics';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
-import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { agentPresetAvailable } from '@/lib/session-presentation';
 import { useRuntime } from '@/lib/runtime-context';
 import { isDaemonDisconnectError } from '@/lib/runtime-errors';
@@ -163,43 +162,13 @@ export function ComposerTargetChip({
   );
 }
 
-export function ComposerIconButton({
-  icon,
-  label,
-  onPress,
-  active = false,
-  disabled = false,
-}: {
-  icon: Parameters<typeof AppSymbol>[0]['name'];
-  label: string;
-  onPress: () => void;
-  active?: boolean;
-  disabled?: boolean;
-}) {
-  const theme = useTheme();
-  return (
-    <AIInput.Action
-      disabled={disabled}
-      icon={
-        <AppSymbol
-          name={icon}
-          size={19}
-          tintColor={active ? NativeTint : theme.textSecondary}
-        />
-      }
-      label={label}
-      onPress={onPress}
-    />
-  );
-}
-
 /**
  * The glyph inside the send/stop slot.
  *
  * 19 is what the toolbar's own icon controls already draw — the attachment
- * menu, the access menu and `ComposerIconButton` all pass 19 to `AppSymbol` —
- * so the slot agrees with the row it sits in. Send already drew 19 and Stop
- * drew 18; the 1pt difference was not doing any work.
+ * menu and the options menu both pass 19 to `AppSymbol` — so the slot agrees
+ * with the row it sits in. Send already drew 19 and Stop drew 18; the 1pt
+ * difference was not doing any work.
  */
 const SEND_SLOT_GLYPH = 19;
 
@@ -397,7 +366,6 @@ export function MobileComposer({
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
-  const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
   // Set while the draft holds a queued message being reworked, so the composer
   // can say so and offer a way out. The message is already dequeued at that
   // point (matching the desktop), so Cancel just clears the draft.
@@ -904,17 +872,18 @@ export function MobileComposer({
               disabled={disconnected || submitting || importingAttachments}
               onChoose={(source) => void chooseAttachment(source)}
             />
-            <ComposerAccessMenu
+            <ComposerOptionsMenu
+              disabled={disconnected}
               mode={session.runtime_mode}
-              onApply={(mode) => applyOptions({ runtimeMode: mode })}
+              model={activeModel}
+              onApplyMode={(mode) => applyOptions({ runtimeMode: mode })}
+              onApplyTraits={(changes) => applyOptions(changes)}
+              selection={{
+                contextWindow: session.context_window ?? null,
+                reasoningEffort: session.reasoning_effort ?? null,
+                serviceTier: session.service_tier ?? null,
+              }}
             />
-            {activeModel && modelHasConfigurableTraits(activeModel) && (
-              <ComposerIconButton
-                icon={{ ios: 'brain.head.profile', android: 'psychology', web: 'psychology' }}
-                label="Reasoning and model options"
-                onPress={() => setTraitsSheetOpen(true)}
-              />
-            )}
           </>
         )}
         placeholder={placeholder}
@@ -953,22 +922,11 @@ export function MobileComposer({
         onDismiss={() => setModelSheetOpen(false)}
         provider={session.provider}
         reasoningEffort={session.reasoning_effort ?? null}
+        // Reasoning effort lives in the options button here too, so this sheet
+        // stays a model picker rather than a second home for the same setting.
+        showReasoningEffort={false}
         visible={modelSheetOpen}
       />
-
-      {activeModel && (
-        <ModelTraitsSheet
-          model={activeModel}
-          onApply={(changes) => applyOptions(changes)}
-          onDismiss={() => setTraitsSheetOpen(false)}
-          selection={{
-            reasoningEffort: session.reasoning_effort ?? null,
-            serviceTier: session.service_tier ?? null,
-            contextWindow: session.context_window ?? null,
-          }}
-          visible={traitsSheetOpen}
-        />
-      )}
     </View>
   );
 }

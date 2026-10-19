@@ -10,13 +10,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { AppSymbol } from './app-symbol';
-import { ComposerAccessMenu } from './composer-access-menu';
 import { ComposerModelPill, ComposerSurface } from './composer-surface';
 import { ComposerAttachmentMenu, type ComposerAttachmentSource } from './composer-attachment-menu';
+import { ComposerOptionsMenu } from './composer-options-menu';
 import { SendStopSlot } from './mobile-composer';
 import { QueuedMessageRow } from './queued-message-row';
-import { ProviderIcon } from './provider-icon';
-import { ModelSheet, ModelTraitsSheet, modelDisplayName } from './session-option-sheets';
+import { ModelSheet, modelDisplayName } from './session-option-sheets';
 import { PermissionPanel, UserInputPanel } from './request-panels';
 import { useDaemon } from '@/lib/daemon-context';
 import { useTheme } from '@/hooks/use-theme';
@@ -35,7 +34,6 @@ import {
   replaceComposerFileTrigger,
   resolvedComposerSubmission,
 } from '@/lib/composer-commands';
-import { modelHasConfigurableTraits } from '@/lib/model-traits';
 import { imagePickerFiles, importLocalAttachment, type LocalAttachmentFile } from '@/lib/attachments';
 import { confirmHaptic, tapHaptic } from '@/lib/haptics';
 import { sessionBusy, sessionHasActiveProviderTurn } from '@/lib/mobile-runtime';
@@ -84,7 +82,6 @@ export function ComposerV2({
   const [localError, setLocalError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modelSheetOpen, setModelSheetOpen] = useState(false);
-  const [traitsSheetOpen, setTraitsSheetOpen] = useState(false);
   const [editingQueued, setEditingQueued] = useState(false);
   const [importingAttachments, setImportingAttachments] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<{ id: number; name: string }[]>([]);
@@ -465,27 +462,35 @@ export function ComposerV2({
       toolbar={
         <AIInput.Toolbar>
           <ComposerAttachmentMenu onChoose={chooseAttachment} />
-          <ComposerAccessMenu
+          {/*
+            One option control instead of two: agent access and the model's
+            traits (reasoning effort, service tier, context window) live behind
+            the same four-square button. Two icon-only slots said only *that* a
+            value was set, never which, so the row spent its width on glyphs
+            nobody could read.
+          */}
+          <ComposerOptionsMenu
+            disabled={disconnected}
             mode={session.runtime_mode}
-            onApply={(mode) => applyOptions({ runtimeMode: mode })}
+            model={activeModel}
+            onApplyMode={(mode) => applyOptions({ runtimeMode: mode })}
+            onApplyTraits={(changes) => applyOptions(changes)}
+            selection={{
+              contextWindow: session.context_window ?? null,
+              reasoningEffort: session.reasoning_effort ?? null,
+              serviceTier: session.service_tier ?? null,
+            }}
           />
           {/*
-            The model is a `Pill` — a value that opens a list — and the reasoning
-            effort is an `Action`, which is what the library's own composer
-            example does.
+            The model is a `Pill` — a value that opens a list — and it stays in
+            the row: which model runs is the one setting a reader checks before
+            typing, so it earns a label where the others earn a sheet.
           */}
           <ComposerModelPill
             accessibilityLabel={`Model, ${selectedModelName}`}
             label={selectedModelName}
             onPress={() => setModelSheetOpen(true)}
           />
-          {activeModel && modelHasConfigurableTraits(activeModel) ? (
-            <AIInput.Action
-              icon={<ProviderIcon provider={session.provider} size={15} />}
-              label="Reasoning and model options"
-              onPress={() => setTraitsSheetOpen(true)}
-            />
-          ) : null}
           <AIInput.Spacer />
           {/*
             Not `AIInput.Submit`: it offers voice when the field is empty, and
@@ -513,22 +518,12 @@ export function ComposerV2({
         onDismiss={() => setModelSheetOpen(false)}
         provider={session.provider}
         reasoningEffort={session.reasoning_effort ?? null}
+        // Reasoning effort has its own home in the options button, so this
+        // sheet is only about which model runs — otherwise the same setting
+        // appears in two lists with two different explanations.
+        showReasoningEffort={false}
         visible={modelSheetOpen}
       />
-
-      {activeModel ? (
-        <ModelTraitsSheet
-          model={activeModel}
-          onApply={(changes) => applyOptions(changes)}
-          onDismiss={() => setTraitsSheetOpen(false)}
-          selection={{
-            reasoningEffort: session.reasoning_effort ?? null,
-            serviceTier: session.service_tier ?? null,
-            contextWindow: session.context_window ?? null,
-          }}
-          visible={traitsSheetOpen}
-        />
-      ) : null}
     </ComposerSurface>
   );
 }

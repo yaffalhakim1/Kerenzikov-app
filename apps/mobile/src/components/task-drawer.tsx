@@ -1181,7 +1181,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    // 16, the same inset the search row below uses. The pill's own 12pt inner
+    // padding then puts its label on the search capsule's left edge; at 12 the
+    // whole control sat 4pt left of everything under it and read as misaligned
+    // with the column it heads.
+    paddingHorizontal: Spacing.three,
     paddingBottom: 10,
   },
   // Shared by the drawer's own controls (close, settings). Round, unlike the

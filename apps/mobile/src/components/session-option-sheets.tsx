@@ -4,7 +4,6 @@ import type {
   ProviderKind,
   ProviderModel,
   ProviderSessionSummary,
-  RuntimeMode,
 } from '@waku/client';
 import { Alert } from 'panelui-native/components/alert';
 import { Button } from 'panelui-native/components/button';
@@ -30,13 +29,9 @@ import { Sheet } from './sheet';
 import { Radius, Spacing } from '@/constants/theme';
 import { useAllProviderModels, useProviderModels } from '@/hooks/use-daemon-data';
 import { useTheme } from '@/hooks/use-theme';
-import {
-  resolveModelTraitSelection,
-  type ModelTraitSelection,
-} from '@/lib/model-traits';
+import { type ModelTraitSelection } from '@/lib/model-traits';
 import {
   providerLabel,
-  runtimeModeLabel,
   type TurnOption,
 } from '@/lib/session-presentation';
 import { listProviderSessions, providerSessionNativeId } from '@/lib/daemon-api';
@@ -221,7 +216,12 @@ export function modelDisplayName(
   return models?.find((item) => item.id === model)?.name ?? model;
 }
 
-/** Model + reasoning-effort picker, backed by the daemon's model discovery. */
+/** Model + reasoning-effort picker, backed by the daemon's model discovery.
+ *
+ *  `showReasoningEffort` is on by default because this sheet is the only model
+ *  picker the app's own composer has. The `AIInput` composer turns it off: its
+ *  options button owns reasoning effort, and a setting offered in two places
+ *  with two different descriptions reads as two different settings. */
 export function ModelSheet({
   visible,
   onDismiss,
@@ -229,6 +229,7 @@ export function ModelSheet({
   model,
   reasoningEffort,
   onApply,
+  showReasoningEffort = true,
 }: {
   visible: boolean;
   onDismiss: () => void;
@@ -236,12 +237,13 @@ export function ModelSheet({
   model: string | null;
   reasoningEffort: string | null;
   onApply: (selection: ModelSelection) => void;
+  showReasoningEffort?: boolean;
 }) {
   const theme = useTheme();
   const probe = useProviderModels(visible ? provider : null);
   const models = probe.data?.models ?? [];
   const selected = model ? models.find((item) => item.id === model) : models.find((item) => item.is_default);
-  const efforts = selected?.reasoning_efforts ?? [];
+  const efforts = showReasoningEffort ? selected?.reasoning_efforts ?? [] : [];
 
   function pickModel(next: ProviderModel) {
     tapHaptic();
@@ -296,94 +298,6 @@ export function ModelSheet({
           ) : null}
         </>
       )}
-    </Sheet>
-  );
-}
-
-/** All model-advertised options in one sheet. Unlike single-choice pickers,
- * it stays open after a choice so effort, tier, and context can be configured
- * together before starting a task. */
-export function ModelTraitsSheet({
-  visible,
-  onDismiss,
-  model,
-  selection,
-  onApply,
-}: {
-  visible: boolean;
-  onDismiss: () => void;
-  model: ProviderModel;
-  selection: ModelTraitSelection;
-  onApply: (changes: Partial<ModelTraitSelection>) => void;
-}) {
-  const resolved = resolveModelTraitSelection(model, selection);
-
-  function pick(changes: Partial<ModelTraitSelection>) {
-    tapHaptic();
-    onApply(changes);
-  }
-
-  return (
-    <Sheet onDismiss={onDismiss} visible={visible}>
-      {model.reasoning_efforts.length ? (
-        <>
-          <SectionHeading>REASONING EFFORT</SectionHeading>
-          {model.reasoning_efforts.map((option) => (
-            <OptionRow
-              description={optionDescription(
-                option.description,
-                model.default_reasoning_effort === option.id,
-              )}
-              key={option.id}
-              label={option.label}
-              onPress={() => pick({ reasoningEffort: option.id })}
-              selected={resolved.reasoningEffort === option.id}
-            />
-          ))}
-        </>
-      ) : null}
-      {model.service_tiers.length ? (
-        <>
-          <SectionHeading>SERVICE TIER</SectionHeading>
-          <OptionRow
-            description={(model.default_service_tier ?? 'default') === 'default'
-              ? 'Default'
-              : undefined}
-            label="Standard"
-            onPress={() => pick({ serviceTier: 'default' })}
-            selected={resolved.serviceTier === 'default'}
-          />
-          {model.service_tiers.map((option) => (
-            <OptionRow
-              description={optionDescription(
-                option.description,
-                model.default_service_tier === option.id,
-              )}
-              key={option.id}
-              label={option.label}
-              onPress={() => pick({ serviceTier: option.id })}
-              selected={resolved.serviceTier === option.id}
-            />
-          ))}
-        </>
-      ) : null}
-      {model.context_windows.length ? (
-        <>
-          <SectionHeading>CONTEXT WINDOW</SectionHeading>
-          {model.context_windows.map((option) => (
-            <OptionRow
-              description={optionDescription(
-                option.description,
-                model.default_context_window === option.id,
-              )}
-              key={option.id}
-              label={option.label}
-              onPress={() => pick({ contextWindow: option.id })}
-              selected={resolved.contextWindow === option.id}
-            />
-          ))}
-        </>
-      ) : null}
     </Sheet>
   );
 }
@@ -572,14 +486,6 @@ export function ModelPickerSheet({
   );
 }
 
-const ACCESS_MODES: Array<{ id: RuntimeMode; description: string }> = [
-  { id: 'plan', description: 'Investigate and propose without changing files.' },
-  { id: 'ask', description: 'Approve every command and file edit.' },
-  { id: 'autoAcceptEdits', description: 'Edits apply automatically; commands still ask.' },
-  { id: 'auto', description: 'Works autonomously inside the project.' },
-  { id: 'fullAccess', description: 'No approval prompts. The agent acts freely.' },
-];
-
 /** Agent preset picker for providers that expose startable compositions
  * (DeepSeek Harness, OpenCode). Mirrors the desktop agent chip. */
 export function AgentPresetSheet({
@@ -628,37 +534,6 @@ export function AgentPresetSheet({
           )}
         </>
       )}
-    </Sheet>
-  );
-}
-
-/** Access-mode picker mirroring the desktop composer's access control. */
-export function AccessSheet({
-  visible,
-  onDismiss,
-  mode,
-  onApply,
-}: {
-  visible: boolean;
-  onDismiss: () => void;
-  mode: RuntimeMode;
-  onApply: (mode: RuntimeMode) => void;
-}) {
-  return (
-    <Sheet onDismiss={onDismiss} title="Agent access" visible={visible}>
-      {ACCESS_MODES.map((item) => (
-        <OptionRow
-          description={item.description}
-          key={item.id}
-          label={runtimeModeLabel(item.id)}
-          onPress={() => {
-            tapHaptic();
-            onApply(item.id);
-            onDismiss();
-          }}
-          selected={mode === item.id}
-        />
-      ))}
     </Sheet>
   );
 }
